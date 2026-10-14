@@ -26,7 +26,7 @@ Lista de proyectos productivos en este VPS al momento de auditar (NO TOCAR):
 
 | Proyecto | Ruta | Stack | Notas |
 |---|---|---|---|
-| `<nombre>` | `/var/www/proyectos/<nombre>` | PHP 8.4 / Postgres `<db>` / Redis db`<n>` | Cliente activo |
+| `<nombre>` | `/var/www/proyectos/<nombre>` | PHP 8.5 / Postgres `<db>` / Redis db`<n>` | Cliente activo |
 
 ## 3. PHP
 

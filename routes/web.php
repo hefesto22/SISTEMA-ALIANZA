@@ -7,7 +7,7 @@ declare(strict_types=1);
 | Web Routes
 |--------------------------------------------------------------------------
 |
-| Filament v4 toma control de "/" porque el panel está configurado con
+| Filament v5 toma control de "/" porque el panel está configurado con
 | ->path('/') en AdminPanelProvider. NO definir aquí Route::get('/') —
 | Filament lo perderá si la ruta web tiene mayor prioridad.
 |

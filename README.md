@@ -1,4 +1,4 @@
-# Plantilla Grupo Olympo — Laravel 12 + Filament v4
+# Plantilla Grupo Olympo — Laravel 13 + Filament v5
 
 Plantilla base para los proyectos de Grupo Olympo / Inversiones Olympo. Diseñada para arrancar sistemas de gestión empresariales en Honduras con stack listo para producción y reglas fiscales del país preconfiguradas.
 
@@ -6,23 +6,23 @@ Plantilla base para los proyectos de Grupo Olympo / Inversiones Olympo. Diseñad
 
 | Capa | Tecnología | Versión |
 |---|---|---|
-| Lenguaje | PHP | 8.4+ |
-| Framework | Laravel | 12 |
-| Panel admin | Filament | v4 (Schemas) |
+| Lenguaje | PHP | 8.5+ |
+| Framework | Laravel | 13 |
+| Panel admin | Filament | v5 (Schemas, Livewire 4) |
 | Base de datos | PostgreSQL | 16 |
 | Cache / Sesión / Queue | Redis | 7 |
 | Procesamiento de colas | Laravel Horizon | última estable |
 | PDFs | spatie/browsershot (Chromium headless) | 5.x |
-| Excel | maatwebsite/excel | 3.1 |
+| Excel | maatwebsite/excel | 4.0 |
 | Permisos | bezhansalleh/filament-shield + spatie/laravel-permission | — |
-| Auditoría | spatie/laravel-activitylog | 4.11 |
-| Backups | spatie/laravel-backup | 9.3 |
-| Health checks | spatie/laravel-health | 1.34 |
-| Observabilidad | sentry/sentry-laravel | 4.13 |
-| Tests | Pest 3 | — |
+| Auditoría | spatie/laravel-activitylog | 4.12 |
+| Backups | spatie/laravel-backup | 10.3 |
+| Health checks | spatie/laravel-health | 1.40 |
+| Observabilidad | sentry/sentry-laravel | 4.27 |
+| Tests | Pest 4 (PHPUnit 12) | — |
 | Análisis estático | Larastan (PHPStan + Laravel) | nivel 7 |
-| Code style | Laravel Pint | 1.24 |
-| Modernización | Rector | 2.0 |
+| Code style | Laravel Pint | 1.27 |
+| Modernización | Rector | 2.2 |
 
 ## Características incluidas
 
@@ -55,10 +55,11 @@ Plantilla base para los proyectos de Grupo Olympo / Inversiones Olympo. Diseñad
 - `getDescendantIds()` resuelto con CTE recursivo de Postgres (1 query vs N anteriores)
 
 **Calidad:**
-- Suite de tests Pest 3 con cobertura de Value Objects, modelos y rutas
+- Suite de tests Pest 4 con cobertura de Value Objects, modelos y rutas
 - CI en GitHub Actions: Pint + PHPStan + Pest sobre Postgres + Redis reales
 - Larastan nivel 7
-- Rector con sets de PHP 8.4, dead code, code quality, type declarations
+- DB local (`<slug>`) y DB de tests (`<slug>_test`) separadas; `tests/TestCase.php` aborta si los tests apuntan a una DB sin `_test`
+- Rector con sets de PHP 8.5, dead code, code quality, type declarations
 
 ## Setup local con Herd + Docker
 

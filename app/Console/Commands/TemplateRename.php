@@ -98,6 +98,8 @@ class TemplateRename extends Command
             base_path('package.json'),
             base_path('README.md'),
             base_path('docker-compose.yml'),
+            base_path('phpunit.xml'),
+            base_path('.github/workflows/ci.yml'),
         ];
 
         $cambiados = 0;
@@ -127,9 +129,9 @@ class TemplateRename extends Command
         $this->newLine();
 
         $this->warn('Próximos pasos manuales:');
-        $this->line('  1. Crear la base de datos en Postgres:');
-        $this->line("     docker exec -i distribuidora_hozana_postgres psql -U postgres -c \"CREATE DATABASE {$slug};\"");
-        $this->line("     docker exec -i distribuidora_hozana_postgres psql -U postgres -c \"CREATE DATABASE {$slug}_test;\"");
+        $this->line('  1. Crear la DB de tests (migrate pregunta si crearla, responder Yes):');
+        $this->line("     DB_DATABASE={$slug}_test php artisan migrate");
+        $this->line("     (la DB local {$slug} se crea igual en el paso 4)");
         $this->newLine();
         $this->line('  2. Borrar el git de la plantilla y crear el repo nuevo:');
         $this->line('     rm -rf .git && git init');

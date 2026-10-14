@@ -23,7 +23,7 @@ parameters:
         - database/migrations/2026_02_20_054231_add_batch_uuid_column_to_activity_log_table.php
 
     ignoreErrors:
-        # ── Filament v4 — magic methods en Schema/Form/Table builders ───────
+        # ── Filament v5 — magic methods en Schema/Form/Table builders ───────
         - identifier: missingType.iterableValue
           path: app/Filament/*
 
@@ -51,9 +51,9 @@ parameters:
         - identifier: trait.unused
           path: app/Models/Concerns/BelongsToEmpresa.php
 
-        # ── Pest 3 magic ────────────────────────────────────────────────────
+        # ── Pest 4 magic ────────────────────────────────────────────────────
         # $this, test(), pest()->extend(), expect() son magic globals.
-        # PHPStan no los entiende sin pest plugin (no estable en Pest 3.x).
+        # PHPStan no los entiende sin el plugin de Pest.
         - identifier: variable.undefined
           path: tests/*
         - identifier: method.notFound
