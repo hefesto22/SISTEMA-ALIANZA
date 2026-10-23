@@ -34,6 +34,8 @@ use Illuminate\Support\Facades\Auth;
  */
 final class ActualizarPrecioAction
 {
+    private const CAMBIO_SOSPECHOSO = 0.25;
+
     public static function make(): Action
     {
         return Action::make('actualizarPrecio')
@@ -66,7 +68,10 @@ final class ActualizarPrecioAction
                             ->icons(['caja' => Heroicon::OutlinedArchiveBox, 'unidad' => Heroicon::OutlinedCube])
                             ->grouped()
                             ->required()
-                            ->live(),
+                            ->live()
+                            ->afterStateUpdated(function (?string $state, ?string $old, Get $get, Set $set, Producto $record): void {
+                                self::convertir($state, $old, $get, $set, $record);
+                            }),
                         TextInput::make('costo')
                             ->hiddenLabel()
                             ->numeric()
@@ -78,7 +83,8 @@ final class ActualizarPrecioAction
                             ->live(debounce: 400),
 
                         Toggle::make('hay_descuento')
-                            ->label('La factura trae descuento')
+                            ->label('Hubo descuento en esta compra')
+                            ->helperText('Ej.: compró 10 cajas y el proveedor le rebajó L. 200 en total. El descuento se reparte en el costo de cada unidad.')
                             ->live(),
                         Grid::make(2)
                             ->visible(fn (Get $get): bool => (bool) $get('hay_descuento'))
@@ -99,7 +105,8 @@ final class ActualizarPrecioAction
                             ]),
 
                         Toggle::make('precio_manual')
-                            ->label('Redondear el precio a mano')
+                            ->label('Poner yo el precio de venta')
+                            ->helperText('Ej.: el sistema calcula L. 10.77 y usted lo quiere vender a L. 11.00. Se guarda la utilidad que realmente deja.')
                             ->live()
                             ->afterStateUpdated(function (bool $state, Get $get, Set $set, Producto $record): void {
                                 $calculo = self::calcular($get, $record);
@@ -168,6 +175,39 @@ final class ActualizarPrecioAction
                     ->success()
                     ->send();
             });
+    }
+
+    /**
+     * Al pasar de "por caja" a "por unidad" (o al revés) se convierte el número
+     * que ya estaba escrito, para que el precio no salte: L. 444.5712 la caja
+     * de 48 pasa a L. 9.2619 la unidad. Lo mismo con la cantidad comprada.
+     */
+    private static function convertir(?string $nuevo, ?string $anterior, Get $get, Set $set, Producto $producto): void
+    {
+        $uxc = max(1, $producto->unidades_por_caja);
+
+        if ($uxc === 1 || $nuevo === $anterior || ! in_array($nuevo, ['caja', 'unidad'], true)) {
+            return;
+        }
+
+        $aCaja = $nuevo === 'caja';
+        $costo = $get('costo');
+
+        if (is_numeric($costo)) {
+            $set('costo', round($aCaja ? (float) $costo * $uxc : (float) $costo / $uxc, 4));
+        }
+
+        $cantidad = $get('cantidad');
+
+        if (is_numeric($cantidad) && (int) $cantidad > 0) {
+            $cantidad = (int) $cantidad;
+
+            if (! $aCaja) {
+                $set('cantidad', $cantidad * $uxc);
+            } elseif ($cantidad % $uxc === 0) {
+                $set('cantidad', intdiv($cantidad, $uxc));
+            }
+        }
     }
 
     /**
@@ -258,6 +298,9 @@ final class ActualizarPrecioAction
             default                  => ['baja', 'Baja '.lempiras(abs($diferencia)).self::variacion($diferencia, $producto)],
         };
 
+        // Un cambio de más del 25% casi siempre es un error de dedo o de caja/unidad.
+        $exagerado = $producto->precio_unidad > 0 && abs($diferencia) / $producto->precio_unidad > self::CAMBIO_SOSPECHOSO;
+
         return [
             'mensaje'    => null,
             'manual'     => (bool) $get('precio_manual'),
@@ -270,8 +313,9 @@ final class ActualizarPrecioAction
             'costoAntes' => lempiras($producto->costo_unidad, 4),
             'margen'     => self::porcentaje($calculo['margen']),
             'hoy'        => lempiras($producto->precio_unidad),
-            'tono'       => $tono,
+            'tono'       => $exagerado ? 'alerta' : $tono,
             'cambio'     => $cambio,
+            'aviso'      => $exagerado ? 'Es un cambio muy grande. Revise el costo y si es por caja o por unidad antes de guardar.' : null,
         ];
     }
 

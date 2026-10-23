@@ -80,6 +80,18 @@ test('actualizar precio desde el panel cambia el precio y deja historial', funct
         ->and($this->producto->cambiosPrecio()->first()?->bodega_id)->toBe($this->bodega->id);
 });
 
+test('pasar de caja a unidad convierte el costo y el precio no salta', function (): void {
+    $this->actingAs($this->encargado);
+
+    // El modal abre con el costo por caja (50 × 12 = 600); al cambiar a "por unidad" queda en 50.
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->callAction('actualizarPrecio', data: ['costo_por' => 'unidad'])
+        ->assertHasNoActionErrors();
+
+    expect($this->producto->fresh()?->precio_unidad)->toBe(59.5238)
+        ->and($this->producto->cambiosPrecio()->count())->toBe(0);
+});
+
 test('el vendedor no ve costos ni puede cambiar precios', function (): void {
     $this->actingAs($this->vendedor);
 

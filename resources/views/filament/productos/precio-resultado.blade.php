@@ -5,9 +5,11 @@
 @php
     $mensaje ??= null;
     $tono ??= 'igual';
+    $aviso ??= null;
     $flecha = match ($tono) {
         'sube' => '▲',
         'baja' => '▼',
+        'alerta' => '⚠',
         default => '=',
     };
 @endphp
@@ -30,6 +32,9 @@
     .ap-chip.sube { color: var(--warning-700); background: color-mix(in oklab, var(--warning-500) 16%, transparent); }
     .ap-chip.baja { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 16%, transparent); }
     .ap-chip.igual { color: var(--gray-600); background: color-mix(in oklab, var(--gray-500) 14%, transparent); }
+    .ap-chip.alerta { color: var(--danger-700); background: color-mix(in oklab, var(--danger-500) 16%, transparent); }
+    .ap-aviso { margin-top: 0.5rem; font-size: 0.8rem; color: var(--danger-700); }
+    .dark .ap-chip.alerta, .dark .ap-aviso { color: var(--danger-400); }
     .dark .ap-chip.sube { color: var(--warning-400); }
     .dark .ap-chip.baja { color: var(--success-400); }
     .dark .ap-chip.igual { color: var(--gray-300); }
@@ -76,6 +81,10 @@
         <span @class(['ap-chip', $tono])>
             {{ $flecha }} {{ $cambio }}
         </span>
+
+        @if ($aviso)
+            <div class="ap-aviso">{{ $aviso }}</div>
+        @endif
 
         <div class="ap-pie">Aplica en todas las bodegas y queda en el historial.</div>
     @endif
