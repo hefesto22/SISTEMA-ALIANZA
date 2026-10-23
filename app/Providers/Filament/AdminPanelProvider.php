@@ -16,6 +16,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -27,6 +28,17 @@ use Throwable;
 
 class AdminPanelProvider extends PanelProvider
 {
+    /**
+     * Los campos de texto se ven en mayúsculas mientras se escribe (menos
+     * correo, contraseña y la pantalla de entrada). Lo que se guarda lo
+     * pasa a mayúsculas el modelo.
+     */
+    private const ESTILO_MAYUSCULAS = '<style>'
+        .'.fi-fo-text-input input:not([type=email]):not([type=password]):not([type=url]),'
+        .'.fi-fo-textarea textarea{text-transform:uppercase}'
+        .'.fi-simple-layout .fi-fo-text-input input{text-transform:none}'
+        .'</style>';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -85,7 +97,9 @@ class AdminPanelProvider extends PanelProvider
             ->databaseNotificationsPolling('30s')
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
             ->navigationGroups(['Ventas', 'Precios', 'Administración'])
-            ->sidebarCollapsibleOnDesktop();
+            ->sidebarCollapsibleOnDesktop()
+            // Todo se guarda en MAYÚSCULAS (GuardaEnMayusculas): se escribe ya en mayúsculas.
+            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS);
     }
 
     /**

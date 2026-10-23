@@ -37,10 +37,10 @@ beforeEach(function (): void {
     $this->bodega = Bodega::factory()->create();
 
     $copan = Departamento::query()->where('codigo', '04')->firstOrFail();
-    $this->santaRosa = $copan->municipios()->where('nombre', 'Santa Rosa de Copán')->firstOrFail();
-    $this->dolores = $copan->municipios()->where('nombre', 'Dolores')->firstOrFail();
+    $this->santaRosa = $copan->municipios()->where('nombre', 'SANTA ROSA DE COPÁN')->firstOrFail();
+    $this->dolores = $copan->municipios()->where('nombre', 'DOLORES')->firstOrFail();
     $this->ocotepeque = Departamento::query()->where('codigo', '14')->firstOrFail();
-    $this->sinuapa = $this->ocotepeque->municipios()->where('nombre', 'Sinuapa')->firstOrFail();
+    $this->sinuapa = $this->ocotepeque->municipios()->where('nombre', 'SINUAPA')->firstOrFail();
 
     $this->vendedor = User::factory()->create(['bodega_id' => $this->bodega->id]);
     $this->vendedor->assignRole(Rol::Vendedor->value);
@@ -61,14 +61,14 @@ test('el catálogo trae los 18 departamentos y 298 municipios y se puede volver 
 
     expect(Departamento::query()->count())->toBe(18)
         ->and(Municipio::query()->count())->toBe(298)
-        ->and($this->santaRosa->etiqueta())->toBe('Santa Rosa de Copán · Copán');
+        ->and($this->santaRosa->etiqueta())->toBe('SANTA ROSA DE COPÁN · COPÁN');
 });
 
 test('las bodegas iniciales quedan en su municipio', function (): void {
     $this->seed(BodegaSeeder::class);
 
-    expect(Bodega::query()->where('codigo', 'COP')->firstOrFail()->municipio?->nombre)->toBe('Santa Rosa de Copán')
-        ->and(Bodega::query()->where('codigo', 'LUC')->firstOrFail()->municipio?->departamento->nombre)->toBe('Ocotepeque');
+    expect(Bodega::query()->where('codigo', 'COP')->firstOrFail()->municipio?->nombre)->toBe('SANTA ROSA DE COPÁN')
+        ->and(Bodega::query()->where('codigo', 'LUC')->firstOrFail()->municipio?->departamento->nombre)->toBe('OCOTEPEQUE');
 });
 
 test('el vendedor solo ve los clientes de los municipios de sus rutas activas', function (): void {
@@ -132,9 +132,10 @@ test('administración crea el cliente con departamento y municipio', function ()
         ])
         ->assertHasNoActionErrors();
 
-    $cliente = Cliente::query()->where('nombre', 'Pulpería La Bendición')->firstOrFail();
+    $cliente = Cliente::query()->where('nombre', 'PULPERÍA LA BENDICIÓN')->firstOrFail();
 
-    expect($cliente->municipio_id)->toBe($this->santaRosa->id);
+    expect($cliente->municipio_id)->toBe($this->santaRosa->id)
+        ->and($cliente->codigo)->toBe(Cliente::codigoPara($cliente->id));
 });
 
 test('el municipio tiene que ser del departamento escogido', function (): void {
@@ -149,7 +150,7 @@ test('el municipio tiene que ser del departamento escogido', function (): void {
         ])
         ->assertHasActionErrors(['municipio_id']);
 
-    expect(Cliente::query()->where('nombre', 'Pulpería Mal Ubicada')->exists())->toBeFalse();
+    expect(Cliente::query()->where('nombre', 'PULPERÍA MAL UBICADA')->exists())->toBeFalse();
 });
 
 test('el vendedor solo crea clientes en sus rutas y quedan en su bodega', function (): void {
@@ -176,11 +177,11 @@ test('el vendedor solo crea clientes en sus rutas y quedan en su bodega', functi
         ])
         ->assertHasNoActionErrors();
 
-    $cliente = Cliente::query()->where('nombre', 'Pulpería En Ruta')->firstOrFail();
+    $cliente = Cliente::query()->where('nombre', 'PULPERÍA EN RUTA')->firstOrFail();
 
     expect($cliente->municipio_id)->toBe($this->santaRosa->id)
         ->and($cliente->bodega_id)->toBe($this->bodega->id)
-        ->and(Cliente::query()->where('nombre', 'Pulpería Fuera de Ruta')->exists())->toBeFalse();
+        ->and(Cliente::query()->where('nombre', 'PULPERÍA FUERA DE RUTA')->exists())->toBeFalse();
 });
 
 test('sin marcar fuera de ruta el vendedor no puede escoger un cliente de otra ruta', function (): void {
@@ -235,7 +236,7 @@ test('fuera de ruta: el pedido sale marcado y con el motivo, que es obligatorio'
     $creado = Pedido::query()->latest('id')->firstOrFail();
 
     expect($creado->fuera_de_ruta)->toBeTrue()
-        ->and($creado->motivo_fuera_ruta)->toBe('Cubriendo la ruta de Ocotepeque')
+        ->and($creado->motivo_fuera_ruta)->toBe('CUBRIENDO LA RUTA DE OCOTEPEQUE')
         ->and($creado->bodega_id)->toBe($this->bodega->id);
 });
 
@@ -281,7 +282,7 @@ test('administración arma una ruta con un departamento completo y sus vendedore
         ])
         ->assertHasNoActionErrors();
 
-    $ruta = Ruta::query()->where('nombre', 'Ruta Ocotepeque')->firstOrFail();
+    $ruta = Ruta::query()->where('nombre', 'RUTA OCOTEPEQUE')->firstOrFail();
 
     expect($ruta->municipios()->count())->toBe($this->ocotepeque->municipios()->count())
         ->and($ruta->vendedores()->pluck('users.id')->all())->toBe([$otro->id])

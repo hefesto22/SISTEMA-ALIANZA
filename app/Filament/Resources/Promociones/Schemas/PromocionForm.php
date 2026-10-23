@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Promociones\Schemas;
 use App\Enums\UnidadVenta;
 use App\Models\Producto;
 use App\Models\Promocion;
+use App\Support\Texto;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
@@ -245,7 +246,7 @@ class PromocionForm
         $porcentaje = is_numeric($datos['descuento_porcentaje'] ?? null) ? (float) $datos['descuento_porcentaje'] : 100.0;
 
         return [
-            'nombre'   => trim((string) $get('nombre')),
+            'nombre'   => Texto::mayusculas((string) $get('nombre')),
             'codigo'   => $record->codigo ?? null,
             'activa'   => (bool) $get('activa'),
             'vigencia' => self::vigencia($get('vigente_desde'), $get('vigente_hasta')),
@@ -260,7 +261,7 @@ class PromocionForm
                 'mitad'  => 'A mitad de precio',
                 default  => Promocion::porcentajeTexto($porcentaje).' de descuento',
             },
-            'nota' => trim((string) $get('descripcion')),
+            'nota' => Texto::mayusculas((string) $get('descripcion')),
         ];
     }
 

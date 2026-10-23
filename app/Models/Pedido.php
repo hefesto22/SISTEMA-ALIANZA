@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\EstadoPedido;
+use App\Models\Concerns\GuardaEnMayusculas;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -49,6 +50,8 @@ use Illuminate\Support\Carbon;
  */
 class Pedido extends Model
 {
+    use GuardaEnMayusculas;
+
     protected $table = 'pedidos';
 
     /** @var list<string> */
@@ -182,5 +185,13 @@ class Pedido extends Model
         }
 
         return $user->bodega_id !== null && $this->bodega_id === $user->bodega_id;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['notas', 'motivo_fuera_ruta'];
     }
 }

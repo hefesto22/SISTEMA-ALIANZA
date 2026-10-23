@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\BodegaFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -32,6 +33,8 @@ use Illuminate\Support\Carbon;
  */
 class Bodega extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<BodegaFactory> */
     use HasFactory;
 
@@ -107,5 +110,13 @@ class Bodega extends Model
     public function scopeActivas(Builder $query): Builder
     {
         return $query->where('activa', true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['codigo', 'nombre', 'direccion'];
     }
 }

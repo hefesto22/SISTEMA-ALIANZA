@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Enums\UnidadVenta;
+use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\ProductoFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -44,6 +45,8 @@ use Illuminate\Support\Carbon;
  */
 class Producto extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<ProductoFactory> */
     use HasFactory;
 
@@ -180,5 +183,13 @@ class Producto extends Model
             $q->where('codigo', 'ilike', "%{$texto}%")
                 ->orWhere('descripcion', 'ilike', "%{$texto}%");
         });
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['descripcion'];
     }
 }

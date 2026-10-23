@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\Rol;
+use App\Models\Concerns\GuardaEnMayusculas;
 use App\Traits\HasAuditFields;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use BezhanSalleh\FilamentShield\Traits\HasPanelShield;
@@ -27,6 +28,7 @@ use stdClass;
 
 class User extends Authenticatable implements FilamentUser
 {
+    use GuardaEnMayusculas;
     use HasAuditFields;
 
     /** @use HasFactory<UserFactory> */
@@ -266,5 +268,13 @@ class User extends Authenticatable implements FilamentUser
         }
 
         return $query->whereIn('id', $user->getVisibleUserIds());
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['name'];
     }
 }

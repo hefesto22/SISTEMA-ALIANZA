@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\MunicipioFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -22,6 +23,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Municipio extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<MunicipioFactory> */
     use HasFactory;
 
@@ -94,5 +97,13 @@ class Municipio extends Model
         $opciones = $query->pluck('nombre', 'id')->all();
 
         return $opciones;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['nombre'];
     }
 }

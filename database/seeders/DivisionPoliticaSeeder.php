@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Models\Departamento;
 use App\Models\Municipio;
+use App\Support\Texto;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\File;
 
@@ -13,7 +14,8 @@ use Illuminate\Support\Facades\File;
  * Los 18 departamentos y 298 municipios de Honduras:
  * database/seeders/data/honduras.json.
  *
- * Se puede correr las veces que sea: no duplica ni borra nada.
+ * Se guardan en MAYÚSCULAS. Se puede correr las veces que sea: no duplica
+ * ni borra nada.
  */
 class DivisionPoliticaSeeder extends Seeder
 {
@@ -26,7 +28,7 @@ class DivisionPoliticaSeeder extends Seeder
             $departamento = Departamento::query()->updateOrCreate(['codigo' => $d['codigo']], ['nombre' => $d['nombre']]);
 
             Municipio::query()->insertOrIgnore(array_map(
-                fn (string $nombre): array => ['departamento_id' => $departamento->id, 'nombre' => $nombre],
+                fn (string $nombre): array => ['departamento_id' => $departamento->id, 'nombre' => Texto::mayusculas($nombre)],
                 $d['municipios'],
             ));
         }

@@ -11,6 +11,7 @@ use App\Models\Departamento;
 use App\Models\Municipio;
 use App\Models\Ruta;
 use App\Models\User;
+use App\Support\Texto;
 use BackedEnum;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -73,6 +74,8 @@ class RutaResource extends Resource
                     ->placeholder('Ej. Ruta 1 - Santa Rosa centro')
                     ->required()
                     ->maxLength(120)
+                    // Se guarda en mayúsculas: se compara igual para no chocar con "RUTA 1" vs "ruta 1".
+                    ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : $state)
                     ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('bodega_id', $get('bodega_id'))),
                 Select::make('agregar_departamento')
                     ->label('Agregar un departamento completo')

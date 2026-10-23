@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Models\Bodega;
 use App\Models\Municipio;
+use App\Support\Texto;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Seeder;
 
@@ -36,7 +37,7 @@ class BodegaSeeder extends Seeder
             }
 
             $municipioId = Municipio::query()
-                ->where('nombre', $municipio)
+                ->where('nombre', Texto::mayusculas($municipio))
                 ->whereHas('departamento', fn (Builder $query): Builder => $query->where('codigo', $departamento))
                 ->value('id');
 

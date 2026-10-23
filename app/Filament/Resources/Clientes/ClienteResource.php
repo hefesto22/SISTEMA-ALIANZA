@@ -67,16 +67,16 @@ class ClienteResource extends Resource
     {
         return $table
             ->columns([
+                TextColumn::make('codigo')
+                    ->label('Código')
+                    ->searchable()
+                    ->sortable()
+                    ->placeholder('—'),
                 TextColumn::make('nombre')
                     ->searchable()
                     ->sortable()
                     ->weight('bold')
                     ->description(fn (Cliente $record): ?string => $record->direccion),
-                TextColumn::make('codigo')
-                    ->label('Código')
-                    ->searchable()
-                    ->placeholder('—')
-                    ->toggleable(),
                 TextColumn::make('rtn')
                     ->label('RTN')
                     ->searchable()
@@ -125,7 +125,8 @@ class ClienteResource extends Resource
                 ? 'No tiene rutas asignadas. Pida a administración que lo agregue a una ruta en Administración → Rutas.'
                 : null)
             ->recordActions([
-                EditAction::make(),
+                EditAction::make()
+                    ->modalDescription(fn (Cliente $record): ?string => $record->codigo),
             ]);
     }
 

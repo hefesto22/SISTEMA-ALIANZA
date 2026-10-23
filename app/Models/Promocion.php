@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\UnidadVenta;
+use App\Models\Concerns\GuardaEnMayusculas;
 use Carbon\CarbonInterface;
 use Database\Factories\PromocionFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -47,6 +48,8 @@ use Illuminate\Support\Carbon;
  */
 class Promocion extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<PromocionFactory> */
     use HasFactory;
 
@@ -268,5 +271,13 @@ class Promocion extends Model
     public static function porcentajeTexto(float $porcentaje): string
     {
         return rtrim(rtrim(number_format($porcentaje, 2), '0'), '.').'%';
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['nombre', 'descripcion'];
     }
 }

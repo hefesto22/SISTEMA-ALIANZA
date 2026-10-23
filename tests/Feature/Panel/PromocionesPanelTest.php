@@ -62,6 +62,7 @@ test('administración crea un combo y se le genera el código', function (): voi
     $promo = Promocion::query()->latest('id')->firstOrFail();
 
     expect($promo->codigo)->toBe('PROMO-'.str_pad((string) $promo->id, 4, '0', STR_PAD_LEFT))
+        ->and($promo->nombre)->toBe('TOFFEE + NUTRINE')
         ->and($promo->descuento_porcentaje)->toBe(50.0)
         ->and($promo->created_by)->toBe($this->admin->id)
         ->and($promo->activa)->toBeTrue()

@@ -65,7 +65,7 @@
     </header>
 
     <div class="datos">
-        <div><b>Cliente:</b> {{ $pedido->cliente->nombre }}</div>
+        <div><b>Cliente:</b> {{ $pedido->cliente->nombre }}@if ($pedido->cliente->codigo) ({{ $pedido->cliente->codigo }})@endif</div>
         <div><b>RTN:</b> {{ $pedido->cliente->rtn ?? '—' }}</div>
         <div><b>Dirección:</b> {{ $pedido->cliente->direccion ?? '—' }}@if ($pedido->cliente->municipio) · {{ $pedido->cliente->municipio->nombre }}, {{ $pedido->cliente->municipio->departamento->nombre }}@endif</div>
         <div><b>Teléfono:</b> {{ $pedido->cliente->telefono ?? '—' }}</div>

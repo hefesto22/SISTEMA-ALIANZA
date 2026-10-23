@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\ClienteFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,9 @@ use Illuminate\Support\Carbon;
  *
  * Queda en un municipio: lo ven los vendedores de las rutas que cubren
  * ese municipio (Administración → Rutas).
+ *
+ * El código (CLI-000001) se genera solo. Puede haber dos clientes con el
+ * mismo nombre y RTN si están en municipios distintos (sucursales).
  *
  * @property int $id
  * @property string|null $codigo
@@ -34,6 +38,8 @@ use Illuminate\Support\Carbon;
  */
 class Cliente extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<ClienteFactory> */
     use HasFactory;
 
@@ -62,6 +68,26 @@ class Cliente extends Model
     }
 
     /**
+     * Código propio del cliente: CLI-000001.
+     */
+    protected static function booted(): void
+    {
+        static::created(function (Cliente $cliente): void {
+            if ($cliente->codigo !== null) {
+                return;
+            }
+
+            $cliente->codigo = self::codigoPara($cliente->id);
+            $cliente->saveQuietly();
+        });
+    }
+
+    public static function codigoPara(int $id): string
+    {
+        return 'CLI-'.str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+    }
+
+    /**
      * @return BelongsTo<Bodega, $this>
      */
     public function bodega(): BelongsTo
@@ -78,11 +104,14 @@ class Cliente extends Model
     }
 
     /**
-     * "Pulpería Ana · Dolores": el municipio ayuda a no confundir clientes con el mismo nombre.
+     * "CLI-000012 · PULPERÍA ANA · DOLORES": código y municipio para no
+     * confundir clientes con el mismo nombre.
      */
     public function etiqueta(): string
     {
-        return $this->municipio === null ? $this->nombre : "{$this->nombre} · {$this->municipio->nombre}";
+        return collect([$this->codigo, $this->nombre, $this->municipio?->nombre])
+            ->filter()
+            ->implode(' · ');
     }
 
     /**
@@ -127,5 +156,13 @@ class Cliente extends Model
         }
 
         return $query->where($query->qualifyColumn('bodega_id'), $user->bodega_id);
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['nombre', 'direccion'];
     }
 }

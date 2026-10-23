@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Users\Schemas;
 
 use App\Enums\Rol;
 use App\Models\Ruta;
+use App\Support\Texto;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -66,8 +67,9 @@ class UserForm
                             ->label('Código de usuario')
                             ->placeholder('Ej: HO01')
                             ->maxLength(20)
+                            ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : $state)
                             ->unique(ignoreRecord: true)
-                            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? mb_strtoupper(trim((string) $state)) : null),
+                            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : null),
                     ]),
 
                 Section::make('Foto de Perfil')

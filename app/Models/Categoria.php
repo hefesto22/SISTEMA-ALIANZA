@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\CategoriaFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -27,6 +28,8 @@ use Illuminate\Support\Carbon;
  */
 class Categoria extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<CategoriaFactory> */
     use HasFactory;
 
@@ -63,5 +66,13 @@ class Categoria extends Model
     public function productos(): HasMany
     {
         return $this->hasMany(Producto::class);
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['nombre'];
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\ProveedorFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -29,6 +30,8 @@ use Illuminate\Support\Carbon;
  */
 class Proveedor extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<ProveedorFactory> */
     use HasFactory;
 
@@ -88,5 +91,13 @@ class Proveedor extends Model
     public function etiqueta(): string
     {
         return $this->nombre_corto ?: $this->nombre;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['nombre', 'nombre_corto', 'razon_social', 'direccion'];
     }
 }

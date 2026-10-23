@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Bodegas;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
 use App\Filament\Schemas\Components\UbicacionFields;
 use App\Models\Bodega;
+use App\Support\Texto;
 use BackedEnum;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -49,6 +50,7 @@ class BodegaResource extends Resource
                     ->helperText('Prefijo de los pedidos de esta bodega. Ej: COP, OCO.')
                     ->required()
                     ->maxLength(10)
+                    ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : $state)
                     ->unique(ignoreRecord: true)
                     ->dehydrateStateUsing(fn (?string $state): string => mb_strtoupper(trim((string) $state))),
                 TextInput::make('nombre')

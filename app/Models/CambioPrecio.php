@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\MotivoCambioPrecio;
+use App\Models\Concerns\GuardaEnMayusculas;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -32,6 +33,8 @@ use Illuminate\Support\Carbon;
  */
 class CambioPrecio extends Model
 {
+    use GuardaEnMayusculas;
+
     protected $table = 'cambios_precio';
 
     /** @var list<string> */
@@ -97,5 +100,13 @@ class CambioPrecio extends Model
         }
 
         return round((($this->precio_nuevo - $this->precio_anterior) / $this->precio_anterior) * 100, 2);
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['nota'];
     }
 }

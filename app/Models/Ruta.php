@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\RutaFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -29,6 +30,8 @@ use Illuminate\Support\Facades\DB;
  */
 class Ruta extends Model
 {
+    use GuardaEnMayusculas;
+
     /** @use HasFactory<RutaFactory> */
     use HasFactory;
 
@@ -113,5 +116,13 @@ class Ruta extends Model
             ->where('activo', true)
             ->whereIn('municipio_id', DB::table('ruta_municipio')->where('ruta_id', $this->id)->select('municipio_id'))
             ->count();
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function camposEnMayusculas(): array
+    {
+        return ['nombre'];
     }
 }
