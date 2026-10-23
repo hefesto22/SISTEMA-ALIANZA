@@ -6,11 +6,13 @@ namespace App\Filament\Resources\Clientes;
 
 use App\Filament\Resources\Clientes\Pages\ManageClientes;
 use App\Filament\Resources\Clientes\Schemas\ClienteForm;
+use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
 use App\Models\Cliente;
 use App\Models\Departamento;
 use App\Models\Municipio;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -125,6 +127,14 @@ class ClienteResource extends Resource
                 ? 'No tiene rutas asignadas. Pida a administración que lo agregue a una ruta en Administración → Rutas.'
                 : null)
             ->recordActions([
+                Action::make('pedidos')
+                    ->label('Pedidos')
+                    ->icon(Heroicon::OutlinedShoppingCart)
+                    ->color('gray')
+                    ->url(fn (Cliente $record): string => PedidoResource::getUrl('index', [
+                        'tab'     => 'todos',
+                        'filters' => ['cliente_id' => ['value' => $record->id]],
+                    ])),
                 EditAction::make()
                     ->modalDescription(fn (Cliente $record): ?string => $record->codigo),
             ]);

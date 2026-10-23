@@ -23,15 +23,32 @@ class ListPedidos extends ListRecords
         ];
     }
 
+    /**
+     * "Todas las bodegas · 6 pendientes · L. 4,250.00 por despachar · 1 fuera de ruta".
+     */
     public function getSubheading(): string
     {
-        if (Acceso::esVendedor()) {
-            return 'Sus pedidos de preventa.';
+        $pendientes = PedidoResource::getEloquentQuery()->where('estado', EstadoPedido::Pendiente);
+
+        $cuantos = (clone $pendientes)->count();
+        $monto = (float) (clone $pendientes)->sum('total');
+        $fuera = (clone $pendientes)->where('fuera_de_ruta', true)->count();
+
+        $partes = [
+            match (true) {
+                Acceso::esVendedor() => 'Sus pedidos',
+                Acceso::veTodo()     => 'Todas las bodegas',
+                default              => 'Vendedores de su bodega',
+            },
+            $cuantos.' '.($cuantos === 1 ? 'pendiente' : 'pendientes'),
+            lempiras($monto).' por despachar',
+        ];
+
+        if ($fuera > 0) {
+            $partes[] = "{$fuera} fuera de ruta";
         }
 
-        return Acceso::veTodo()
-            ? 'Pedidos de todas las bodegas.'
-            : 'Pedidos de su bodega: valide el despacho de los pendientes.';
+        return implode(' · ', $partes);
     }
 
     /**

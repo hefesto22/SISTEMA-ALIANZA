@@ -11,7 +11,7 @@ use Illuminate\Auth\Access\HandlesAuthorization;
 /**
  * Permisos Shield ("Accion:Pedido") + a quién le toca cada pedido:
  *  - el vendedor solo toca los suyos y solo mientras están pendientes;
- *  - bodega valida los pendientes de SU bodega;
+ *  - el encargado de bodega ve y valida los de los vendedores de SU bodega;
  *  - administración puede con todos.
  */
 class PedidoPolicy
@@ -57,6 +57,6 @@ class PedidoPolicy
         }
 
         return $user->veTodasLasBodegas()
-            || ($user->bodega_id !== null && $user->bodega_id === $pedido->bodega_id);
+            || ($user->bodega_id !== null && $pedido->vendedor->bodega_id === $user->bodega_id);
     }
 }

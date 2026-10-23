@@ -153,9 +153,9 @@ class Pedido extends Model
 
     /**
      * Quién ve qué:
-     *  - Administración: todos los pedidos.
+     *  - Super admin y administración: todos los pedidos, de todas las bodegas.
      *  - Vendedor: solo los que él levantó.
-     *  - Bodega: los de su bodega.
+     *  - Encargado de bodega: los de los vendedores de su bodega.
      *
      * @param Builder<Pedido> $query
      *
@@ -171,7 +171,11 @@ class Pedido extends Model
             return $query->where('vendedor_id', $user->id);
         }
 
-        return $query->where('bodega_id', $user->bodega_id);
+        if ($user->bodega_id === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereHas('vendedor', fn (Builder $vendedor): Builder => $vendedor->where('bodega_id', $user->bodega_id));
     }
 
     public function esVisiblePara(User $user): bool
@@ -184,7 +188,7 @@ class Pedido extends Model
             return $this->vendedor_id === $user->id;
         }
 
-        return $user->bodega_id !== null && $this->bodega_id === $user->bodega_id;
+        return $user->bodega_id !== null && $this->vendedor->bodega_id === $user->bodega_id;
     }
 
     /**
