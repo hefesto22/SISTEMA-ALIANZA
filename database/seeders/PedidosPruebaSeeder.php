@@ -8,6 +8,7 @@ use App\Domain\Pedidos\RecalcularPedido;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
 use App\Models\Cliente;
+use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
@@ -64,8 +65,11 @@ class PedidosPruebaSeeder extends Seeder
             return;
         }
 
-        // Los de prueba anteriores se cambian por estos (las líneas se borran con el pedido).
-        $anteriores = Pedido::query()->where('notas', 'like', self::NOTA.'%')->delete();
+        // Los de prueba anteriores se cambian por estos (las líneas se borran con el
+        // pedido). Si ya se habían impreso, sus facturas también son de prueba.
+        $dePrueba = Pedido::query()->where('notas', 'like', self::NOTA.'%');
+        Factura::query()->whereIn('pedido_id', (clone $dePrueba)->select('id'))->delete();
+        $anteriores = $dePrueba->delete();
 
         $creados = 0;
 

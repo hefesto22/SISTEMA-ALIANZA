@@ -64,7 +64,7 @@ class PedidosTable
             ->recordUrl(fn (Pedido $record): ?string => self::alHacerClic($record) === null ? PedidoResource::getUrl('view', ['record' => $record]) : null)
             ->poll('30s')
             ->extraAttributes(['class' => 'pedidos-tarjetas'])
-            ->searchPlaceholder('Buscar por cliente, código, número de pedido o vendedor…')
+            ->searchPlaceholder('Buscar por cliente, código, número de pedido o de factura, o vendedor…')
             ->defaultSort('created_at', 'desc')
             ->paginated([12, 24, 48])
             ->defaultPaginationPageOption(12)
@@ -148,7 +148,7 @@ class PedidosTable
     }
 
     /**
-     * Número de pedido, cliente (nombre o código) o vendedor.
+     * Número de pedido o de factura, cliente (nombre o código) o vendedor.
      *
      * @param Builder<Model> $query
      *
@@ -160,6 +160,7 @@ class PedidosTable
 
         return $query->where(function (Builder $q) use ($like): void {
             $q->where('numero', 'ilike', $like)
+                ->orWhereHas('facturas', fn (Builder $f): Builder => $f->where('numero', 'ilike', $like))
                 ->orWhereHas('cliente', fn (Builder $c): Builder => $c->where('nombre', 'ilike', $like)->orWhere('codigo', 'ilike', $like))
                 ->orWhereHas('vendedor', fn (Builder $v): Builder => $v->where('name', 'ilike', $like)->orWhere('codigo', 'ilike', $like));
         });

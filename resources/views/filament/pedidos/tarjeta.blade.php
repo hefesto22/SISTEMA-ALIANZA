@@ -8,6 +8,8 @@
     $cliente = $pedido->cliente;
     $lineas = (int) ($pedido->items_count ?? $pedido->items()->count());
     $ubicacion = collect([$pedido->numero, $cliente->codigo, $cliente->municipio?->nombre])->filter()->implode(' · ');
+    $factura = $pedido->factura;
+    $porSustituir = $pedido->esReimpresion() ? $pedido->facturaPorSustituir() : null;
     $quien = \App\Filament\Support\Acceso::esVendedor()
         ? $pedido->bodega->nombre
         : collect([$pedido->vendedor->codigo, $pedido->vendedor->name])->filter()->implode(' · ');
@@ -35,6 +37,8 @@
         .pt-tiempo { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.78rem; color: var(--pt-tenue); }
         .pt-tiempo svg { width: 0.9rem; height: 0.9rem; }
         .pt-codigo { font-size: 0.8rem; line-height: 1.45; color: var(--pt-tenue); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+        .pt-codigo.pt-anulada { color: var(--danger-600); font-weight: 600; }
+        .dark .pt-codigo.pt-anulada { color: var(--danger-400); }
         .pt-pie { min-width: 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 0.75rem; margin-top: 0.25rem; padding-top: 0.75rem; border-top: 1px solid var(--pt-borde); }
         .pt-chip { flex: 0 1 auto; min-width: 0; font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 0.375rem; color: var(--primary-600); border: 1px solid color-mix(in oklab, var(--primary-500) 40%, transparent); background: color-mix(in oklab, var(--primary-500) 10%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .pt-total { flex-shrink: 0; text-align: end; }
@@ -68,7 +72,7 @@
 
     <div class="pt-meta">
         @if ($pedido->esReimpresion())
-            <span class="pt-pill reimprimir" title="Se corrigió después de impreso{{ $pedido->corregido_at ? ' · '.$pedido->corregido_at->format('d/m/Y H:i') : '' }}">Por reimprimir</span>
+            <span class="pt-pill reimprimir" title="Se corrigió después de impreso{{ $pedido->corregido_at ? ' · '.$pedido->corregido_at->format('d/m/Y H:i') : '' }}{{ $porSustituir ? '. Sale factura nueva; retire la N° '.$porSustituir->numero.' (anulada).' : '' }}">Por reimprimir</span>
         @elseif ($pedido->estado === \App\Enums\EstadoPedido::Impreso)
             <span class="pt-pill impreso" title="{{ $pedido->impreso_at?->format('d/m/Y H:i') }}">Impreso{{ $pedido->impresiones > 1 ? ' · '.$pedido->impresiones.' veces' : '' }}</span>
         @else
@@ -85,6 +89,12 @@
     </div>
 
     <div class="pt-codigo">{{ $ubicacion }}</div>
+
+    @if ($factura)
+        <div class="pt-codigo">Factura {{ $factura->numero }}</div>
+    @elseif ($porSustituir)
+        <div class="pt-codigo pt-anulada">Factura {{ $porSustituir->numero }} anulada: retirarla</div>
+    @endif
 
     <div class="pt-pie">
         <span class="pt-chip" title="{{ $quien }}">{{ $quien }}</span>

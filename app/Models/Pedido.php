@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
 use App\Models\Concerns\GuardaEnMayusculas;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -18,7 +20,9 @@ use Illuminate\Support\Carbon;
  * Mientras está Pendiente los precios son informativos (los del día en que
  * se levantó). Al validar, bodega confirma qué sale y el pedido se recalcula
  * con el precio VIGENTE en ese momento; queda Por imprimir. Al imprimirlo
- * pasa a Impreso. Si se corrige, vuelve a Por imprimir (reimpresión).
+ * pasa a Impreso y se emite su factura (con CAI). Si se corrige después de
+ * impreso, la factura se anula y el pedido vuelve a Por imprimir: al
+ * reimprimirlo sale una factura nueva que sustituye a la anulada.
  *
  * subtotal = bruto (sin ISV), descuento = promociones, ISV sobre lo neto,
  * total = subtotal − descuento + ISV.
@@ -55,6 +59,7 @@ use Illuminate\Support\Carbon;
  * @property-read User|null $validador
  * @property-read User|null $impresor
  * @property-read User|null $corrector
+ * @property-read Factura|null $factura
  */
 class Pedido extends Model
 {
@@ -176,6 +181,40 @@ class Pedido extends Model
     public function items(): HasMany
     {
         return $this->hasMany(PedidoItem::class);
+    }
+
+    /**
+     * Todas sus facturas, vigentes y anuladas, de la más vieja a la más nueva.
+     *
+     * @return HasMany<Factura, $this>
+     */
+    public function facturas(): HasMany
+    {
+        return $this->hasMany(Factura::class)->orderBy('id');
+    }
+
+    /**
+     * La factura que vale (a lo más hay una vigente).
+     *
+     * @return HasOne<Factura, $this>
+     */
+    public function factura(): HasOne
+    {
+        return $this->hasOne(Factura::class)->where('estado', EstadoFactura::Vigente);
+    }
+
+    /**
+     * La factura anulada que todavía no tiene otra que la sustituya: al
+     * reimprimir, la nueva dice que reemplaza a esta y que hay que retirarla.
+     */
+    public function facturaPorSustituir(): ?Factura
+    {
+        return $this->facturas()
+            ->reorder()
+            ->where('estado', EstadoFactura::Anulada)
+            ->whereDoesntHave('reemplazo')
+            ->latest('id')
+            ->first();
     }
 
     public function estaPendiente(): bool

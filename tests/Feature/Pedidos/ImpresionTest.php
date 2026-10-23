@@ -8,6 +8,7 @@ use App\Domain\Pedidos\MarcarImpreso;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
 use App\Domain\Precios\ActualizarPrecioProducto;
+use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
@@ -17,6 +18,7 @@ use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
 use App\Models\Bodega;
 use App\Models\Cliente;
+use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
@@ -27,8 +29,9 @@ use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
 
 /**
- * Después de validar: Por imprimir → Imprimir → Impreso. Si se corrige
- * después de impreso, vuelve a Por imprimir y la hoja sale como REIMPRESIÓN.
+ * Después de validar: Por imprimir → Imprimir → Impreso (con factura). Si se
+ * corrige después de impreso, la factura se anula, vuelve a Por imprimir y
+ * al reimprimir sale una factura nueva que sustituye a la anulada.
  */
 beforeEach(function (): void {
     $this->seed(RolesSistemaSeeder::class);
@@ -45,6 +48,8 @@ beforeEach(function (): void {
     // Gravado: L 100 la unidad. Exento: L 50 la unidad, caja de 10 = L 500.
     $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['unidades_por_caja' => 12]);
     $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->create(['unidades_por_caja' => 10]);
+
+    facturacionLista();
 });
 
 /**
@@ -211,7 +216,7 @@ test('se marcan varias tarjetas y se imprimen de un solo; los pendientes no se p
         ->assertTableBulkActionHidden('imprimirSeleccionados');
 });
 
-test('corregir un pedido impreso: vuelve a por imprimir como reimpresión, con los precios de cuando se validó', function (): void {
+test('corregir un pedido impreso: anula la factura, vuelve a por imprimir y al reimprimir sale una nueva, con los precios de cuando se validó', function (): void {
     $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
     $this->actingAs($this->encargado)->get(route('pedidos.imprimir', $pedido))->assertOk();
@@ -224,7 +229,7 @@ test('corregir un pedido impreso: vuelve a por imprimir como reimpresión, con l
     // Avisan que del gravado solo salió 1.
     Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
         ->assertActionVisible('corregir')
-        ->callAction('corregir', data: ['items' => [['sale' => 1], ['sale' => 1]]])
+        ->callAction('corregir', data: ['items' => [['sale' => 1], ['sale' => 1]], 'motivo' => 'el cliente devolvió uno'])
         ->assertHasNoActionErrors();
 
     $undoRepeaterFake();
@@ -246,12 +251,23 @@ test('corregir un pedido impreso: vuelve a por imprimir como reimpresión, con l
         ->set('activeTab', EstadoPedido::PorImprimir->value)
         ->assertSee('Por reimprimir');
 
+    $anulada = Factura::query()->where('pedido_id', $pedido?->id)->firstOrFail();
+
     $this->get(route('pedidos.imprimir', $pedido))
         ->assertOk()
-        ->assertSee('REIMPRESIÓN');
+        ->assertSee('Sustituye a la factura N° '.$anulada->numero)
+        ->assertDontSee('REIMPRESIÓN');
+
+    $facturas = $pedido?->facturas()->get();
 
     expect($pedido?->fresh()?->estado)->toBe(EstadoPedido::Impreso)
-        ->and($pedido?->fresh()?->impresiones)->toBe(2);
+        ->and($pedido?->fresh()?->impresiones)->toBe(2)
+        ->and($facturas)->toHaveCount(2)
+        ->and($facturas?->first()?->estado)->toBe(EstadoFactura::Anulada)
+        ->and($facturas?->first()?->motivo_anulacion)->toBe('PEDIDO CORREGIDO: EL CLIENTE DEVOLVIÓ UNO')
+        ->and($facturas?->last()?->estado)->toBe(EstadoFactura::Vigente)
+        ->and($facturas?->last()?->reemplaza_a_id)->toBe($anulada->id)
+        ->and($facturas?->last()?->total)->toBe(615.0);
 });
 
 test('solo se corrige lo validado, y solo bodega', function (): void {

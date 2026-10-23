@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -100,6 +101,16 @@ class Bodega extends Model
     public function rutas(): HasMany
     {
         return $this->hasMany(Ruta::class);
+    }
+
+    /**
+     * CAI asignados a esta bodega (sin contar los globales).
+     *
+     * @return BelongsToMany<Cai, $this>
+     */
+    public function cais(): BelongsToMany
+    {
+        return $this->belongsToMany(Cai::class, 'cai_bodega');
     }
 
     /**

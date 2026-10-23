@@ -7,8 +7,10 @@ use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
+use App\Filament\Resources\Cais\Pages\ManageCais;
 use App\Filament\Resources\CambiosPrecio\Pages\ListCambiosPrecio;
 use App\Filament\Resources\Clientes\Pages\ManageClientes;
+use App\Filament\Resources\Facturas\Pages\ListFacturas;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
@@ -64,6 +66,8 @@ test('las pantallas de administración abren', function (): void {
     Livewire::test(ManageClientes::class)->assertOk();
     Livewire::test(ManageBodegas::class)->assertOk();
     Livewire::test(ManageRutas::class)->assertOk();
+    Livewire::test(ManageCais::class)->assertOk();
+    Livewire::test(ListFacturas::class)->assertOk();
     Livewire::test(ListPedidos::class)->assertOk();
 });
 
@@ -203,6 +207,8 @@ test('el vendedor levanta la preventa y bodega la despacha', function (): void {
 
     expect($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($pedido->fresh()?->validado_por)->toBe($this->encargado->id);
+
+    facturacionLista();
 
     $this->get(route('pedidos.imprimir', $pedido))
         ->assertOk()

@@ -14,8 +14,8 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * Roles de trabajo con sus permisos (formato Shield "Accion:Modelo").
  *
- *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos y usuarios.
- *  bodega        → actualiza precios, ve historial, promociones y rutas, valida despacho de su bodega.
+ *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI) y usuarios.
+ *  bodega        → actualiza precios, ve historial, promociones y rutas, valida e imprime (factura) lo de su bodega.
  *  vendedor      → consulta precios y promociones vigentes, maneja los clientes de sus rutas y su preventa.
  *
  * Ojo: al correrlo de nuevo, los permisos de estos tres roles vuelven a
@@ -41,6 +41,8 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Pedido', ['viewAny', 'view', 'create', 'update', 'delete', 'validar']),
                 ...$this->permisos('Promocion', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('User', ['viewAny', 'view', 'create', 'update']),
+                ...$this->permisos('Cai', ['viewAny', 'view', 'create', 'update', 'delete']),
+                ...$this->permisos('Factura', ['viewAny', 'view']),
             ],
             Rol::Bodega->value => [
                 ...$this->permisos('Producto', ['viewAny', 'view', 'update']),
@@ -51,6 +53,8 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Pedido', ['viewAny', 'view', 'create', 'update', 'delete', 'validar']),
                 ...$this->permisos('Promocion', ['viewAny', 'view']),
                 ...$this->permisos('Ruta', ['viewAny', 'view']),
+                ...$this->permisos('Cai', ['viewAny', 'view']),
+                ...$this->permisos('Factura', ['viewAny', 'view']),
             ],
             Rol::Vendedor->value => [
                 ...$this->permisos('Producto', ['viewAny', 'view']),

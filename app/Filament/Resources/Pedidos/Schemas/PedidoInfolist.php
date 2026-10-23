@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Schemas;
 
+use App\Filament\Resources\Facturas\FacturaResource;
+use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -111,6 +113,40 @@ class PedidoInfolist
                                 TextEntry::make('total')
                                     ->formatStateUsing(fn (float $state): string => lempiras($state))
                                     ->weight('bold'),
+                            ]),
+                    ]),
+
+                Section::make('Facturas')
+                    ->description('Cada vez que se corrige un pedido ya impreso, su factura queda anulada y al reimprimir sale otra. Las anuladas hay que retirarlas al cliente y marcarlas ANULADA.')
+                    ->columnSpanFull()
+                    ->visible(fn (Pedido $record): bool => $record->facturas()->exists())
+                    ->schema([
+                        RepeatableEntry::make('facturas')
+                            ->hiddenLabel()
+                            ->table([
+                                TableColumn::make('Número'),
+                                TableColumn::make('Emitida'),
+                                TableColumn::make('Total'),
+                                TableColumn::make('Estado'),
+                                TableColumn::make('Detalle'),
+                            ])
+                            ->schema([
+                                TextEntry::make('numero')
+                                    ->weight('bold')
+                                    ->copyable()
+                                    ->helperText(fn (Factura $record): string => 'CAI '.$record->cai),
+                                TextEntry::make('fecha_emision')
+                                    ->dateTime('d/m/Y H:i')
+                                    ->helperText(fn (Factura $record): ?string => collect([
+                                        $record->emisor?->name,
+                                        $record->impresiones > 1 ? "impresa {$record->impresiones} veces" : null,
+                                    ])->filter()->implode(' · ') ?: null),
+                                TextEntry::make('total')
+                                    ->formatStateUsing(fn (float $state): string => lempiras($state)),
+                                TextEntry::make('estado')
+                                    ->badge(),
+                                TextEntry::make('detalle')
+                                    ->state(fn (Factura $record): string => FacturaResource::historial($record)),
                             ]),
                     ]),
 

@@ -6,18 +6,20 @@ namespace App\Filament\Resources\Pedidos\Actions;
 
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Pedidos\CorregirPedido;
-use App\Enums\EstadoPedido;
 use App\Filament\Support\Acceso;
 use App\Models\Pedido;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 
 /**
  * Corregir un pedido ya validado (por imprimir o impreso) cuando avisan de un
- * error: quitar lo que no va o cambiar cantidades. Vuelve a Por imprimir; si
- * ya se había impreso, queda para reimprimir.
+ * error: quitar lo que no va o cambiar cantidades. Vuelve a Por imprimir.
+ *
+ * Si ya se imprimió, su factura queda ANULADA (con el motivo, que se pide
+ * aquí) y al reimprimir sale una factura nueva que la sustituye.
  */
 final class CorregirPedidoAction
 {
@@ -29,13 +31,23 @@ final class CorregirPedidoAction
             ->color('gray')
             ->authorize('corregir')
             ->modalHeading(fn (Pedido $record): string => "Corregir · {$record->numero} · {$record->cliente->nombre}")
-            ->modalDescription(fn (Pedido $record): string => $record->estado === EstadoPedido::Impreso
-                ? 'Ya se imprimió. Cambie lo que sale (basurero o 0 = no sale); al guardar queda para reimprimir.'
+            ->modalDescription(fn (Pedido $record): string => $record->factura !== null
+                ? "Ya se imprimió con la factura N° {$record->factura->numero}. Al guardar, esa factura queda ANULADA (hay que retirarla al cliente) y al reimprimir sale una nueva. Cambie lo que sale (basurero o 0 = no sale)."
                 : 'Cambie lo que sale (basurero o 0 = no sale). Sigue por imprimir.')
             ->modalWidth(Width::FiveExtraLarge)
             ->modalSubmitActionLabel('Guardar corrección')
             ->fillForm(fn (Pedido $record): array => LineasPedido::datos($record))
-            ->schema(LineasPedido::schema())
+            ->schema(fn (Pedido $record): array => [
+                ...LineasPedido::schema(),
+                Textarea::make('motivo')
+                    ->label('Motivo de la corrección')
+                    ->placeholder('Ej. el cliente devolvió 2 cajas de aceite')
+                    ->helperText('Queda en el historial como motivo de la anulación de la factura.')
+                    ->rows(2)
+                    ->maxLength(200)
+                    ->required()
+                    ->visible($record->factura !== null),
+            ])
             ->action(function (array $data, Pedido $record): void {
                 $usuario = Acceso::usuario();
 
@@ -43,8 +55,11 @@ final class CorregirPedidoAction
                     return;
                 }
 
+                $anulada = $record->factura;
+                $motivo = is_string($data['motivo'] ?? null) ? $data['motivo'] : null;
+
                 try {
-                    $pedido = app(CorregirPedido::class)->ejecutar($record, LineasPedido::cantidades($data, $record), $usuario);
+                    $pedido = app(CorregirPedido::class)->ejecutar($record, LineasPedido::cantidades($data, $record), $usuario, $motivo);
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
 
@@ -52,15 +67,16 @@ final class CorregirPedidoAction
                 }
 
                 Notification::make()
-                    ->title($pedido->esReimpresion()
+                    ->title($anulada !== null
                         ? "Pedido {$pedido->numero} corregido: queda para reimprimir"
                         : "Pedido {$pedido->numero} corregido")
-                    ->body('Total para el cliente: '.lempiras($pedido->total))
+                    ->body(($anulada !== null ? "La factura N° {$anulada->numero} quedó ANULADA: retírela al cliente. " : '').'Total para el cliente: '.lempiras($pedido->total))
                     ->success()
                     ->actions([ImprimirPedidoAction::enNotificacion($pedido)])
                     ->send();
 
                 $record->refresh();
+                $record->unsetRelation('factura');
             });
     }
 }

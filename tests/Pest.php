@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 use App\Domain\ValueObjects\Monto;
+use App\Models\Cai;
+use App\Models\DatosFiscales;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Pest\Expectation;
@@ -63,4 +65,19 @@ function actingAsAdmin(): User
     test()->actingAs($user);
 
     return $user;
+}
+
+/**
+ * Datos fiscales completos y un CAI global vigente: lo mínimo para que
+ * bodega pueda imprimir (emitir) facturas.
+ */
+function facturacionLista(): Cai
+{
+    DatosFiscales::actual()->update([
+        'razon_social' => 'DISTRIBUIDORA DE PRUEBA S. DE R.L.',
+        'rtn'          => '05019000123456',
+        'direccion'    => 'BARRIO EL CENTRO, SANTA ROSA DE COPÁN',
+    ]);
+
+    return Cai::factory()->create();
 }

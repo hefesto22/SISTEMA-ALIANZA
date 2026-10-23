@@ -13,12 +13,13 @@
             return;
         }
 
-        const avisarError = () => {
+        const avisarError = (motivo) => {
             if (window.FilamentNotification) {
                 new window.FilamentNotification()
-                    .title('No se pudo abrir la hoja para imprimir')
-                    .body('Recargue la página e intente de nuevo.')
+                    .title('No se pudo imprimir')
+                    .body(motivo || 'Recargue la página e intente de nuevo.')
                     .danger()
+                    .persistent()
                     .send();
             }
         };
@@ -36,10 +37,12 @@
             marco.addEventListener('load', () => {
                 const ventana = marco.contentWindow;
 
-                // Si no llegó la hoja (sin permiso, sesión vencida, error) no se imprime la página de error.
+                // Si no llegó la hoja (sin CAI vigente, sin permiso, sesión vencida…) no se imprime la página de error.
                 if (! ventana || ! marco.contentDocument?.querySelector('.hoja')) {
+                    const motivo = marco.contentDocument?.body?.dataset.error;
+
                     marco.remove();
-                    avisarError();
+                    avisarError(motivo);
 
                     return;
                 }
