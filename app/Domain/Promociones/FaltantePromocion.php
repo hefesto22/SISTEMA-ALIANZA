@@ -24,7 +24,7 @@ final readonly class FaltantePromocion
         $cantidad = Promocion::cantidadTexto($this->cantidad, $this->unidad);
         $producto = $this->promocion->productoBeneficio->descripcion;
 
-        if ($this->promocion->esMismoProducto()) {
+        if ($this->promocion->regaloEnCondicion()) {
             return "Agregue {$cantidad} más de {$producto} y le sale {$this->promocion->beneficioTexto()} ({$this->promocion->codigo}).";
         }
 

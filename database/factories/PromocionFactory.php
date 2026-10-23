@@ -10,7 +10,10 @@ use App\Models\Promocion;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
- * Por defecto: compra 1 unidad del producto condición → 1 unidad del de regalo gratis.
+ * Por defecto solo trae el producto de regalo (gratis). Las condiciones
+ * se agregan con para() y con yCompra():
+ *
+ *   Promocion::factory()->para($toffee, $nutrine)->yCompra($otro, 2)->create();
  *
  * @extends Factory<Promocion>
  */
@@ -23,9 +26,6 @@ class PromocionFactory extends Factory
     {
         return [
             'nombre'                => 'Promo '.fake()->word(),
-            'producto_condicion_id' => Producto::factory(),
-            'cantidad_condicion'    => 1,
-            'condicion_unidad'      => UnidadVenta::Unidad,
             'producto_beneficio_id' => Producto::factory(),
             'cantidad_beneficio'    => 1,
             'beneficio_unidad'      => UnidadVenta::Unidad,
@@ -37,15 +37,35 @@ class PromocionFactory extends Factory
     /**
      * Si compra $cantidad de $condicion, $regalo de $beneficio sale con $porcentaje de descuento.
      */
-    public function para(Producto $condicion, Producto $beneficio, int $cantidad = 1, int $regalo = 1, float $porcentaje = 100): static
+    public function para(
+        Producto $condicion,
+        Producto $beneficio,
+        int $cantidad = 1,
+        int $regalo = 1,
+        float $porcentaje = 100,
+        UnidadVenta $unidadCondicion = UnidadVenta::Unidad,
+    ): static {
+        return $this
+            ->state(fn (array $attributes): array => [
+                'producto_beneficio_id' => $beneficio->id,
+                'cantidad_beneficio'    => $regalo,
+                'descuento_porcentaje'  => $porcentaje,
+            ])
+            ->yCompra($condicion, $cantidad, $unidadCondicion);
+    }
+
+    /**
+     * Agrega otro producto a la condición.
+     */
+    public function yCompra(Producto $producto, int $cantidad = 1, UnidadVenta $unidad = UnidadVenta::Unidad): static
     {
-        return $this->state(fn (array $attributes): array => [
-            'producto_condicion_id' => $condicion->id,
-            'cantidad_condicion'    => $cantidad,
-            'producto_beneficio_id' => $beneficio->id,
-            'cantidad_beneficio'    => $regalo,
-            'descuento_porcentaje'  => $porcentaje,
-        ]);
+        return $this->afterCreating(function (Promocion $promocion) use ($producto, $cantidad, $unidad): void {
+            $promocion->condiciones()->create([
+                'producto_id' => $producto->id,
+                'cantidad'    => $cantidad,
+                'unidad'      => $unidad,
+            ]);
+        });
     }
 
     public function inactiva(): static

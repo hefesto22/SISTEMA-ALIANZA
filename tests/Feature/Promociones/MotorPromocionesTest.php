@@ -53,7 +53,7 @@ test('gratis deja la línea del regalo en cero', function (): void {
 });
 
 test('la condición por caja cuenta las unidades sueltas', function (): void {
-    $promo = Promocion::factory()->para($this->toffee, $this->nutrine)->create(['condicion_unidad' => UnidadVenta::Caja]);
+    $promo = Promocion::factory()->para($this->toffee, $this->nutrine, unidadCondicion: UnidadVenta::Caja)->create();
 
     $completa = $this->motor->calcular([
         lineaPromo(1, $this->toffee, 6),
@@ -98,6 +98,57 @@ test('mismo producto: compre 2 y lleve 1 gratis', function (): void {
         ->and($ocho->faltantes)->toHaveCount(1)
         ->and($ocho->faltantes[0]->cantidad)->toBe(1)
         ->and($ocho->faltantes[0]->texto())->toContain('Agregue 1 unidad más de BUTTER TOFFEE');
+});
+
+test('combo: si compra toffee y nutrine, el regalo sale gratis', function (): void {
+    $baby = Producto::factory()->precio(10.0, 18.0)->create(['descripcion' => 'BABY CREMA 12X100ML']);
+    $promo = Promocion::factory()->para($this->toffee, $baby, cantidad: 2)->yCompra($this->nutrine)->create();
+
+    $una = $this->motor->calcular([
+        lineaPromo(1, $this->toffee, 4),
+        lineaPromo(2, $this->nutrine, 1),
+        lineaPromo(3, $baby, 3),
+    ], [$promo]);
+
+    $dos = $this->motor->calcular([
+        lineaPromo(1, $this->toffee, 4),
+        lineaPromo(2, $this->nutrine, 2),
+        lineaPromo(3, $baby, 3),
+    ], [$promo]);
+
+    $sinNutrine = $this->motor->calcular([
+        lineaPromo(1, $this->toffee, 4),
+        lineaPromo(3, $baby, 3),
+    ], [$promo]);
+
+    // Cuenta lo que alcance de los dos: 4 toffee dan para 2, pero 1 nutrine solo para 1.
+    expect($una->descuentoDe(3)?->monto)->toBe(18.0)
+        ->and($una->descuentoDe(3)?->unidades)->toBe(1)
+        ->and($dos->descuentoDe(3)?->monto)->toBe(36.0)
+        ->and($sinNutrine->descuentos)->toBe([])
+        ->and($sinNutrine->faltantes)->toBe([])
+        ->and($promo->resumen())->toBe('Compra 2 unidades de BUTTER TOFFEE 12X100G + 1 unidad de BABY NUTRINE 24X50G → 1 unidad de BABY CREMA 12X100ML gratis');
+});
+
+test('combo con el regalo dentro de lo que compra', function (): void {
+    // Compra 2 toffee + 1 nutrine y lleva 1 toffee más gratis.
+    $promo = Promocion::factory()->para($this->toffee, $this->toffee, cantidad: 2)->yCompra($this->nutrine)->create();
+
+    $completo = $this->motor->calcular([
+        lineaPromo(1, $this->toffee, 3),
+        lineaPromo(2, $this->nutrine, 1),
+    ], [$promo]);
+
+    $sinRegalo = $this->motor->calcular([
+        lineaPromo(1, $this->toffee, 2),
+        lineaPromo(2, $this->nutrine, 1),
+    ], [$promo]);
+
+    expect($completo->descuentoDe(1)?->monto)->toBe(30.0)
+        ->and($completo->faltantes)->toBe([])
+        ->and($sinRegalo->descuentos)->toBe([])
+        ->and($sinRegalo->faltantes[0]->cantidad)->toBe(1)
+        ->and($sinRegalo->faltantes[0]->texto())->toContain('Agregue 1 unidad más de BUTTER TOFFEE');
 });
 
 test('si falta el producto de regalo, avisa al vendedor', function (): void {

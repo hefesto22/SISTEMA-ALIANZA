@@ -9,6 +9,7 @@ use App\Filament\Resources\Promociones\Schemas\PromocionForm;
 use App\Filament\Support\Acceso;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ManageRecords;
+use Filament\Support\Enums\Width;
 
 class ManagePromociones extends ManageRecords
 {
@@ -19,6 +20,9 @@ class ManagePromociones extends ManageRecords
         return [
             CreateAction::make()
                 ->label('Nueva promoción')
+                ->modalHeading('Nueva promoción')
+                ->modalDescription('El código se genera solo al guardar.')
+                ->modalWidth(Width::SixExtraLarge)
                 ->mutateDataUsing(fn (array $data): array => [
                     ...PromocionForm::completar($data),
                     'created_by' => Acceso::usuario()?->id,

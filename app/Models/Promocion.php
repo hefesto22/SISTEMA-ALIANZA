@@ -8,6 +8,7 @@ use App\Enums\UnidadVenta;
 use Carbon\CarbonInterface;
 use Database\Factories\PromocionFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,11 +16,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
- * Promoción "si compra X, Y sale gratis / a mitad / con N% de descuento".
+ * Promoción "si compra esto, aquello sale gratis / a mitad / con N% de descuento".
  *
- * Ejemplo: por cada 1 unidad de BUTTER TOFFEE, 1 unidad de BABY NUTRINE a
- * mitad de precio. Si condición y beneficio son el mismo producto queda
- * como "compre 2 y lleve 1 más gratis".
+ * La condición puede ser uno o varios productos, cada uno con su cantidad:
+ * "2 cajas de BUTTER TOFFEE + 1 caja de NUTRINE → 1 unidad de BABY NUTRINE gratis".
+ * Si el regalo es uno de los productos de la condición queda como
+ * "compre 2 y lleve 1 más gratis".
  *
  * El código (PROMO-0001) se genera solo. Solo cuenta en los pedidos
  * mientras esté activa y dentro de sus fechas; el cálculo vive en
@@ -29,9 +31,6 @@ use Illuminate\Support\Carbon;
  * @property string|null $codigo
  * @property string $nombre
  * @property string|null $descripcion
- * @property int $producto_condicion_id
- * @property int $cantidad_condicion
- * @property UnidadVenta $condicion_unidad
  * @property int $producto_beneficio_id
  * @property int $cantidad_beneficio
  * @property UnidadVenta $beneficio_unidad
@@ -42,7 +41,7 @@ use Illuminate\Support\Carbon;
  * @property int|null $created_by
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
- * @property-read Producto $productoCondicion
+ * @property-read Collection<int, PromocionCondicion> $condiciones
  * @property-read Producto $productoBeneficio
  * @property-read User|null $creador
  */
@@ -57,9 +56,6 @@ class Promocion extends Model
     protected $fillable = [
         'nombre',
         'descripcion',
-        'producto_condicion_id',
-        'cantidad_condicion',
-        'condicion_unidad',
         'producto_beneficio_id',
         'cantidad_beneficio',
         'beneficio_unidad',
@@ -72,8 +68,6 @@ class Promocion extends Model
 
     /** @var array<string, mixed> */
     protected $attributes = [
-        'cantidad_condicion'   => 1,
-        'condicion_unidad'     => 'unidad',
         'cantidad_beneficio'   => 1,
         'beneficio_unidad'     => 'unidad',
         'descuento_porcentaje' => 100,
@@ -86,14 +80,13 @@ class Promocion extends Model
     protected function casts(): array
     {
         return [
-            'cantidad_condicion'   => 'integer',
-            'condicion_unidad'     => UnidadVenta::class,
-            'cantidad_beneficio'   => 'integer',
-            'beneficio_unidad'     => UnidadVenta::class,
-            'descuento_porcentaje' => 'float',
-            'activa'               => 'boolean',
-            'vigente_desde'        => 'date',
-            'vigente_hasta'        => 'date',
+            'producto_beneficio_id' => 'integer',
+            'cantidad_beneficio'    => 'integer',
+            'beneficio_unidad'      => UnidadVenta::class,
+            'descuento_porcentaje'  => 'float',
+            'activa'                => 'boolean',
+            'vigente_desde'         => 'date',
+            'vigente_hasta'         => 'date',
         ];
     }
 
@@ -113,11 +106,13 @@ class Promocion extends Model
     }
 
     /**
-     * @return BelongsTo<Producto, $this>
+     * Lo que el cliente tiene que comprar (uno o varios productos).
+     *
+     * @return HasMany<PromocionCondicion, $this>
      */
-    public function productoCondicion(): BelongsTo
+    public function condiciones(): HasMany
     {
-        return $this->belongsTo(Producto::class, 'producto_condicion_id');
+        return $this->hasMany(PromocionCondicion::class)->orderBy('id');
     }
 
     /**
@@ -214,9 +209,12 @@ class Promocion extends Model
         };
     }
 
-    public function esMismoProducto(): bool
+    /**
+     * El regalo es uno de los productos que hay que comprar ("compre 2 y lleve 1 más").
+     */
+    public function regaloEnCondicion(): bool
     {
-        return $this->producto_condicion_id === $this->producto_beneficio_id;
+        return $this->condiciones->contains(fn (PromocionCondicion $c): bool => $c->producto_id === $this->producto_beneficio_id);
     }
 
     /**
@@ -233,18 +231,25 @@ class Promocion extends Model
 
     /**
      * Lo que se le explica al cliente, por ejemplo:
-     * "Compra 1 unidad de BUTTER TOFFEE → 1 unidad de BABY NUTRINE a mitad de precio".
+     * "Compra 2 cajas de BUTTER TOFFEE + 1 caja de NUTRINE → 1 unidad de BABY NUTRINE gratis".
      */
     public function resumen(): string
     {
-        $condicion = self::cantidadTexto($this->cantidad_condicion, $this->condicion_unidad);
+        $compra = $this->condiciones
+            ->map(fn (PromocionCondicion $c): string => $c->texto())
+            ->implode(' + ');
+
         $beneficio = self::cantidadTexto($this->cantidad_beneficio, $this->beneficio_unidad);
 
-        if ($this->esMismoProducto()) {
-            return "Compra {$condicion} de {$this->productoCondicion->descripcion} y lleva {$beneficio} más {$this->beneficioTexto()}";
+        if ($this->regaloEnCondicion()) {
+            if ($this->condiciones->count() === 1) {
+                return "Compra {$compra} y lleva {$beneficio} más {$this->beneficioTexto()}";
+            }
+
+            return "Compra {$compra} → {$beneficio} más de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}";
         }
 
-        return "Compra {$condicion} de {$this->productoCondicion->descripcion} → {$beneficio} de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}";
+        return "Compra {$compra} → {$beneficio} de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}";
     }
 
     /**

@@ -268,7 +268,7 @@ class PedidoForm
             $paraMotor[] = new LineaPromocion($clave, $producto->id, $producto->unidades_por_caja, $unidad, $cantidad, $producto->precioPara($unidad));
         }
 
-        $vigentes = Promocion::query()->vigentes()->with(['productoCondicion', 'productoBeneficio'])->orderBy('id')->get();
+        $vigentes = Promocion::query()->vigentes()->with(['condiciones.producto', 'productoBeneficio'])->orderBy('id')->get();
 
         return [$lineas, app(MotorPromociones::class)->calcular($paraMotor, $vigentes)];
     }
@@ -277,7 +277,7 @@ class PedidoForm
     {
         $filas = Promocion::query()
             ->vigentes()
-            ->with(['productoCondicion', 'productoBeneficio'])
+            ->with(['condiciones.producto', 'productoBeneficio'])
             ->orderBy('id')
             ->get()
             ->map(fn (Promocion $p): string => '<li style="margin-bottom:4px"><b>'.e((string) $p->codigo).'</b> · '.e($p->nombre)

@@ -54,8 +54,8 @@ function pedidoConPromo(Bodega $bodega, User $vendedor, Producto $gravado, Produ
 function promoCajaExento(Producto $gravado, Producto $exento): Promocion
 {
     return Promocion::factory()
-        ->para($exento, $gravado, porcentaje: 50)
-        ->create(['condicion_unidad' => UnidadVenta::Caja]);
+        ->para($exento, $gravado, porcentaje: 50, unidadCondicion: UnidadVenta::Caja)
+        ->create();
 }
 
 test('cada promoción genera su propio código', function (): void {

@@ -34,17 +34,20 @@ beforeEach(function (): void {
     $this->nutrine = Producto::factory()->precio(20.0, 25.30)->create(['descripcion' => 'BABY NUTRINE 24X50G']);
 });
 
-test('administración crea la promoción y se le genera el código', function (): void {
+test('administración crea un combo y se le genera el código', function (): void {
+    $baby = Producto::factory()->precio(10.0, 18.0)->create(['descripcion' => 'BABY CREMA 12X100ML']);
     $this->actingAs($this->admin);
+    $undoRepeaterFake = Repeater::fake();
 
     Livewire::test(ManagePromociones::class)
         ->assertOk()
         ->callAction('create', data: [
-            'nombre'                => 'Toffee + Nutrine',
-            'producto_condicion_id' => $this->toffee->id,
-            'cantidad_condicion'    => 1,
-            'condicion_unidad'      => UnidadVenta::Unidad->value,
-            'producto_beneficio_id' => $this->nutrine->id,
+            'nombre'      => 'Toffee + Nutrine',
+            'condiciones' => [
+                ['producto_id' => $this->toffee->id, 'cantidad' => 2, 'unidad' => UnidadVenta::Caja->value],
+                ['producto_id' => $this->nutrine->id, 'cantidad' => 1, 'unidad' => UnidadVenta::Caja->value],
+            ],
+            'producto_beneficio_id' => $baby->id,
             'cantidad_beneficio'    => 1,
             'beneficio_unidad'      => UnidadVenta::Unidad->value,
             'tipo'                  => 'mitad',
@@ -52,12 +55,16 @@ test('administración crea la promoción y se le genera el código', function ()
         ])
         ->assertHasNoActionErrors();
 
+    $undoRepeaterFake();
+
     $promo = Promocion::query()->latest('id')->firstOrFail();
 
     expect($promo->codigo)->toBe('PROMO-'.str_pad((string) $promo->id, 4, '0', STR_PAD_LEFT))
         ->and($promo->descuento_porcentaje)->toBe(50.0)
         ->and($promo->created_by)->toBe($this->admin->id)
-        ->and($promo->activa)->toBeTrue();
+        ->and($promo->activa)->toBeTrue()
+        ->and($promo->condiciones->pluck('producto_id')->all())->toBe([$this->toffee->id, $this->nutrine->id])
+        ->and($promo->resumen())->toBe('Compra 2 cajas de BUTTER TOFFEE 12X100G + 1 caja de BABY NUTRINE 24X50G → 1 unidad de BABY CREMA 12X100ML a mitad de precio');
 });
 
 test('se activa y desactiva con el interruptor', function (): void {

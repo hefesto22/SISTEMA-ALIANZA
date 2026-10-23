@@ -14,18 +14,23 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Components\View;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\HtmlString;
 
 /**
- * "Actualizar precio": se mete el costo de la factura del proveedor (por caja
- * o por unidad, con descuento si hubo), se ve al instante el precio que sale
- * con el % de utilidad y se guarda. Aplica a TODAS las bodegas y deja historial.
+ * "Actualizar precio": a la izquierda se mete el costo de la factura del
+ * proveedor (por caja o por unidad, con descuento si hubo); a la derecha
+ * una tarjeta muestra al instante el precio nuevo, la caja, la utilidad y
+ * cuánto cambia contra el de hoy. Aplica a TODAS las bodegas y deja historial.
+ *
+ * La tarjeta es resources/views/filament/productos/precio-resultado.blade.php.
  */
 final class ActualizarPrecioAction
 {
@@ -36,74 +41,103 @@ final class ActualizarPrecioAction
             ->icon(Heroicon::OutlinedCurrencyDollar)
             ->color('warning')
             ->authorize('update')
-            ->modalHeading(fn (Producto $record): string => "Actualizar precio · {$record->descripcion}")
-            ->modalDescription('El precio nuevo aplica en todas las bodegas y queda en el historial.')
+            ->modalIcon(Heroicon::OutlinedCurrencyDollar)
+            ->modalIconColor('warning')
+            ->modalHeading(fn (Producto $record): string => $record->descripcion)
+            ->modalDescription(fn (Producto $record): string => self::ficha($record))
+            ->modalWidth(Width::FourExtraLarge)
             ->modalSubmitActionLabel('Guardar precio')
             ->fillForm(fn (Producto $record): array => [
                 'costo_por' => $record->unidades_por_caja > 1 ? 'caja' : 'unidad',
                 'costo'     => $record->unidades_por_caja > 1
                     ? round($record->costo_unidad * $record->unidades_por_caja, 4)
                     : $record->costo_unidad,
+                'hay_descuento' => false,
                 'cantidad'      => 1,
                 'descuento'     => 0,
                 'precio_manual' => false,
             ])
             ->schema([
-                Grid::make(2)->schema([
-                    ToggleButtons::make('costo_por')
-                        ->label('El costo de la factura es')
-                        ->options(['caja' => 'Por caja', 'unidad' => 'Por unidad'])
-                        ->inline()
-                        ->required()
-                        ->live(),
-                    TextInput::make('costo')
-                        ->label(fn (Get $get): string => $get('costo_por') === 'caja' ? 'Costo por caja (sin ISV)' : 'Costo por unidad (sin ISV)')
-                        ->numeric()
-                        ->minValue(0)
-                        ->prefix('L.')
-                        ->required()
-                        ->live(debounce: 400),
-                    TextInput::make('cantidad')
-                        ->label('Cantidad comprada')
-                        ->helperText('Solo importa si hay descuento.')
-                        ->numeric()
-                        ->integer()
-                        ->minValue(1)
-                        ->required()
-                        ->live(debounce: 400),
-                    TextInput::make('descuento')
-                        ->label('Descuento total de la línea')
-                        ->numeric()
-                        ->minValue(0)
-                        ->prefix('L.')
-                        ->live(debounce: 400),
-                ]),
-                TextEntry::make('calculo')
-                    ->hiddenLabel()
-                    ->state(fn (Get $get, Producto $record): HtmlString => self::resumen($get, $record)),
-                Toggle::make('precio_manual')
-                    ->label('Ajustar el precio de venta a mano (redondear)')
-                    ->live(),
-                Grid::make(2)
-                    ->visible(fn (Get $get): bool => (bool) $get('precio_manual'))
-                    ->schema([
+                Grid::make(12)->schema([
+                    Group::make([
+                        ToggleButtons::make('costo_por')
+                            ->label('Costo de la factura (sin ISV)')
+                            ->options(['caja' => 'Por caja', 'unidad' => 'Por unidad'])
+                            ->icons(['caja' => Heroicon::OutlinedArchiveBox, 'unidad' => Heroicon::OutlinedCube])
+                            ->grouped()
+                            ->required()
+                            ->live(),
+                        TextInput::make('costo')
+                            ->hiddenLabel()
+                            ->numeric()
+                            ->minValue(0)
+                            ->prefix('L.')
+                            ->suffix(fn (Get $get): string => $get('costo_por') === 'caja' ? 'por caja' : 'por unidad')
+                            ->required()
+                            ->autofocus()
+                            ->live(debounce: 400),
+
+                        Toggle::make('hay_descuento')
+                            ->label('La factura trae descuento')
+                            ->live(),
+                        Grid::make(2)
+                            ->visible(fn (Get $get): bool => (bool) $get('hay_descuento'))
+                            ->schema([
+                                TextInput::make('cantidad')
+                                    ->label(fn (Get $get): string => $get('costo_por') === 'caja' ? 'Cajas compradas' : 'Unidades compradas')
+                                    ->numeric()
+                                    ->integer()
+                                    ->minValue(1)
+                                    ->required()
+                                    ->live(debounce: 400),
+                                TextInput::make('descuento')
+                                    ->label('Descuento total')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->prefix('L.')
+                                    ->live(debounce: 400),
+                            ]),
+
+                        Toggle::make('precio_manual')
+                            ->label('Redondear el precio a mano')
+                            ->live()
+                            ->afterStateUpdated(function (bool $state, Get $get, Set $set, Producto $record): void {
+                                $calculo = self::calcular($get, $record);
+
+                                if ($state && blank($get('precio_unidad')) && is_array($calculo)) {
+                                    $set('precio_unidad', round($calculo['precio'], 2));
+                                }
+                            }),
                         TextInput::make('precio_unidad')
-                            ->label('Precio de venta por unidad (sin ISV)')
+                            ->label('Precio por unidad (sin ISV)')
                             ->numeric()
                             ->minValue(0.0001)
                             ->prefix('L.')
-                            ->required(fn (Get $get): bool => (bool) $get('precio_manual')),
-                    ]),
-                TextInput::make('nota')
-                    ->label('Nota (opcional)')
-                    ->placeholder('Ej: Factura 375448')
-                    ->maxLength(255),
+                            ->live(debounce: 400)
+                            ->required(fn (Get $get): bool => (bool) $get('precio_manual'))
+                            ->visible(fn (Get $get): bool => (bool) $get('precio_manual')),
+
+                        TextInput::make('nota')
+                            ->label('Nota (opcional)')
+                            ->placeholder('Ej: Factura 375448')
+                            ->maxLength(255),
+                    ])->columnSpan(7),
+
+                    View::make('filament.productos.precio-resultado')
+                        ->viewData(fn (Get $get, Producto $record): array => self::resultado($get, $record))
+                        ->columnSpan(5),
+                ]),
             ])
             ->action(function (array $data, Producto $record): void {
                 /** @var User|null $usuario */
                 $usuario = Auth::user();
                 $manual = (bool) ($data['precio_manual'] ?? false);
                 $precioAnterior = $record->precio_unidad;
+
+                if (! ($data['hay_descuento'] ?? false)) {
+                    $data['cantidad'] = 1;
+                    $data['descuento'] = 0;
+                }
 
                 try {
                     $costoUnidad = self::costoUnidad($data, $record);
@@ -137,6 +171,20 @@ final class ActualizarPrecioAction
     }
 
     /**
+     * "MERHONSA · Código 740100167992 · caja de 48 · gravado · 14% de utilidad".
+     */
+    private static function ficha(Producto $producto): string
+    {
+        return collect([
+            $producto->proveedor->etiqueta(),
+            "Código {$producto->codigo}",
+            $producto->unidades_por_caja > 1 ? "caja de {$producto->unidades_por_caja}" : null,
+            $producto->gravado ? 'gravado' : 'exento',
+            self::porcentaje($producto->margenAplicado()).' de utilidad',
+        ])->filter()->implode(' · ');
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     private static function costoUnidad(array $data, Producto $producto): float
@@ -151,44 +199,99 @@ final class ActualizarPrecioAction
     }
 
     /**
-     * Vista previa del cálculo mientras se escribe el costo.
+     * Lo que va quedando mientras se escribe, o qué falta / qué está mal.
+     *
+     * @return array{costo: float, precio: float, margen: float}|string
      */
-    private static function resumen(Get $get, Producto $producto): HtmlString
+    private static function calcular(Get $get, Producto $producto): array|string
     {
         if (! is_numeric($get('costo'))) {
-            return new HtmlString('<span class="text-gray-500">Escriba el costo para ver el precio.</span>');
+            return 'Escriba el costo de la factura para ver el precio nuevo.';
         }
+
+        $conDescuento = (bool) $get('hay_descuento');
 
         try {
             $costo = self::costoUnidad([
                 'costo'     => $get('costo'),
                 'costo_por' => $get('costo_por'),
-                'cantidad'  => $get('cantidad'),
-                'descuento' => $get('descuento'),
+                'cantidad'  => $conDescuento ? $get('cantidad') : 1,
+                'descuento' => $conDescuento ? $get('descuento') : 0,
             ], $producto);
+
+            $manual = $get('precio_unidad');
+
+            if ($get('precio_manual') && is_numeric($manual) && (float) $manual > 0) {
+                $precio = round((float) $manual, 4);
+
+                return ['costo' => $costo, 'precio' => $precio, 'margen' => CalculadoraPrecio::margenReal($costo, $precio)];
+            }
+
             $margen = $producto->margenAplicado();
-            $precio = CalculadoraPrecio::precioVenta($costo, $margen);
+
+            return ['costo' => $costo, 'precio' => CalculadoraPrecio::precioVenta($costo, $margen), 'margen' => $margen];
         } catch (ReglaNegocioException $e) {
-            return new HtmlString('<span class="text-danger-600">'.e($e->getMessage()).'</span>');
+            return $e->getMessage();
+        }
+    }
+
+    /**
+     * Datos para la tarjeta de la derecha.
+     *
+     * @return array<string, mixed>
+     */
+    private static function resultado(Get $get, Producto $producto): array
+    {
+        $calculo = self::calcular($get, $producto);
+
+        if (is_string($calculo)) {
+            return ['mensaje' => $calculo];
         }
 
         $uxc = max(1, $producto->unidades_por_caja);
-        $porcentaje = rtrim(rtrim(number_format($margen * 100, 2), '0'), '.');
-        $isv = $producto->gravado ? 'con ISV' : 'exento';
+        $precioCaja = $calculo['precio'] * $uxc;
+        $diferencia = round($calculo['precio'] - $producto->precio_unidad, 2);
 
-        $filas = [
-            ['Costo por unidad', lempiras($costo, 4).' (antes '.lempiras($producto->costo_unidad, 4).')'],
-            ["Precio por unidad ({$porcentaje}% utilidad)", '<b>'.lempiras($precio).'</b> · '.$isv.': '.lempiras(CalculadoraPrecio::conIsv($precio, $producto->gravado))],
-            ["Precio por caja de {$uxc}", '<b>'.lempiras($precio * $uxc).'</b> · '.$isv.': '.lempiras(CalculadoraPrecio::conIsv($precio * $uxc, $producto->gravado))],
-            ['Precio actual por unidad', lempiras($producto->precio_unidad)],
+        [$tono, $cambio] = match (true) {
+            abs($diferencia) < 0.005 => ['igual', 'Queda igual que hoy'],
+            $diferencia > 0          => ['sube', 'Sube '.lempiras($diferencia).self::variacion($diferencia, $producto)],
+            default                  => ['baja', 'Baja '.lempiras(abs($diferencia)).self::variacion($diferencia, $producto)],
+        };
+
+        return [
+            'mensaje'    => null,
+            'manual'     => (bool) $get('precio_manual'),
+            'precio'     => lempiras($calculo['precio']),
+            'precioIsv'  => $producto->gravado ? lempiras(CalculadoraPrecio::conIsv($calculo['precio'], true)) : null,
+            'uxc'        => $uxc > 1 ? $uxc : null,
+            'caja'       => lempiras($precioCaja),
+            'cajaIsv'    => $producto->gravado ? lempiras(CalculadoraPrecio::conIsv($precioCaja, true)) : null,
+            'costo'      => lempiras($calculo['costo'], 4),
+            'costoAntes' => lempiras($producto->costo_unidad, 4),
+            'margen'     => self::porcentaje($calculo['margen']),
+            'hoy'        => lempiras($producto->precio_unidad),
+            'tono'       => $tono,
+            'cambio'     => $cambio,
         ];
+    }
 
-        $html = '<table class="w-full text-sm">';
-
-        foreach ($filas as [$etiqueta, $valor]) {
-            $html .= '<tr><td class="py-1 pe-4 text-gray-500">'.e($etiqueta).'</td><td class="py-1">'.$valor.'</td></tr>';
+    /**
+     * " (+4.64%)" o " (−3.1%)" contra el precio de hoy.
+     */
+    private static function variacion(float $diferencia, Producto $producto): string
+    {
+        if ($producto->precio_unidad <= 0) {
+            return '';
         }
 
-        return new HtmlString($html.'</table>');
+        return ' ('.($diferencia > 0 ? '+' : '−').self::porcentaje(abs($diferencia) / $producto->precio_unidad).')';
+    }
+
+    /**
+     * 0.14 → "14%", 0.1525 → "15.25%".
+     */
+    private static function porcentaje(float $fraccion): string
+    {
+        return rtrim(rtrim(number_format($fraccion * 100, 2), '0'), '.').'%';
     }
 }

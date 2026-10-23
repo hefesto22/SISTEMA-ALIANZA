@@ -83,7 +83,7 @@ class PedidoInfolist
                                     ->formatStateUsing(fn (float $state): string => lempiras($state)),
                                 TextEntry::make('descuento')
                                     ->formatStateUsing(fn (float $state): string => $state > 0 ? '−'.lempiras($state) : '—')
-                                    ->color(fn (float $state): ?string => $state > 0 ? 'success' : 'gray')
+                                    ->color(fn (float $state): string => $state > 0 ? 'success' : 'gray')
                                     ->helperText(fn (PedidoItem $record): ?string => $record->promocion?->codigo),
                                 TextEntry::make('total')
                                     ->formatStateUsing(fn (float $state): string => lempiras($state))

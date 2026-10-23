@@ -99,12 +99,12 @@ final class RecalcularPedido
      */
     private function promociones(Collection $items, bool $respetarPromocionesDelPedido): Collection
     {
-        $promociones = Promocion::query()->vigentes()->get();
+        $promociones = Promocion::query()->vigentes()->with('condiciones')->get();
 
         $delPedido = $items->pluck('promocion_id')->filter()->unique()->values()->all();
 
         if ($respetarPromocionesDelPedido && $delPedido !== []) {
-            $promociones = $promociones->merge(Promocion::query()->whereKey($delPedido)->get());
+            $promociones = $promociones->merge(Promocion::query()->with('condiciones')->whereKey($delPedido)->get());
         }
 
         return $promociones->sortBy('id')->values();

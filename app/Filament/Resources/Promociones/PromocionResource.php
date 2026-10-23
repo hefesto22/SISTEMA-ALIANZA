@@ -14,6 +14,7 @@ use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -60,7 +61,7 @@ class PromocionResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $query = Promocion::query()
-            ->with(['productoCondicion', 'productoBeneficio'])
+            ->with(['condiciones.producto', 'productoBeneficio'])
             ->withCount('items');
 
         return Acceso::esVendedor() ? $query->vigentes() : $query;
@@ -150,6 +151,8 @@ class PromocionResource extends Resource
             ])
             ->recordActions([
                 EditAction::make()
+                    ->modalHeading(fn (Promocion $record): string => "Editar {$record->codigo}")
+                    ->modalWidth(Width::SixExtraLarge)
                     ->mutateDataUsing(fn (array $data): array => PromocionForm::completar($data)),
                 DeleteAction::make()
                     ->hidden(fn (Promocion $record): bool => (int) $record->getAttribute('items_count') > 0),
