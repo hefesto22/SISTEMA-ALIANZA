@@ -159,7 +159,7 @@ class FacturaResource extends Resource
         }
 
         if ($factura->estaAnulada()) {
-            $partes[] = trim('Anulada '.$factura->anulada_at?->format('d/m/Y H:i').' '.($factura->anulador?->name ?? ''))
+            $partes[] = trim('Anulada '.$factura->anulada_at?->format('d/m/Y H:i').' '.($factura->anulador->name ?? ''))
                 .($factura->motivo_anulacion ? ": {$factura->motivo_anulacion}" : '');
             $partes[] = $factura->reemplazo !== null
                 ? "Sustituida por {$factura->reemplazo->numero}"

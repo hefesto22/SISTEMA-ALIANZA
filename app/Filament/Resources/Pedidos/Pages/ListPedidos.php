@@ -91,6 +91,17 @@ class ListPedidos extends ListRecords
     }
 
     /**
+     * Las pestañas cuentan pedidos y Filament las calcula al principio de cada
+     * petición, antes de validar, corregir o imprimir. Se recalculan justo
+     * antes de dibujar para que los números queden al día.
+     */
+    public function rendering(): void
+    {
+        unset($this->cachedTabs);
+        $this->idsPorImprimir = null;
+    }
+
+    /**
      * Después de imprimir (resources/views/filament/imprimir-hoja.blade.php):
      * se vuelve a dibujar para que los impresos pasen a su pestaña.
      */
