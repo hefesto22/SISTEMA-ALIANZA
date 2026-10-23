@@ -4,15 +4,20 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Users\Schemas;
 
+use App\Enums\Rol;
+use App\Models\Ruta;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
+use Spatie\Permission\Models\Role;
 
 class UserForm
 {
@@ -112,7 +117,28 @@ class UserForm
                             ->multiple()
                             ->preload()
                             ->searchable()
+                            ->live()
                             ->placeholder('Seleccionar roles'),
+                    ]),
+
+                Section::make('Rutas')
+                    ->description('Rutas que trabaja el vendedor. Solo ve y crea clientes de los municipios de esas rutas. Las rutas se arman en Administración → Rutas.')
+                    ->icon('heroicon-o-map')
+                    ->aside()
+                    ->visible(fn (Get $get): bool => self::esVendedor($get('roles')))
+                    ->schema([
+                        Select::make('rutas')
+                            ->label('Rutas')
+                            ->relationship(
+                                'rutas',
+                                'nombre',
+                                fn (Builder $query): Builder => $query->with('bodega')->orderBy('nombre'),
+                            )
+                            ->getOptionLabelFromRecordUsing(fn (Ruta $record): string => "{$record->nombre} · {$record->bodega->codigo}".($record->activa ? '' : ' (inactiva)'))
+                            ->multiple()
+                            ->searchable()
+                            ->preload()
+                            ->placeholder('Escoja sus rutas'),
                     ]),
 
                 Section::make('Estado de la Cuenta')
@@ -128,5 +154,19 @@ class UserForm
                             ->helperText('Si se desactiva, el usuario no podrá iniciar sesión en el panel.'),
                     ]),
             ]);
+    }
+
+    /**
+     * Las rutas solo aplican si entre los roles escogidos está el de vendedor.
+     */
+    private static function esVendedor(mixed $roles): bool
+    {
+        if (! is_array($roles) || $roles === []) {
+            return false;
+        }
+
+        $vendedor = Role::query()->where('name', Rol::Vendedor->value)->value('id');
+
+        return $vendedor !== null && in_array((string) $vendedor, array_map(strval(...), $roles), true);
     }
 }

@@ -8,6 +8,8 @@ use App\Filament\Resources\Clientes\Pages\ManageClientes;
 use App\Filament\Resources\Clientes\Schemas\ClienteForm;
 use App\Filament\Support\Acceso;
 use App\Models\Cliente;
+use App\Models\Departamento;
+use App\Models\Municipio;
 use BackedEnum;
 use Filament\Actions\EditAction;
 use Filament\Resources\Resource;
@@ -15,6 +17,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
@@ -50,12 +53,12 @@ class ClienteResource extends Resource
     }
 
     /**
-     * Cada quien ve los clientes de su bodega; administración ve todos.
+     * Administración ve todos; el vendedor, los de sus rutas; bodega, los de su bodega.
      */
     public static function getEloquentQuery(): Builder
     {
         $usuario = Acceso::usuario();
-        $query = Cliente::query()->with(['bodega', 'vendedor']);
+        $query = Cliente::query()->with(['bodega', 'municipio.departamento']);
 
         return $usuario === null ? $query->whereRaw('1 = 0') : $query->visiblePara($usuario);
     }
@@ -82,9 +85,11 @@ class ClienteResource extends Resource
                 TextColumn::make('telefono')
                     ->label('Teléfono')
                     ->placeholder('—'),
-                TextColumn::make('vendedor.name')
-                    ->label('Vendedor')
-                    ->placeholder('—'),
+                TextColumn::make('municipio.nombre')
+                    ->label('Municipio')
+                    ->description(fn (Cliente $record): ?string => $record->municipio?->departamento->nombre)
+                    ->placeholder('Sin zona')
+                    ->searchable(),
                 TextColumn::make('bodega.nombre')
                     ->label('Bodega')
                     ->toggleable(),
@@ -97,16 +102,53 @@ class ClienteResource extends Resource
                     ->label('Bodega')
                     ->relationship('bodega', 'nombre')
                     ->visible(fn (): bool => Acceso::veTodo()),
-                SelectFilter::make('vendedor_id')
-                    ->label('Vendedor')
-                    ->relationship('vendedor', 'name')
+                SelectFilter::make('departamento')
+                    ->label('Departamento')
+                    ->options(fn (): array => Departamento::opciones())
+                    ->searchable()
+                    ->query(fn (Builder $query, array $data): Builder => blank($data['value'] ?? null)
+                        ? $query
+                        : $query->whereHas('municipio', fn (Builder $q): Builder => $q->where('departamento_id', $data['value']))),
+                SelectFilter::make('municipio_id')
+                    ->label('Municipio')
+                    ->options(fn (): array => self::municipios())
                     ->searchable(),
+                Filter::make('sin_zona')
+                    ->label('Sin departamento ni municipio')
+                    ->query(fn (Builder $query): Builder => $query->whereNull('municipio_id'))
+                    ->toggle()
+                    ->visible(fn (): bool => Acceso::veTodo()),
                 TernaryFilter::make('activo')
                     ->default(true),
             ])
+            ->emptyStateDescription(fn (): ?string => Acceso::usuario()?->municipiosDeRuta() === []
+                ? 'No tiene rutas asignadas. Pida a administración que lo agregue a una ruta en Administración → Rutas.'
+                : null)
             ->recordActions([
                 EditAction::make(),
             ]);
+    }
+
+    /**
+     * Municipios para el filtro ("San José · Copán"); al vendedor, solo los de sus rutas.
+     *
+     * @return array<int, string>
+     */
+    private static function municipios(): array
+    {
+        $zonas = Acceso::usuario()?->municipiosDeRuta();
+        $query = Municipio::query()->with('departamento')->orderBy('nombre');
+
+        if ($zonas !== null) {
+            $query->whereKey($zonas);
+        }
+
+        /** @var array<int, string> $opciones */
+        $opciones = $query->get()
+            ->mapWithKeys(fn (Municipio $municipio): array => [$municipio->id => $municipio->etiqueta()])
+            ->all();
+
+        return $opciones;
     }
 
     public static function getPages(): array

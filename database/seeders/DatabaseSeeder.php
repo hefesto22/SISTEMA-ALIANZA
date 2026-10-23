@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
             AdminUserSeeder::class,
             RolesSistemaSeeder::class,
             BrandingSettingSeeder::class,
+            DivisionPoliticaSeeder::class,
             BodegaSeeder::class,
             ProveedorSeeder::class,
             CatalogoSeeder::class,

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Users\Schemas;
 
+use App\Enums\Rol;
+use App\Models\Municipio;
+use App\Models\User;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Grid;
@@ -52,6 +55,28 @@ class UserInfolist
                             ->color('primary')
                             ->separator(',')
                             ->placeholder('Sin roles asignados'),
+                    ]),
+
+                Section::make('Rutas')
+                    ->icon('heroicon-o-map')
+                    ->visible(fn (User $record): bool => $record->hasRole(Rol::Vendedor->value))
+                    ->schema([
+                        TextEntry::make('rutas.nombre')
+                            ->label('Rutas que trabaja')
+                            ->badge()
+                            ->placeholder('Sin rutas: no ve clientes'),
+                        TextEntry::make('municipios_ruta')
+                            ->label('Municipios')
+                            ->state(fn (User $record): array => Municipio::query()
+                                ->whereKey($record->municipiosDeRuta() ?? [])
+                                ->with('departamento')
+                                ->orderBy('nombre')
+                                ->get()
+                                ->map(fn (Municipio $municipio): string => $municipio->etiqueta())
+                                ->all())
+                            ->badge()
+                            ->color('gray')
+                            ->placeholder('—'),
                     ]),
 
                 Section::make('Último Acceso')

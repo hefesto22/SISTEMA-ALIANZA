@@ -8,6 +8,7 @@ use Database\Factories\BodegaFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -22,10 +23,12 @@ use Illuminate\Support\Carbon;
  * @property string $codigo
  * @property string $nombre
  * @property string|null $direccion
+ * @property int|null $municipio_id
  * @property string|null $telefono
  * @property bool $activa
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
+ * @property-read Municipio|null $municipio
  */
 class Bodega extends Model
 {
@@ -39,6 +42,7 @@ class Bodega extends Model
         'codigo',
         'nombre',
         'direccion',
+        'municipio_id',
         'telefono',
         'activa',
     ];
@@ -75,6 +79,24 @@ class Bodega extends Model
     public function clientes(): HasMany
     {
         return $this->hasMany(Cliente::class);
+    }
+
+    /**
+     * Dónde queda la bodega.
+     *
+     * @return BelongsTo<Municipio, $this>
+     */
+    public function municipio(): BelongsTo
+    {
+        return $this->belongsTo(Municipio::class);
+    }
+
+    /**
+     * @return HasMany<Ruta, $this>
+     */
+    public function rutas(): HasMany
+    {
+        return $this->hasMany(Ruta::class);
     }
 
     /**

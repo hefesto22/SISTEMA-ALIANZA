@@ -152,7 +152,7 @@ class PromocionResource extends Resource
             ->recordActions([
                 EditAction::make()
                     ->modalHeading(fn (Promocion $record): string => "Editar {$record->codigo}")
-                    ->modalWidth(Width::SixExtraLarge)
+                    ->modalWidth(Width::SevenExtraLarge)
                     ->mutateDataUsing(fn (array $data): array => PromocionForm::completar($data)),
                 DeleteAction::make()
                     ->hidden(fn (Promocion $record): bool => (int) $record->getAttribute('items_count') > 0),

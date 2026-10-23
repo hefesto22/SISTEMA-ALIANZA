@@ -21,6 +21,9 @@ use Illuminate\Support\Carbon;
  * subtotal = bruto (sin ISV), descuento = promociones, ISV sobre lo neto,
  * total = subtotal − descuento + ISV.
  *
+ * Fuera de ruta: el vendedor le vendió a un cliente que no es de sus rutas;
+ * se permite, pero queda marcado con el motivo.
+ *
  * @property int $id
  * @property string|null $numero
  * @property int $bodega_id
@@ -29,6 +32,8 @@ use Illuminate\Support\Carbon;
  * @property EstadoPedido $estado
  * @property Carbon $fecha
  * @property string|null $notas
+ * @property bool $fuera_de_ruta
+ * @property string|null $motivo_fuera_ruta
  * @property float $subtotal
  * @property float $descuento
  * @property float $isv
@@ -55,11 +60,14 @@ class Pedido extends Model
         'estado',
         'fecha',
         'notas',
+        'fuera_de_ruta',
+        'motivo_fuera_ruta',
     ];
 
     /** @var array<string, mixed> */
     protected $attributes = [
-        'estado' => 'pendiente',
+        'estado'        => 'pendiente',
+        'fuera_de_ruta' => false,
     ];
 
     /**
@@ -68,13 +76,14 @@ class Pedido extends Model
     protected function casts(): array
     {
         return [
-            'estado'      => EstadoPedido::class,
-            'fecha'       => 'date',
-            'subtotal'    => 'float',
-            'descuento'   => 'float',
-            'isv'         => 'float',
-            'total'       => 'float',
-            'validado_at' => 'datetime',
+            'estado'        => EstadoPedido::class,
+            'fecha'         => 'date',
+            'fuera_de_ruta' => 'boolean',
+            'subtotal'      => 'float',
+            'descuento'     => 'float',
+            'isv'           => 'float',
+            'total'         => 'float',
+            'validado_at'   => 'datetime',
         ];
     }
 

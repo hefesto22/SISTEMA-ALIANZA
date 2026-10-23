@@ -17,10 +17,13 @@ use App\Filament\Resources\Productos\Pages\ListProductos;
 use App\Filament\Resources\Productos\Pages\ViewProducto;
 use App\Filament\Resources\Proveedores\Pages\EditProveedor;
 use App\Filament\Resources\Proveedores\Pages\ListProveedores;
+use App\Filament\Resources\Rutas\Pages\ManageRutas;
 use App\Models\Bodega;
 use App\Models\Cliente;
+use App\Models\Municipio;
 use App\Models\Pedido;
 use App\Models\Producto;
+use App\Models\Ruta;
 use App\Models\User;
 use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
@@ -60,6 +63,7 @@ test('las pantallas de administración abren', function (): void {
     Livewire::test(EditProveedor::class, ['record' => $this->producto->proveedor_id])->assertOk();
     Livewire::test(ManageClientes::class)->assertOk();
     Livewire::test(ManageBodegas::class)->assertOk();
+    Livewire::test(ManageRutas::class)->assertOk();
     Livewire::test(ListPedidos::class)->assertOk();
 });
 
@@ -159,7 +163,9 @@ test('el vendedor no ve costos ni puede cambiar precios', function (): void {
 });
 
 test('el vendedor levanta la preventa y bodega la despacha', function (): void {
-    $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id]);
+    $municipio = Municipio::factory()->create();
+    $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id, 'municipio_id' => $municipio->id]);
+    Ruta::factory()->cubre($municipio)->para($this->vendedor)->create(['bodega_id' => $this->bodega->id]);
 
     $this->actingAs($this->vendedor);
     $undoRepeaterFake = Repeater::fake();

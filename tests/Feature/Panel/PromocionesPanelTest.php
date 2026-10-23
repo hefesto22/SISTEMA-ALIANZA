@@ -9,9 +9,11 @@ use App\Filament\Resources\Promociones\Pages\ManagePromociones;
 use App\Filament\Resources\Promociones\PromocionResource;
 use App\Models\Bodega;
 use App\Models\Cliente;
+use App\Models\Municipio;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\Promocion;
+use App\Models\Ruta;
 use App\Models\User;
 use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
@@ -105,7 +107,9 @@ test('sin promociones la preventa se ve normal', function (): void {
 
 test('la preventa muestra las promociones y el pedido sale con el descuento', function (): void {
     $promo = Promocion::factory()->para($this->toffee, $this->nutrine, porcentaje: 50)->create();
-    $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id]);
+    $municipio = Municipio::factory()->create();
+    $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id, 'municipio_id' => $municipio->id]);
+    Ruta::factory()->cubre($municipio)->para($this->vendedor)->create(['bodega_id' => $this->bodega->id]);
 
     $this->actingAs($this->vendedor);
     $undoRepeaterFake = Repeater::fake();

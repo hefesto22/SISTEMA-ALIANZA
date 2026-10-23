@@ -36,6 +36,7 @@ class PedidoInfolist
                                 $record->cliente->rtn ? 'RTN '.$record->cliente->rtn : null,
                                 $record->cliente->telefono,
                                 $record->cliente->direccion,
+                                $record->cliente->municipio?->etiqueta(),
                             ])->filter()->implode(' · ') ?: null),
                         TextEntry::make('vendedor.name')
                             ->label('Vendedor'),
@@ -48,6 +49,14 @@ class PedidoInfolist
                         TextEntry::make('notas')
                             ->placeholder('—')
                             ->columnSpan(2),
+                        TextEntry::make('motivo_fuera_ruta')
+                            ->label('Fuera de ruta')
+                            ->badge()
+                            ->color('warning')
+                            ->icon('heroicon-m-exclamation-triangle')
+                            ->helperText('El cliente no es de las rutas del vendedor.')
+                            ->visible(fn (Pedido $record): bool => $record->fuera_de_ruta)
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Productos')

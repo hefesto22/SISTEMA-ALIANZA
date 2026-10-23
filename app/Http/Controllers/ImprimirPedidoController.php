@@ -19,7 +19,7 @@ class ImprimirPedidoController extends Controller
     {
         Gate::authorize('view', $pedido);
 
-        $pedido->load(['items.producto', 'items.promocion.condiciones.producto', 'items.promocion.productoBeneficio', 'cliente', 'vendedor', 'bodega', 'validador']);
+        $pedido->load(['items.producto', 'items.promocion.condiciones.producto', 'items.promocion.productoBeneficio', 'cliente.municipio.departamento', 'vendedor', 'bodega', 'validador']);
 
         return view('pedidos.imprimir', ['pedido' => $pedido]);
     }

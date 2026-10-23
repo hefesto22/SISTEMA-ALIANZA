@@ -13,17 +13,21 @@ use App\Enums\UnidadVenta;
 use App\Filament\Resources\Clientes\Schemas\ClienteForm;
 use App\Filament\Support\Acceso;
 use App\Models\Cliente;
+use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\Promocion;
+use App\Models\User;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
@@ -55,12 +59,36 @@ class PedidoForm
                             ->relationship(
                                 'cliente',
                                 'nombre',
-                                fn (Builder $query): Builder => self::clientesVisibles($query),
+                                fn (Builder $query, Get $get, ?Model $record): Builder => self::clientesVisibles(
+                                    $query,
+                                    fueraDeRuta: (bool) $get('fuera_de_ruta'),
+                                    actual: $record instanceof Pedido ? $record->cliente_id : null,
+                                ),
                             )
+                            ->getOptionLabelFromRecordUsing(fn (Cliente $record): string => $record->etiqueta())
                             ->searchable(['nombre', 'codigo', 'rtn'])
                             ->required()
                             ->createOptionForm(ClienteForm::components())
                             ->createOptionUsing(fn (array $data): int => (int) Cliente::query()->create(ClienteForm::completar($data))->getKey())
+                            ->columnSpanFull(),
+                        Toggle::make('fuera_de_ruta')
+                            ->label('El cliente no es de mi ruta')
+                            ->helperText('Para venderle a un cliente de otra ruta o bodega. El pedido queda marcado como fuera de ruta, con el motivo.')
+                            ->live()
+                            ->afterStateUpdated(function (mixed $state, Set $set): void {
+                                if (! $state) {
+                                    $set('cliente_id', null);
+                                    $set('motivo_fuera_ruta', null);
+                                }
+                            })
+                            ->visible($esVendedor)
+                            ->columnSpanFull(),
+                        TextInput::make('motivo_fuera_ruta')
+                            ->label('Motivo')
+                            ->placeholder('Ej. Cubriendo la ruta de HO04 / El cliente llamó para pedir')
+                            ->required()
+                            ->maxLength(255)
+                            ->visible(fn (Get $get): bool => $esVendedor && (bool) $get('fuera_de_ruta'))
                             ->columnSpanFull(),
                         Select::make('bodega_id')
                             ->label('Bodega que despacha')
@@ -168,20 +196,52 @@ class PedidoForm
     }
 
     /**
+     * El vendedor que le vende a un cliente que no es de sus rutas: el pedido
+     * queda marcado con el motivo. Se calcula aquí con el cliente escogido,
+     * sin confiar en lo que mandó el formulario.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public static function marcarFueraDeRuta(array $data, User $vendedor): array
+    {
+        $fuera = filled($data['cliente_id'] ?? null)
+            && ! Cliente::query()->visiblePara($vendedor)->whereKey($data['cliente_id'])->exists();
+
+        $motivo = trim(is_string($data['motivo_fuera_ruta'] ?? null) ? $data['motivo_fuera_ruta'] : '');
+
+        $data['fuera_de_ruta'] = $fuera;
+        $data['motivo_fuera_ruta'] = $fuera ? ($motivo !== '' ? $motivo : 'Sin motivo') : null;
+
+        return $data;
+    }
+
+    /**
+     * Clientes activos que le tocan a quien levanta el pedido: al vendedor,
+     * los de los municipios de sus rutas (o todos si marcó fuera de ruta).
+     * Al editar, el cliente que ya tiene el pedido siempre se puede dejar.
+     *
      * @param Builder<Model> $query
      *
      * @return Builder<Model>
      */
-    private static function clientesVisibles(Builder $query): Builder
+    private static function clientesVisibles(Builder $query, bool $fueraDeRuta = false, ?int $actual = null): Builder
     {
         $usuario = Acceso::usuario();
-        $query->where('activo', true);
+        $query->with('municipio');
 
-        if ($usuario === null || $usuario->veTodasLasBodegas()) {
-            return $query;
+        if ($usuario === null || ($fueraDeRuta && $usuario->esVendedor())) {
+            return $query->where('activo', true);
         }
 
-        return $query->where('bodega_id', $usuario->bodega_id);
+        return $query->where(function (Builder $q) use ($usuario, $actual): void {
+            $q->where(fn (Builder $visibles): Builder => Cliente::filtrarVisibles($visibles->where('activo', true), $usuario));
+
+            if ($actual !== null) {
+                $q->orWhere($q->qualifyColumn('id'), $actual);
+            }
+        });
     }
 
     private static function unidad(mixed $valor): UnidadVenta
@@ -294,12 +354,12 @@ class PedidoForm
         $filas = [];
 
         foreach ($resultado->porPromocion() as $grupo) {
-            $filas[] = '<div style="color:#16a34a">✓ <b>'.e((string) $grupo['promocion']->codigo).'</b> '.e($grupo['promocion']->nombre)
+            $filas[] = '<div style="color:#16a34a">'.self::icono('heroicon-m-check-circle').' <b>'.e((string) $grupo['promocion']->codigo).'</b> '.e($grupo['promocion']->nombre)
                 .': −'.e(lempiras($grupo['monto'])).' (sin ISV)</div>';
         }
 
         foreach ($resultado->faltantes as $faltante) {
-            $filas[] = '<div style="color:#d97706">⚠ '.e($faltante->texto()).'</div>';
+            $filas[] = '<div style="color:#d97706">'.self::icono('heroicon-m-exclamation-triangle').' '.e($faltante->texto()).'</div>';
         }
 
         if ($filas === []) {
@@ -307,5 +367,10 @@ class PedidoForm
         }
 
         return new HtmlString('<div style="font-size:.875rem">'.implode('', $filas).'</div>');
+    }
+
+    private static function icono(string $nombre): string
+    {
+        return svg($nombre, '', ['style' => 'display:inline-block;width:1rem;height:1rem;vertical-align:-3px'])->toHtml();
     }
 }

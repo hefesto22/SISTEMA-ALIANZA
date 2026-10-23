@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Bodegas;
 
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
+use App\Filament\Schemas\Components\UbicacionFields;
 use App\Models\Bodega;
 use BackedEnum;
 use Filament\Actions\DeleteAction;
@@ -17,6 +18,7 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class BodegaResource extends Resource
 {
@@ -40,6 +42,7 @@ class BodegaResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema
+            ->columns(2)
             ->components([
                 TextInput::make('codigo')
                     ->label('Código')
@@ -51,6 +54,7 @@ class BodegaResource extends Resource
                 TextInput::make('nombre')
                     ->required()
                     ->maxLength(255),
+                ...UbicacionFields::make(required: false),
                 TextInput::make('direccion')
                     ->label('Dirección')
                     ->maxLength(255),
@@ -76,6 +80,13 @@ class BodegaResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->weight('bold'),
+                TextColumn::make('municipio.nombre')
+                    ->label('Municipio')
+                    ->description(fn (Bodega $record): ?string => $record->municipio?->departamento->nombre)
+                    ->placeholder('—'),
+                TextColumn::make('rutas_count')
+                    ->label('Rutas')
+                    ->counts('rutas'),
                 TextColumn::make('usuarios_count')
                     ->label('Usuarios')
                     ->counts('usuarios'),
@@ -89,6 +100,7 @@ class BodegaResource extends Resource
                 IconColumn::make('activa')
                     ->boolean(),
             ])
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('municipio.departamento'))
             ->defaultSort('codigo')
             ->recordActions([
                 EditAction::make(),

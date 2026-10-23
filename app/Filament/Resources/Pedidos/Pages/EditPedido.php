@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Filament\Resources\Pedidos\PedidoResource;
+use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
 use App\Filament\Support\Acceso;
 use App\Models\Pedido;
 use Filament\Actions\ViewAction;
@@ -37,6 +38,7 @@ class EditPedido extends EditRecord
 
             if ($usuario->esVendedor()) {
                 unset($data['vendedor_id']);
+                $data = PedidoForm::marcarFueraDeRuta($data, $usuario);
             }
         }
 

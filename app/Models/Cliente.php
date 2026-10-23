@@ -15,19 +15,22 @@ use Illuminate\Support\Carbon;
 /**
  * Cliente de la ruta (pulpería, mini súper…).
  *
+ * Queda en un municipio: lo ven los vendedores de las rutas que cubren
+ * ese municipio (Administración → Rutas).
+ *
  * @property int $id
  * @property string|null $codigo
  * @property string $nombre
  * @property string|null $rtn
  * @property string|null $telefono
  * @property string|null $direccion
+ * @property int|null $municipio_id
  * @property int|null $bodega_id
- * @property int|null $vendedor_id
  * @property bool $activo
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Bodega|null $bodega
- * @property-read User|null $vendedor
+ * @property-read Municipio|null $municipio
  */
 class Cliente extends Model
 {
@@ -43,8 +46,8 @@ class Cliente extends Model
         'rtn',
         'telefono',
         'direccion',
+        'municipio_id',
         'bodega_id',
-        'vendedor_id',
         'activo',
     ];
 
@@ -67,11 +70,19 @@ class Cliente extends Model
     }
 
     /**
-     * @return BelongsTo<User, $this>
+     * @return BelongsTo<Municipio, $this>
      */
-    public function vendedor(): BelongsTo
+    public function municipio(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'vendedor_id');
+        return $this->belongsTo(Municipio::class);
+    }
+
+    /**
+     * "Pulpería Ana · Dolores": el municipio ayuda a no confundir clientes con el mismo nombre.
+     */
+    public function etiqueta(): string
+    {
+        return $this->municipio === null ? $this->nombre : "{$this->nombre} · {$this->municipio->nombre}";
     }
 
     /**
@@ -83,7 +94,8 @@ class Cliente extends Model
     }
 
     /**
-     * Administración ve todos; vendedores y bodega ven los clientes de su bodega.
+     * Administración ve todos; el vendedor, los de los municipios de sus
+     * rutas activas; bodega, los de su bodega.
      *
      * @param Builder<Cliente> $query
      *
@@ -91,10 +103,29 @@ class Cliente extends Model
      */
     public function scopeVisiblePara(Builder $query, User $user): Builder
     {
+        return self::filtrarVisibles($query, $user);
+    }
+
+    /**
+     * La misma regla de scopeVisiblePara para cualquier consulta de clientes
+     * (por ejemplo la del select de cliente en el pedido).
+     *
+     * @template TModel of Model
+     *
+     * @param Builder<TModel> $query
+     *
+     * @return Builder<TModel>
+     */
+    public static function filtrarVisibles(Builder $query, User $user): Builder
+    {
         if ($user->veTodasLasBodegas()) {
             return $query;
         }
 
-        return $query->where('bodega_id', $user->bodega_id);
+        if ($user->esVendedor()) {
+            return $query->whereIn($query->qualifyColumn('municipio_id'), Ruta::municipiosDe($user));
+        }
+
+        return $query->where($query->qualifyColumn('bodega_id'), $user->bodega_id);
     }
 }

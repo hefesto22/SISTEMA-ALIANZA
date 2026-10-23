@@ -22,7 +22,7 @@ class ManagePromociones extends ManageRecords
                 ->label('Nueva promoción')
                 ->modalHeading('Nueva promoción')
                 ->modalDescription('El código se genera solo al guardar.')
-                ->modalWidth(Width::SixExtraLarge)
+                ->modalWidth(Width::SevenExtraLarge)
                 ->mutateDataUsing(fn (array $data): array => [
                     ...PromocionForm::completar($data),
                     'created_by' => Acceso::usuario()?->id,

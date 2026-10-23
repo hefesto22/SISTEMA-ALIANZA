@@ -6,6 +6,7 @@ namespace Database\Factories;
 
 use App\Models\Bodega;
 use App\Models\Cliente;
+use App\Models\Municipio;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -19,11 +20,12 @@ class ClienteFactory extends Factory
     public function definition(): array
     {
         return [
-            'nombre'    => 'Pulpería '.fake()->lastName(),
-            'telefono'  => fake()->numerify('9#######'),
-            'direccion' => fake()->streetAddress(),
-            'bodega_id' => Bodega::factory(),
-            'activo'    => true,
+            'nombre'       => 'Pulpería '.fake()->lastName(),
+            'telefono'     => fake()->numerify('9#######'),
+            'direccion'    => fake()->streetAddress(),
+            'municipio_id' => Municipio::factory(),
+            'bodega_id'    => Bodega::factory(),
+            'activo'       => true,
         ];
     }
 }

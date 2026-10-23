@@ -6,11 +6,11 @@
     $mensaje ??= null;
     $tono ??= 'igual';
     $aviso ??= null;
-    $flecha = match ($tono) {
-        'sube' => '▲',
-        'baja' => '▼',
-        'alerta' => '⚠',
-        default => '=',
+    $icono = match ($tono) {
+        'sube' => 'heroicon-m-arrow-trending-up',
+        'baja' => 'heroicon-m-arrow-trending-down',
+        'alerta' => 'heroicon-m-exclamation-triangle',
+        default => 'heroicon-m-minus',
     };
 @endphp
 
@@ -32,6 +32,7 @@
     .ap-fila dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
     .ap-fila dd small { display: block; font-size: 0.75rem; font-weight: 400; color: var(--ap-tenue); }
     .ap-chip { align-self: flex-start; margin-top: 1rem; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+    .ap-chip svg { width: 1rem; height: 1rem; flex-shrink: 0; }
     .ap-chip.sube { color: var(--warning-700); background: color-mix(in oklab, var(--warning-500) 16%, transparent); }
     .ap-chip.baja { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 16%, transparent); }
     .ap-chip.igual { color: var(--ap-tenue); background: color-mix(in oklab, var(--gray-400) 16%, transparent); }
@@ -92,7 +93,7 @@
         </dl>
 
         <span @class(['ap-chip', $tono])>
-            {{ $flecha }} {{ $cambio }}
+            {{ svg($icono) }} {{ $cambio }}
         </span>
 
         @if ($aviso)

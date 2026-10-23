@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Filament\Resources\Pedidos\PedidoResource;
+use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
 use App\Filament\Support\Acceso;
 use App\Models\Pedido;
 use Filament\Notifications\Notification;
@@ -18,7 +19,8 @@ class CreatePedido extends CreateRecord
     protected static ?string $title = 'Nueva preventa';
 
     /**
-     * El vendedor no escoge vendedor ni bodega: son los suyos.
+     * El vendedor no escoge vendedor ni bodega: son los suyos. Si el cliente
+     * no es de sus rutas, el pedido queda marcado fuera de ruta.
      * Bodega crea pedidos solo para su bodega.
      *
      * @param array<string, mixed> $data
@@ -34,6 +36,7 @@ class CreatePedido extends CreateRecord
 
             if ($usuario->esVendedor()) {
                 $data['vendedor_id'] = $usuario->id;
+                $data = PedidoForm::marcarFueraDeRuta($data, $usuario);
             }
         }
 

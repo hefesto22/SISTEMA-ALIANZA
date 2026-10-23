@@ -67,9 +67,12 @@
     <div class="datos">
         <div><b>Cliente:</b> {{ $pedido->cliente->nombre }}</div>
         <div><b>RTN:</b> {{ $pedido->cliente->rtn ?? '—' }}</div>
-        <div><b>Dirección:</b> {{ $pedido->cliente->direccion ?? '—' }}</div>
+        <div><b>Dirección:</b> {{ $pedido->cliente->direccion ?? '—' }}@if ($pedido->cliente->municipio) · {{ $pedido->cliente->municipio->nombre }}, {{ $pedido->cliente->municipio->departamento->nombre }}@endif</div>
         <div><b>Teléfono:</b> {{ $pedido->cliente->telefono ?? '—' }}</div>
         <div><b>Vendedor:</b> {{ $pedido->vendedor->name }}@if ($pedido->vendedor->codigo) ({{ $pedido->vendedor->codigo }})@endif</div>
+        @if ($pedido->fuera_de_ruta)
+            <div><b>Fuera de ruta:</b> {{ $pedido->motivo_fuera_ruta }}</div>
+        @endif
         <div><b>Despachó:</b> {{ $pedido->validador?->name ?? 'Pendiente de validar' }}@if ($pedido->validado_at) · {{ $pedido->validado_at->format('d/m/Y H:i') }}@endif</div>
     </div>
 

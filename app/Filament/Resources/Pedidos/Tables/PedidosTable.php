@@ -8,6 +8,7 @@ use App\Filament\Resources\Pedidos\Actions\AnularPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ValidarDespachoAction;
 use App\Filament\Support\Acceso;
+use App\Models\Pedido;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
@@ -15,6 +16,7 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -39,6 +41,13 @@ class PedidosTable
                     ->label('Cliente')
                     ->searchable()
                     ->wrap(),
+                TextColumn::make('ruta')
+                    ->label('Ruta')
+                    ->state(fn (Pedido $record): ?string => $record->fuera_de_ruta ? 'Fuera de ruta' : null)
+                    ->badge()
+                    ->color('warning')
+                    ->tooltip(fn (Pedido $record): ?string => $record->motivo_fuera_ruta)
+                    ->placeholder(''),
                 TextColumn::make('vendedor.name')
                     ->label('Vendedor')
                     ->visible(! $esVendedor)
@@ -77,6 +86,8 @@ class PedidosTable
                     ->relationship('vendedor', 'name')
                     ->searchable()
                     ->visible(! $esVendedor),
+                TernaryFilter::make('fuera_de_ruta')
+                    ->label('Fuera de ruta'),
                 Filter::make('fecha')
                     ->schema([
                         DatePicker::make('desde'),

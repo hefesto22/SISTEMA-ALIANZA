@@ -14,6 +14,7 @@ use Filament\Panel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -122,6 +123,35 @@ class User extends Authenticatable implements FilamentUser
     public function bodega(): BelongsTo
     {
         return $this->belongsTo(Bodega::class);
+    }
+
+    /**
+     * Rutas que trabaja el vendedor. Solo ve los clientes de sus municipios.
+     *
+     * @return BelongsToMany<Ruta, $this>
+     */
+    public function rutas(): BelongsToMany
+    {
+        return $this->belongsToMany(Ruta::class, 'ruta_vendedor');
+    }
+
+    /**
+     * Municipios donde puede trabajar (los de sus rutas activas):
+     * null = sin límite (no es vendedor); lista vacía = vendedor sin rutas.
+     *
+     * @return list<int>|null
+     */
+    public function municipiosDeRuta(): ?array
+    {
+        if (! $this->esVendedor()) {
+            return null;
+        }
+
+        return array_values(Ruta::municipiosDe($this)
+            ->distinct()
+            ->pluck('ruta_municipio.municipio_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all());
     }
 
     /**

@@ -67,6 +67,14 @@ class UsersTable
                     ->color('primary')
                     ->separator(',')
                     ->placeholder('Sin rol'),
+                TextColumn::make('rutas.nombre')
+                    ->label('Rutas')
+                    ->badge()
+                    ->color('gray')
+                    ->limitList(3)
+                    ->expandableLimitedList()
+                    ->placeholder('—')
+                    ->toggleable(),
                 ToggleColumn::make('is_active')
                     ->label('Activo')
                     ->onColor('success')
