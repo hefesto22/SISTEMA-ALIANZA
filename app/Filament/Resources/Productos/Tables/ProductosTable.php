@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Productos\Tables;
 
+use App\Domain\Precios\CalculadoraPrecio;
 use App\Filament\Resources\Productos\Actions\ActualizarPrecioAction;
 use App\Filament\Resources\Productos\ProductoResource;
 use App\Models\Producto;
@@ -19,7 +20,7 @@ use Filament\Tables\Table;
  * Lista de precios: una fila por producto con lo que el vendedor necesita
  * de un vistazo. El precio grande es el de venta al cliente (con ISV si es
  * gravado); abajo, chiquito, el precio sin ISV. Administración/bodega ven
- * además el costo y el % de utilidad.
+ * además el costo (con ISV si es gravado) y la utilidad que de verdad deja.
  */
 class ProductosTable
 {
@@ -59,8 +60,9 @@ class ProductosTable
                     ->alignCenter(),
                 TextColumn::make('costo_unidad')
                     ->label('Costo')
-                    ->formatStateUsing(fn (float $state): string => lempiras($state, 4))
-                    ->description(fn (Producto $record): string => self::porcentaje($record->margenAplicado()).' util.'.($record->margen === null ? '' : ' (propio)'))
+                    ->formatStateUsing(fn (Producto $record): string => lempiras(CalculadoraPrecio::conIsv($record->costo_unidad, $record->gravado), 4))
+                    ->description(fn (Producto $record): string => self::porcentaje(CalculadoraPrecio::margenReal($record->costo_unidad, $record->precio_unidad)).' util.')
+                    ->tooltip(fn (Producto $record): ?string => $record->gravado ? 'Costo por unidad con ISV' : null)
                     ->alignEnd()
                     ->color('gray')
                     ->visible($verCostos),

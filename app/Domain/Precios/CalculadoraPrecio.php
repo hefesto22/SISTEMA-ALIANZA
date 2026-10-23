@@ -57,6 +57,30 @@ final class CalculadoraPrecio
     }
 
     /**
+     * Lo que se escribe en pantalla → lo que se guarda.
+     *
+     * En pantalla costo y precio van CON ISV (si es gravado) y por caja o por
+     * unidad; en la base se guardan por unidad y SIN ISV, con 4 decimales.
+     *
+     *   caja de 48 a L. 594.72 con ISV → 594.72 ÷ 1.15 ÷ 48 = 10.7739 por unidad sin ISV
+     */
+    public static function aUnidadSinIsv(float $monto, bool $gravado, int $unidades = 1): float
+    {
+        $isv = $gravado ? 1 + self::tasaIsv() : 1.0;
+
+        return round($monto / $isv / max(1, $unidades), self::DECIMALES);
+    }
+
+    /**
+     * Lo guardado (por unidad, sin ISV) → como se muestra en pantalla
+     * (con ISV si es gravado, por caja o por unidad), a 2 decimales.
+     */
+    public static function aPantalla(float $porUnidadSinIsv, bool $gravado, int $unidades = 1): float
+    {
+        return round(self::conIsv($porUnidadSinIsv * max(1, $unidades), $gravado), 2);
+    }
+
+    /**
      * Lleva el costo de la factura del proveedor a costo por unidad sin ISV.
      *
      * @param float $costo Costo sin ISV por caja o por unidad, según $porCaja

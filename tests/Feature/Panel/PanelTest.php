@@ -63,51 +63,90 @@ test('las pantallas de administración abren', function (): void {
     Livewire::test(ListPedidos::class)->assertOk();
 });
 
-test('actualizar precio desde el panel cambia el precio y deja historial', function (): void {
+test('actualizar precio: se escriben costo y precio con ISV y se guardan sin ISV', function (): void {
     $this->actingAs($this->encargado);
 
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->callAction('actualizarPrecio', data: [
-            'costo_por'     => 'unidad',
-            'costo'         => 60,
-            'precio_manual' => false,
+            'costo_por'    => 'unidad',
+            'costo'        => 69,
+            'precio_venta' => 82.14,
         ])
         ->assertHasNoActionErrors();
 
-    expect($this->producto->fresh()?->precio_unidad)->toBe(71.4286)
-        ->and($this->producto->cambiosPrecio()->first()?->user_id)->toBe($this->encargado->id)
-        ->and($this->producto->cambiosPrecio()->first()?->bodega_id)->toBe($this->bodega->id);
+    // 69 ÷ 1.15 = 60 de costo; 82.14 ÷ 1.15 = 71.4261 de precio sin ISV (al cliente vuelve a dar 82.14).
+    $producto = $this->producto->fresh();
+    $cambio = $this->producto->cambiosPrecio()->first();
+
+    expect($producto?->costo_unidad)->toBe(60.0)
+        ->and($producto?->precio_unidad)->toBe(71.4261)
+        ->and(round((float) $producto?->precioUnidadConIsv(), 2))->toBe(82.14)
+        ->and($cambio?->motivo)->toBe(MotivoCambioPrecio::Compra)
+        ->and($cambio?->user_id)->toBe($this->encargado->id)
+        ->and($cambio?->bodega_id)->toBe($this->bodega->id);
 });
 
-test('el precio de venta a mano se escribe con ISV y se guarda sin ISV', function (): void {
+test('al cambiar el costo, el precio de venta se recalcula solo con el % de utilidad', function (): void {
     $this->actingAs($this->encargado);
 
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
-        ->callAction('actualizarPrecio', data: [
-            'costo_por'     => 'unidad',
-            'costo'         => 50,
-            'precio_manual' => true,
-            'precio_venta'  => 70,
-        ])
+        ->callAction('actualizarPrecio', data: ['costo_por' => 'unidad', 'costo' => 69])
         ->assertHasNoActionErrors();
 
-    // 70 ÷ 1.15 = 60.8696 sin ISV; con ISV vuelve a dar 70.00 al cliente.
+    // Costo 69 con ISV = 60 neto; con 16% → 71.4286 sin ISV = L. 82.14 con ISV.
     $producto = $this->producto->fresh();
 
-    expect($producto?->precio_unidad)->toBe(60.8696)
-        ->and($producto?->precioUnidadConIsv())->toBe(70.0)
+    expect($producto?->costo_unidad)->toBe(60.0)
+        ->and($producto?->precio_unidad)->toBe(71.4286)
+        ->and(round((float) $producto?->precioUnidadConIsv(), 2))->toBe(82.14);
+});
+
+test('lo escrito por caja se divide entre la caja al pasar a unidad, sin descuadrarse', function (): void {
+    $this->actingAs($this->encargado);
+
+    // Caja de 12: costo L. 600 con ISV → precio sugerido con 16% = L. 714.29 la caja.
+    // Al pasar a unidad: L. 50.00 de costo y L. 59.52 de precio (no 600 × 12).
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->mountAction('actualizarPrecio')
+        ->fillForm(['costo' => 600])
+        ->assertSchemaStateSet(['precio_venta' => 714.29])
+        ->fillForm(['costo_por' => 'unidad'])
+        ->assertSchemaStateSet(['costo' => 50.0, 'precio_venta' => 59.52])
+        ->fillForm(['costo_por' => 'caja'])
+        ->assertSchemaStateSet(['costo' => 600.0, 'precio_venta' => 714.29])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    $producto = $this->producto->fresh();
+
+    expect($producto?->costo_unidad)->toBe(43.4783)
+        ->and($producto?->precio_unidad)->toBe(51.7598);
+});
+
+test('si solo cambia el precio de venta, el costo queda igual', function (): void {
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->callAction('actualizarPrecio', data: ['costo_por' => 'unidad', 'precio_venta' => 70])
+        ->assertHasNoActionErrors();
+
+    $producto = $this->producto->fresh();
+
+    expect($producto?->costo_unidad)->toBe(50.0)
+        ->and($producto?->precio_unidad)->toBe(60.8696)
         ->and($this->producto->cambiosPrecio()->first()?->motivo)->toBe(MotivoCambioPrecio::Manual);
 });
 
-test('pasar de caja a unidad convierte el costo y el precio no salta', function (): void {
+test('pasar de caja a unidad convierte costo y precio y nada cambia', function (): void {
     $this->actingAs($this->encargado);
 
-    // El modal abre con el costo por caja (50 × 12 = 600); al cambiar a "por unidad" queda en 50.
+    // El modal abre por caja de 12 (costo L. 690.00, precio L. 821.43 con ISV); al pasar a unidad queda L. 57.50 y L. 68.45.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->callAction('actualizarPrecio', data: ['costo_por' => 'unidad'])
         ->assertHasNoActionErrors();
 
     expect($this->producto->fresh()?->precio_unidad)->toBe(59.5238)
+        ->and($this->producto->fresh()?->costo_unidad)->toBe(50.0)
         ->and($this->producto->cambiosPrecio()->count())->toBe(0);
 });
 

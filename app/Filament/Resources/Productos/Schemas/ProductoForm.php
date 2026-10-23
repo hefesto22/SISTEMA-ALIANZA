@@ -74,7 +74,8 @@ class ProductoForm
                         Toggle::make('gravado')
                             ->label('Paga ISV (G)')
                             ->helperText('Apagado = exento (E).')
-                            ->default(true),
+                            ->default(true)
+                            ->live(),
                         TextInput::make('margen')
                             ->label('% de utilidad propio')
                             ->helperText('Déjelo vacío para usar el de la categoría.')
@@ -90,23 +91,33 @@ class ProductoForm
                             ->default(true),
                     ]),
 
-                Section::make('Costo inicial')
-                    ->description('El precio de venta se calcula con el % de utilidad. Después se cambia con "Actualizar precio".')
+                Section::make('Costo y precio de venta')
+                    ->description('Tal como se manejan: con ISV si el producto paga ISV. Después se cambian con "Actualizar precio".')
                     ->columns(3)
                     ->columnSpanFull()
                     ->visibleOn('create')
                     ->schema([
                         ToggleButtons::make('costo_por')
-                            ->label('El costo es')
-                            ->options(['caja' => 'Por caja', 'unidad' => 'Por unidad'])
+                            ->label('Los montos son por')
+                            ->options(['caja' => 'Caja', 'unidad' => 'Unidad'])
                             ->default('caja')
-                            ->inline()
+                            ->grouped()
+                            ->live()
                             ->dehydrated(false),
                         TextInput::make('costo_inicial')
-                            ->label('Costo sin ISV')
+                            ->label(fn (Get $get): string => $get('gravado') ? 'Costo con ISV' : 'Costo')
                             ->numeric()
                             ->minValue(0)
                             ->prefix('L.')
+                            ->suffix(fn (Get $get): string => $get('costo_por') === 'caja' ? 'por caja' : 'por unidad')
+                            ->required()
+                            ->dehydrated(false),
+                        TextInput::make('precio_inicial')
+                            ->label(fn (Get $get): string => $get('gravado') ? 'Precio de venta con ISV' : 'Precio de venta')
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->prefix('L.')
+                            ->suffix(fn (Get $get): string => $get('costo_por') === 'caja' ? 'por caja' : 'por unidad')
                             ->required()
                             ->dehydrated(false),
                     ]),

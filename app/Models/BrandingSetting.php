@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Configuración visual del sistema (logo, favicon, color primario).
+ * Configuración visual del sistema (logo, favicon y tema de colores).
+ * `primary_color` quedó de la plantilla; el color del panel ahora sale de
+ * `tema` (ver App\Enums\TemaPanel).
  *
  * Patrón singleton: solo existe UNA fila en la tabla, accesible vía
  * BrandingSetting::current(). El registro inicial lo crea
@@ -24,6 +26,7 @@ use Illuminate\Support\Facades\Storage;
  * @property string|null $logo_path
  * @property string|null $favicon_path
  * @property string $primary_color
+ * @property string|null $tema
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -36,6 +39,7 @@ class BrandingSetting extends Model
         'logo_path',
         'favicon_path',
         'primary_color',
+        'tema',
     ];
 
     /**
@@ -49,7 +53,7 @@ class BrandingSetting extends Model
             self::CACHE_KEY,
             static fn (): self => self::firstOrCreate(
                 [],
-                ['primary_color' => '#f59e0b']
+                ['primary_color' => '#f59e0b', 'tema' => 'default']
             )
         );
 

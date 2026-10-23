@@ -41,6 +41,17 @@ test('la utilidad es después del ISV: el precio con ISV deja el mismo % sobre e
         ->and(round(1 - $costoConIsv / $venta, 4))->toBe(0.14);
 });
 
+test('lo que se escribe con ISV por caja se guarda por unidad sin ISV, y vuelve igual', function (): void {
+    // Caja de 48 a L. 594.72 con ISV → 10.7739 por unidad sin ISV
+    $guardado = CalculadoraPrecio::aUnidadSinIsv(594.72, true, 48);
+
+    expect($guardado)->toBe(10.7739)
+        ->and(CalculadoraPrecio::aPantalla($guardado, true, 48))->toBe(594.72)
+        ->and(CalculadoraPrecio::aPantalla($guardado, true))->toBe(12.39)
+        // exento: sin ISV, solo se reparte entre la caja
+        ->and(CalculadoraPrecio::aUnidadSinIsv(120.0, false, 12))->toBe(10.0);
+});
+
 test('no acepta margen de 100% o más', function (): void {
     CalculadoraPrecio::precioVenta(10, 1.0);
 })->throws(ReglaNegocioException::class);

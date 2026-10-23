@@ -41,10 +41,10 @@ class ProductoInfolist
                             ->badge()
                             ->formatStateUsing(fn (bool $state): string => $state ? 'G · Gravado 15%' : 'E · Exento')
                             ->color(fn (bool $state): string => $state ? 'info' : 'gray'),
-                        TextEntry::make('margen_aplicado')
-                            ->label('% de utilidad')
-                            ->state(fn (Producto $record): string => rtrim(rtrim(number_format($record->margenAplicado() * 100, 2), '0'), '.').'%'
-                                .($record->margen === null ? ' (de la categoría)' : ' (propio)'))
+                        TextEntry::make('margen_real')
+                            ->label('Utilidad')
+                            ->state(fn (Producto $record): string => self::porcentaje(CalculadoraPrecio::margenReal($record->costo_unidad, $record->precio_unidad)))
+                            ->helperText(fn (Producto $record): string => 'La categoría sugiere '.self::porcentaje($record->margenAplicado()))
                             ->visible($verCostos),
                         TextEntry::make('activo')
                             ->label('Estado')
@@ -85,5 +85,10 @@ class ProductoInfolist
                             ->helperText(fn (Producto $record): ?string => $record->actualizadoPor?->name),
                     ]),
             ]);
+    }
+
+    private static function porcentaje(float $fraccion): string
+    {
+        return rtrim(rtrim(number_format($fraccion * 100, 2), '0'), '.').'%';
     }
 }

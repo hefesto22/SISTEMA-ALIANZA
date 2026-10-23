@@ -33,14 +33,18 @@ class CreateProducto extends CreateRecord
         $usuario = Auth::user();
         $datos = $this->data ?? [];
 
-        try {
-            $costoUnidad = CalculadoraPrecio::costoUnitario(
-                costo: (float) ($datos['costo_inicial'] ?? 0),
-                porCaja: ($datos['costo_por'] ?? 'unidad') === 'caja',
-                unidadesPorCaja: max(1, $producto->unidades_por_caja),
-            );
+        // Costo y precio se escriben con ISV (si es gravado) y por caja o unidad; se guardan por unidad sin ISV.
+        $unidades = ($datos['costo_por'] ?? 'unidad') === 'caja' ? max(1, $producto->unidades_por_caja) : 1;
 
-            app(ActualizarPrecioProducto::class)->ejecutar($producto, $costoUnidad, MotivoCambioPrecio::Compra, $usuario, nota: 'Producto nuevo');
+        try {
+            app(ActualizarPrecioProducto::class)->ejecutar(
+                $producto,
+                CalculadoraPrecio::aUnidadSinIsv((float) ($datos['costo_inicial'] ?? 0), $producto->gravado, $unidades),
+                MotivoCambioPrecio::Compra,
+                $usuario,
+                CalculadoraPrecio::aUnidadSinIsv((float) ($datos['precio_inicial'] ?? 0), $producto->gravado, $unidades),
+                'Producto nuevo',
+            );
         } catch (ReglaNegocioException $e) {
             Notification::make()->title('El producto se creó, pero falta su precio')->body($e->getMessage())->warning()->send();
         }

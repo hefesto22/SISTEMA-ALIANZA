@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers\Filament;
 
+use App\Enums\TemaPanel;
 use App\Filament\Pages\Auth\Login;
 use App\Models\BrandingSetting;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -38,15 +39,17 @@ class AdminPanelProvider extends PanelProvider
             ->login(Login::class)
             ->profile()
             // ── Branding dinámico desde BrandingSetting ─────────────────────
-            // Cada proyecto que herede la plantilla configura su logo,
-            // favicon y color desde el panel sin tocar código.
+            // Logo y favicon se configuran desde el panel sin tocar código.
+            // Colores: tema shadcn (openplain/filament-shadcn-theme) escogido
+            // en Sistema → Configuración, con grises zinc como shadcn/ui.
             ->brandName(fn (): string => env('APP_BRAND_NAME', config('app.name', 'Olympo')))
             ->brandLogo(fn (): ?string => self::brandingValue('logoUrl'))
             ->darkModeBrandLogo(fn (): ?string => self::brandingValue('logoUrl'))
             ->brandLogoHeight('2.5rem')
             ->favicon(fn (): ?string => self::brandingValue('faviconUrl'))
             ->colors([
-                'primary' => self::primaryColorPalette(),
+                'primary' => self::paletaPrimaria(),
+                'gray'    => Color::Zinc,
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
@@ -102,23 +105,19 @@ class AdminPanelProvider extends PanelProvider
     }
 
     /**
-     * Genera la paleta de colores para Filament a partir del color
-     * primario configurado en BrandingSetting. Si falla, usa Amber.
+     * Paleta del tema shadcn escogido en Configuración. Si la tabla aún no
+     * está migrada o no hay tema, usa el clásico de shadcn (blanco y negro).
      *
      * @return array<int|string, string>
      */
-    private static function primaryColorPalette(): array
+    private static function paletaPrimaria(): array
     {
         try {
-            $hex = BrandingSetting::current()->primary_color;
-
-            if (is_string($hex) && preg_match('/^#[0-9a-f]{6}$/i', $hex) === 1) {
-                return Color::hex($hex);
-            }
+            $tema = TemaPanel::tryFrom((string) BrandingSetting::current()->tema);
         } catch (Throwable) {
-            // Tabla aún no migrada; usamos default.
+            $tema = null;
         }
 
-        return Color::Amber;
+        return ($tema ?? TemaPanel::Default)->paleta();
     }
 }

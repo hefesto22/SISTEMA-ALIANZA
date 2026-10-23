@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Enums\TemaPanel;
 use App\Models\BrandingSetting;
 use App\Support\ImageOptimizer;
 use BezhanSalleh\FilamentShield\Support\Utils;
-use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
@@ -21,7 +22,7 @@ use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
  * Permite al super-admin (o a quien tenga permiso) editar:
  *  - Logo: imagen visible en la barra superior del panel
  *  - Favicon: ícono de la pestaña del navegador
- *  - Color primario: tono base de botones y acentos
+ *  - Tema de colores (shadcn): tono de botones y acentos, en claro y oscuro
  *
  * Singleton — siempre edita la única fila de branding_settings.
  *
@@ -61,9 +62,9 @@ class BrandingSettingsPage extends Page
         $setting = BrandingSetting::current();
 
         $this->form->fill([
-            'logo_path'     => $setting->logo_path,
-            'favicon_path'  => $setting->favicon_path,
-            'primary_color' => $setting->primary_color,
+            'logo_path'    => $setting->logo_path,
+            'favicon_path' => $setting->favicon_path,
+            'tema'         => (TemaPanel::tryFrom((string) $setting->tema) ?? TemaPanel::Default)->value,
         ]);
     }
 
@@ -112,13 +113,15 @@ class BrandingSettingsPage extends Page
                     ])
                     ->columns(2),
 
-                Section::make('Color del panel')
-                    ->description('Tono base de botones, acentos y elementos interactivos.')
+                Section::make('Tema de colores')
+                    ->description('Diseño estilo shadcn/ui: los colores se ajustan solos entre modo claro y oscuro.')
                     ->schema([
-                        ColorPicker::make('primary_color')
-                            ->label('Color primario')
+                        ToggleButtons::make('tema')
+                            ->label('Tema')
+                            ->options(TemaPanel::class)
+                            ->inline()
                             ->required()
-                            ->helperText('Selecciona el color principal del sistema. Filament generará automáticamente la paleta completa de tonos.'),
+                            ->helperText('"Shadcn" es el clásico: botones negros en modo claro y blancos en modo oscuro.'),
                     ]),
             ]);
     }
@@ -128,9 +131,9 @@ class BrandingSettingsPage extends Page
         $datos = $this->form->getState();
 
         BrandingSetting::current()->update([
-            'logo_path'     => $datos['logo_path'] ?? null,
-            'favicon_path'  => $datos['favicon_path'] ?? null,
-            'primary_color' => $datos['primary_color'] ?? '#f59e0b',
+            'logo_path'    => $datos['logo_path'] ?? null,
+            'favicon_path' => $datos['favicon_path'] ?? null,
+            'tema'         => self::tema($datos['tema'] ?? null)->value,
         ]);
 
         Notification::make()
@@ -140,6 +143,15 @@ class BrandingSettingsPage extends Page
             ->send();
 
         $this->redirect(static::getUrl());
+    }
+
+    private static function tema(mixed $valor): TemaPanel
+    {
+        if ($valor instanceof TemaPanel) {
+            return $valor;
+        }
+
+        return TemaPanel::tryFrom(is_string($valor) ? $valor : '') ?? TemaPanel::Default;
     }
 
     public static function canAccess(): bool
