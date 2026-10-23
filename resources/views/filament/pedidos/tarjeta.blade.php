@@ -22,11 +22,15 @@
         .pt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
         .pt-pill { font-size: 0.72rem; font-weight: 600; line-height: 1.4; padding: 0.1rem 0.5rem; border-radius: 0.375rem; border: 1px solid; }
         .pt-pill.pendiente { color: var(--warning-700); border-color: color-mix(in oklab, var(--warning-500) 45%, transparent); background: color-mix(in oklab, var(--warning-500) 12%, transparent); }
-        .pt-pill.despachado { color: var(--success-700); border-color: color-mix(in oklab, var(--success-500) 45%, transparent); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
+        .pt-pill.por_imprimir { color: var(--info-700); border-color: color-mix(in oklab, var(--info-500) 45%, transparent); background: color-mix(in oklab, var(--info-500) 12%, transparent); }
+        .pt-pill.reimprimir { color: var(--primary-700); border-color: color-mix(in oklab, var(--primary-500) 55%, transparent); background: color-mix(in oklab, var(--primary-500) 14%, transparent); }
+        .pt-pill.impreso { color: var(--success-700); border-color: color-mix(in oklab, var(--success-500) 45%, transparent); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
         .pt-pill.anulado { color: var(--pt-tenue); border-color: var(--pt-borde); background: color-mix(in oklab, var(--gray-400) 12%, transparent); }
         .pt-pill.fuera { color: var(--danger-700); border-color: color-mix(in oklab, var(--danger-500) 45%, transparent); background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
         .dark .pt-pill.pendiente { color: var(--warning-400); }
-        .dark .pt-pill.despachado { color: var(--success-400); }
+        .dark .pt-pill.por_imprimir { color: var(--info-400); }
+        .dark .pt-pill.reimprimir { color: var(--primary-400); }
+        .dark .pt-pill.impreso { color: var(--success-400); }
         .dark .pt-pill.fuera { color: var(--danger-400); }
         .pt-tiempo { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.78rem; color: var(--pt-tenue); }
         .pt-tiempo svg { width: 0.9rem; height: 0.9rem; }
@@ -45,6 +49,14 @@
         .pedidos-tarjetas .fi-ta-content-grid .fi-ta-record-content,
         .pedidos-tarjetas .fi-ta-content-grid .fi-ta-col { min-width: 0; max-width: 100%; }
 
+        /* Casilla para marcar (imprimir varias): arriba a la derecha, sin correr la tarjeta. */
+        .pedidos-tarjetas .fi-ta-content-grid .fi-ta-record { position: relative; }
+        .pedidos-tarjetas .fi-ta-content-grid .fi-ta-record-checkbox { position: absolute; top: 1.1rem; inset-inline-end: 1rem; z-index: 1; margin: 0; }
+        .pedidos-tarjetas .fi-ta-content-grid .fi-ta-record:has(.fi-ta-record-checkbox) .pt-cliente { padding-inline-end: 1.75rem; }
+        .pedidos-tarjetas .fi-ta-content-header { display: flex; align-items: center; gap: 0.6rem; }
+        .pedidos-tarjetas .fi-ta-content-header::after { content: 'Marcar todos los de esta página'; font-size: 0.85rem; color: var(--gray-500); }
+        .dark .pedidos-tarjetas .fi-ta-content-header::after { color: var(--gray-400); }
+
         /* Botones de abajo parejos, como en Cuentas abiertas. */
         .pedidos-tarjetas .fi-ta-content-grid .fi-ta-actions { width: 100%; justify-content: stretch; gap: 0.5rem; }
         .pedidos-tarjetas .fi-ta-content-grid .fi-ta-actions > .fi-btn { flex: 1 1 0; justify-content: center; }
@@ -55,7 +67,13 @@
     <div class="pt-cliente">{{ $cliente->nombre }}</div>
 
     <div class="pt-meta">
-        <span class="pt-pill {{ $pedido->estado->value }}">{{ $pedido->estado->getLabel() }}</span>
+        @if ($pedido->esReimpresion())
+            <span class="pt-pill reimprimir" title="Se corrigió después de impreso{{ $pedido->corregido_at ? ' · '.$pedido->corregido_at->format('d/m/Y H:i') : '' }}">Por reimprimir</span>
+        @elseif ($pedido->estado === \App\Enums\EstadoPedido::Impreso)
+            <span class="pt-pill impreso" title="{{ $pedido->impreso_at?->format('d/m/Y H:i') }}">Impreso{{ $pedido->impresiones > 1 ? ' · '.$pedido->impresiones.' veces' : '' }}</span>
+        @else
+            <span class="pt-pill {{ $pedido->estado->value }}">{{ $pedido->estado->getLabel() }}</span>
+        @endif
 
         @if ($pedido->fuera_de_ruta)
             <span class="pt-pill fuera" title="{{ $pedido->motivo_fuera_ruta }}">Fuera de ruta</span>

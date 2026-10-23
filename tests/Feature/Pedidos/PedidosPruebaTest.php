@@ -145,7 +145,7 @@ test('al despachar desde la tarjeta se quita lo que no hay y se baja lo que no a
 
     $items = $pedido->items()->orderBy('id')->get();
 
-    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::Despachado)
+    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($items->first()?->cantidad_despachada)->toBe(1)
         ->and($items->get(1)?->cantidad_despachada)->toBe($items->get(1)?->cantidad)
         ->and($items->last()?->cantidad_despachada)->toBe(0);

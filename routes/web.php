@@ -20,9 +20,15 @@ declare(strict_types=1);
 */
 
 use App\Http\Controllers\ImprimirPedidoController;
+use App\Http\Controllers\ImprimirPedidosController;
 use Illuminate\Support\Facades\Route;
 
-// Hoja imprimible del pedido (nota de despacho). Requiere sesión iniciada.
+// Hoja imprimible del pedido. Requiere sesión iniciada.
 Route::middleware('auth')
     ->get('pedidos/{pedido}/imprimir', ImprimirPedidoController::class)
     ->name('pedidos.imprimir');
+
+// Varios pedidos de un solo (?ids=1,2,3), uno por página.
+Route::middleware('auth')
+    ->get('imprimir/pedidos', ImprimirPedidosController::class)
+    ->name('pedidos.imprimir-lote');

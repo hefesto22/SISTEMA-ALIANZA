@@ -43,9 +43,23 @@ class PedidoInfolist
                         TextEntry::make('bodega.nombre')
                             ->label('Bodega'),
                         TextEntry::make('validador.name')
-                            ->label('Despachó')
+                            ->label('Validó')
                             ->placeholder('Sin validar')
                             ->helperText(fn (Pedido $record): ?string => $record->validado_at?->format('d/m/Y H:i')),
+                        TextEntry::make('impresor.name')
+                            ->label('Imprimió')
+                            ->placeholder('Sin imprimir')
+                            ->helperText(fn (Pedido $record): ?string => $record->impreso_at === null ? null : collect([
+                                $record->impreso_at->format('d/m/Y H:i'),
+                                $record->impresiones > 1 ? "{$record->impresiones} veces" : null,
+                            ])->filter()->implode(' · '))
+                            ->visible(fn (Pedido $record): bool => $record->estaValidado()),
+                        TextEntry::make('corrector.name')
+                            ->label('Corrigió')
+                            ->helperText(fn (Pedido $record): ?string => $record->corregido_at?->format('d/m/Y H:i'))
+                            ->hint(fn (Pedido $record): ?string => $record->esReimpresion() ? 'Falta reimprimir' : null)
+                            ->hintColor('warning')
+                            ->visible(fn (Pedido $record): bool => $record->corregido_at !== null),
                         TextEntry::make('notas')
                             ->placeholder('—')
                             ->columnSpan(2),
@@ -61,7 +75,7 @@ class PedidoInfolist
 
                 Section::make('Productos')
                     ->description(fn (Pedido $record): string => $record->estaPendiente()
-                        ? 'Precios de hoy (estimados). Bodega confirma cantidades y precio al despachar.'
+                        ? 'Precios de hoy (estimados). Bodega confirma cantidades y precio al validar.'
                         : 'Cantidades y precios confirmados por bodega.')
                     ->columnSpanFull()
                     ->schema([

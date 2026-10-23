@@ -11,7 +11,8 @@ use Illuminate\Auth\Access\HandlesAuthorization;
 /**
  * Permisos Shield ("Accion:Pedido") + a quién le toca cada pedido:
  *  - el vendedor solo toca los suyos y solo mientras están pendientes;
- *  - el encargado de bodega ve y valida los de los vendedores de SU bodega;
+ *  - el encargado de bodega ve, valida, corrige e imprime los de los
+ *    vendedores de SU bodega;
  *  - administración puede con todos.
  */
 class PedidoPolicy
@@ -50,9 +51,36 @@ class PedidoPolicy
             && $pedido->esVisiblePara($user);
     }
 
+    /**
+     * Bodega valida lo que sale de un pedido pendiente.
+     */
     public function validar(User $user, Pedido $pedido): bool
     {
-        if (! $user->can('Validar:Pedido') || ! $pedido->estaPendiente()) {
+        return $pedido->estaPendiente() && $this->leTocaABodega($user, $pedido);
+    }
+
+    /**
+     * Corregir lo que sale de un pedido ya validado (por imprimir o impreso).
+     */
+    public function corregir(User $user, Pedido $pedido): bool
+    {
+        return $pedido->estaValidado() && $this->leTocaABodega($user, $pedido);
+    }
+
+    /**
+     * Imprimirlo cuenta como impresión (pasa a Impreso); los demás solo ven la hoja.
+     */
+    public function imprimir(User $user, Pedido $pedido): bool
+    {
+        return $pedido->estaValidado() && $this->leTocaABodega($user, $pedido);
+    }
+
+    /**
+     * Administración, o el encargado de la bodega de ese vendedor.
+     */
+    private function leTocaABodega(User $user, Pedido $pedido): bool
+    {
+        if (! $user->can('Validar:Pedido')) {
             return false;
         }
 

@@ -126,7 +126,7 @@ test('al despachar se respeta la promoción aunque la hayan desactivado', functi
 
     $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
 
-    expect($despachado->estado)->toBe(EstadoPedido::Despachado)
+    expect($despachado->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($despachado->descuento)->toBe(50.0)
         ->and($despachado->total)->toBe(672.5);
 });

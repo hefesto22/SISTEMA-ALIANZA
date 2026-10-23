@@ -7,14 +7,13 @@ namespace App\Domain\Pedidos;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\EstadoPedido;
 use App\Models\Pedido;
-use App\Models\PedidoItem;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Bodega confirma qué sale de cada línea. Lo que no hay se baja (hasta 0)
  * y el pedido se recalcula con el precio vigente: eso es lo que le llega
- * al cliente. Después de esto el pedido queda cerrado (Despachado).
+ * al cliente. Después de esto el pedido queda Por imprimir.
  *
  * Las promociones se vuelven a calcular con lo que de verdad sale: si ya no
  * se cumple la condición, el regalo se cobra. Se respetan las promociones con
@@ -36,20 +35,12 @@ final class ValidarDespacho
                 throw new ReglaNegocioException("El pedido {$pedido->numero} ya está {$pedido->estado->getLabel()}; no se puede validar otra vez.");
             }
 
-            /** @var PedidoItem $item */
-            foreach ($pedido->items as $item) {
-                $cantidad = array_key_exists($item->id, $despachado) && $despachado[$item->id] !== null
-                    ? (int) $despachado[$item->id]
-                    : $item->cantidad;
-
-                $item->cantidad_despachada = max(0, min($cantidad, $item->cantidad));
-                $item->save();
-            }
+            AjustarLineas::aplicar($pedido, $despachado, faltaSaleCompleta: true);
 
             $this->recalcular->ejecutar($pedido, preciosVigentes: true, respetarPromocionesDelPedido: true);
 
             $pedido->forceFill([
-                'estado'       => EstadoPedido::Despachado,
+                'estado'       => EstadoPedido::PorImprimir,
                 'validado_por' => $usuario->id,
                 'validado_at'  => now(),
             ])->save();

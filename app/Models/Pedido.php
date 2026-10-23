@@ -16,8 +16,9 @@ use Illuminate\Support\Carbon;
  * Pedido de preventa levantado por un vendedor en ruta.
  *
  * Mientras está Pendiente los precios son informativos (los del día en que
- * se levantó). Al validar el despacho, bodega confirma qué sale y el pedido
- * se recalcula con el precio VIGENTE en ese momento.
+ * se levantó). Al validar, bodega confirma qué sale y el pedido se recalcula
+ * con el precio VIGENTE en ese momento; queda Por imprimir. Al imprimirlo
+ * pasa a Impreso. Si se corrige, vuelve a Por imprimir (reimpresión).
  *
  * subtotal = bruto (sin ISV), descuento = promociones, ISV sobre lo neto,
  * total = subtotal − descuento + ISV.
@@ -41,12 +42,19 @@ use Illuminate\Support\Carbon;
  * @property float $total
  * @property int|null $validado_por
  * @property Carbon|null $validado_at
+ * @property int $impresiones
+ * @property Carbon|null $impreso_at
+ * @property int|null $impreso_por
+ * @property Carbon|null $corregido_at
+ * @property int|null $corregido_por
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Bodega $bodega
  * @property-read Cliente $cliente
  * @property-read User $vendedor
  * @property-read User|null $validador
+ * @property-read User|null $impresor
+ * @property-read User|null $corrector
  */
 class Pedido extends Model
 {
@@ -71,6 +79,7 @@ class Pedido extends Model
     protected $attributes = [
         'estado'        => 'pendiente',
         'fuera_de_ruta' => false,
+        'impresiones'   => 0,
     ];
 
     /**
@@ -87,6 +96,9 @@ class Pedido extends Model
             'isv'           => 'float',
             'total'         => 'float',
             'validado_at'   => 'datetime',
+            'impresiones'   => 'integer',
+            'impreso_at'    => 'datetime',
+            'corregido_at'  => 'datetime',
         ];
     }
 
@@ -139,6 +151,26 @@ class Pedido extends Model
     }
 
     /**
+     * Quién lo imprimió la última vez.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function impresor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'impreso_por');
+    }
+
+    /**
+     * Quién lo corrigió después de validado (la última vez).
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function corrector(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'corregido_por');
+    }
+
+    /**
      * @return HasMany<PedidoItem, $this>
      */
     public function items(): HasMany
@@ -149,6 +181,22 @@ class Pedido extends Model
     public function estaPendiente(): bool
     {
         return $this->estado === EstadoPedido::Pendiente;
+    }
+
+    /**
+     * Ya pasó por bodega: por imprimir o impreso.
+     */
+    public function estaValidado(): bool
+    {
+        return $this->estado->estaValidado();
+    }
+
+    /**
+     * Ya se había impreso y lo corrigieron: hay que volver a imprimirlo.
+     */
+    public function esReimpresion(): bool
+    {
+        return $this->estado === EstadoPedido::PorImprimir && $this->impresiones > 0;
     }
 
     /**

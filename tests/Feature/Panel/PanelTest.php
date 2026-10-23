@@ -201,12 +201,16 @@ test('el vendedor levanta la preventa y bodega la despacha', function (): void {
         ->callAction('validarDespacho')
         ->assertHasNoActionErrors();
 
-    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::Despachado)
+    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($pedido->fresh()?->validado_por)->toBe($this->encargado->id);
 
     $this->get(route('pedidos.imprimir', $pedido))
         ->assertOk()
         ->assertSee((string) $pedido->numero);
+
+    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and($pedido->fresh()?->impresiones)->toBe(1)
+        ->and($pedido->fresh()?->impreso_por)->toBe($this->encargado->id);
 });
 
 test('un vendedor no puede imprimir el pedido de otro', function (): void {

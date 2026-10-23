@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Tables;
 
+use App\Enums\EstadoPedido;
 use App\Filament\Resources\Pedidos\Actions\AnularPedidoAction;
+use App\Filament\Resources\Pedidos\Actions\CorregirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ValidarDespachoAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
@@ -18,6 +20,7 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\ViewColumn;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -28,11 +31,17 @@ use Illuminate\Support\Facades\Gate;
 
 /**
  * Pedidos en tarjetas (como Cuentas abiertas): cliente, estado, hace cuánto,
- * número y código del cliente, vendedor y total. Abajo van Ver, Despachar
- * (bodega y administración) y el resto en "...".
+ * número y código del cliente, vendedor y total.
  *
- * Al hacer clic en la tarjeta: a quien le toca despachar se le abre el modal
- * para quitar lo que no hay o bajar cantidades; a los demás, el pedido.
+ * Botones según cómo va el pedido (para bodega y administración):
+ *  - Pendiente: Ver · Validar
+ *  - Por imprimir: Corregir · Imprimir (o Reimprimir)
+ *  - Impreso: Ver · Corregir
+ * y el resto en "...". Al hacer clic en la tarjeta se abre Validar o
+ * Corregir; si no le toca, se abre el pedido.
+ *
+ * Bodega puede marcar varias (ya validadas) e imprimirlas de un solo, por
+ * ejemplo para reimprimir las de un cliente o un vendedor con los filtros.
  */
 class PedidosTable
 {
@@ -51,13 +60,20 @@ class PedidosTable
                 ]),
             ])
             ->contentGrid(['md' => 2, 'xl' => 3, '2xl' => 4])
-            ->recordAction(fn (Pedido $record): ?string => Gate::allows('validar', $record) ? 'validarDespacho' : null)
-            ->recordUrl(fn (Pedido $record): ?string => Gate::allows('validar', $record) ? null : PedidoResource::getUrl('view', ['record' => $record]))
+            ->recordAction(fn (Pedido $record): ?string => self::alHacerClic($record))
+            ->recordUrl(fn (Pedido $record): ?string => self::alHacerClic($record) === null ? PedidoResource::getUrl('view', ['record' => $record]) : null)
+            ->poll('30s')
             ->extraAttributes(['class' => 'pedidos-tarjetas'])
             ->searchPlaceholder('Buscar por cliente, código, número de pedido o vendedor…')
             ->defaultSort('created_at', 'desc')
             ->paginated([12, 24, 48])
             ->defaultPaginationPageOption(12)
+            ->filtersLayout(FiltersLayout::AboveContentCollapsible)
+            ->filtersFormColumns(['md' => 2, 'xl' => 4])
+            ->checkIfRecordIsSelectableUsing(fn (Pedido $record): bool => $record->estaValidado())
+            ->toolbarActions([
+                ImprimirPedidoAction::seleccionados(),
+            ])
             ->filters([
                 SelectFilter::make('cliente_id')
                     ->label('Cliente')
@@ -84,6 +100,8 @@ class PedidosTable
                         DatePicker::make('desde'),
                         DatePicker::make('hasta'),
                     ])
+                    ->columns(2)
+                    ->columnSpan(2)
                     ->query(fn (Builder $query, array $data): Builder => $query
                         ->when($data['desde'] ?? null, fn (Builder $q, mixed $fecha): Builder => $q->whereDate('fecha', '>=', $fecha))
                         ->when($data['hasta'] ?? null, fn (Builder $q, mixed $fecha): Builder => $q->whereDate('fecha', '<=', $fecha))),
@@ -93,21 +111,40 @@ class PedidosTable
                     ->label('Ver')
                     ->button()
                     ->outlined()
-                    ->color('gray'),
+                    ->color('gray')
+                    ->visible(fn (Pedido $record): bool => ! ($record->estado === EstadoPedido::PorImprimir && Gate::allows('corregir', $record))),
                 ValidarDespachoAction::make()
-                    ->label('Despachar')
                     ->button()
                     ->outlined()
                     ->color('gray'),
+                CorregirPedidoAction::make()
+                    ->button()
+                    ->outlined(),
+                ImprimirPedidoAction::make()
+                    ->button()
+                    ->outlined(),
                 ActionGroup::make([
                     EditAction::make(),
-                    ImprimirPedidoAction::make(),
+                    ImprimirPedidoAction::hoja(),
                     AnularPedidoAction::make(),
                 ])
                     ->icon(Heroicon::EllipsisHorizontal)
                     ->color('gray')
                     ->tooltip('Más'),
             ]);
+    }
+
+    /**
+     * Clic en la tarjeta: Validar (pendiente) o Corregir (ya validado) a
+     * quien le toca; null = abrir el pedido.
+     */
+    private static function alHacerClic(Pedido $pedido): ?string
+    {
+        return match (true) {
+            Gate::allows('validar', $pedido)  => 'validarDespacho',
+            Gate::allows('corregir', $pedido) => 'corregir',
+            default                           => null,
+        };
     }
 
     /**

@@ -99,7 +99,9 @@ class AdminPanelProvider extends PanelProvider
             ->navigationGroups(['Ventas', 'Precios', 'Administración'])
             ->sidebarCollapsibleOnDesktop()
             // Todo se guarda en MAYÚSCULAS (GuardaEnMayusculas): se escribe ya en mayúsculas.
-            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS);
+            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS)
+            // Imprimir hojas de pedidos ahí mismo, sin abrir otra pestaña.
+            ->renderHook(PanelsRenderHook::BODY_END, fn (): string => view('filament.imprimir-hoja')->render());
     }
 
     /**

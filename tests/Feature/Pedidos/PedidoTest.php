@@ -74,7 +74,7 @@ test('bodega despacha lo que hay y se cobra con el precio vigente al despachar',
         $lineaExenta->id  => 0,   // no hay
     ], $encargado);
 
-    expect($despachado->estado)->toBe(EstadoPedido::Despachado)
+    expect($despachado->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($despachado->validado_por)->toBe($encargado->id)
         ->and($despachado->subtotal)->toBe(110.0)
         ->and($despachado->isv)->toBe(16.5)
