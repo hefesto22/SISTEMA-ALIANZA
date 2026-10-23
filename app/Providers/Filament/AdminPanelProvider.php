@@ -47,7 +47,9 @@ class AdminPanelProvider extends PanelProvider
             ->darkModeBrandLogo(fn (): ?string => self::brandingValue('logoUrl'))
             ->brandLogoHeight('2.5rem')
             ->favicon(fn (): ?string => self::brandingValue('faviconUrl'))
-            ->colors([
+            // Closure: se evalúa en cada request, ya con la app completa, así
+            // el tema recién escogido se ve al recargar.
+            ->colors(fn (): array => [
                 'primary' => self::paletaPrimaria(),
                 'gray'    => Color::Zinc,
             ])
@@ -105,15 +107,16 @@ class AdminPanelProvider extends PanelProvider
     }
 
     /**
-     * Paleta del tema shadcn escogido en Configuración. Si la tabla aún no
-     * está migrada o no hay tema, usa el clásico de shadcn (blanco y negro).
+     * Paleta del tema shadcn escogido en Configuración. Se lee directo de la
+     * tabla (una fila, sin caché) para que el cambio se vea de inmediato. Si
+     * la tabla aún no está migrada o no hay tema, usa el clásico de shadcn.
      *
      * @return array<int|string, string>
      */
     private static function paletaPrimaria(): array
     {
         try {
-            $tema = TemaPanel::tryFrom((string) BrandingSetting::current()->tema);
+            $tema = TemaPanel::tryFrom((string) BrandingSetting::query()->value('tema'));
         } catch (Throwable) {
             $tema = null;
         }

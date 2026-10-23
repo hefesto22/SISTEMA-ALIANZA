@@ -61,6 +61,18 @@ class BrandingSetting extends Model
     }
 
     /**
+     * Cambia el tema de colores del panel (App\Enums\TemaPanel) y limpia el caché.
+     */
+    public static function cambiarTema(string $tema): void
+    {
+        self::current();
+
+        self::query()->update(['tema' => $tema]);
+
+        Cache::forget(self::CACHE_KEY);
+    }
+
+    /**
      * Limpia el cache cuando se modifica el registro.
      */
     protected static function booted(): void

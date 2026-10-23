@@ -121,7 +121,20 @@ class BrandingSettingsPage extends Page
                             ->options(TemaPanel::class)
                             ->inline()
                             ->required()
-                            ->helperText('"Shadcn" es el clásico: botones negros en modo claro y blancos en modo oscuro.'),
+                            ->live()
+                            ->afterStateUpdated(function (mixed $state): void {
+                                // Se aplica al momento: guarda el tema y recarga para pintar el panel.
+                                $tema = self::tema($state);
+                                BrandingSetting::cambiarTema($tema->value);
+
+                                Notification::make()
+                                    ->title("Tema {$tema->getLabel()} aplicado")
+                                    ->success()
+                                    ->send();
+
+                                $this->redirect(static::getUrl());
+                            })
+                            ->helperText('Se aplica al tocarlo. "Shadcn" es el clásico: botones negros en modo claro y blancos en modo oscuro.'),
                     ]),
             ]);
     }
@@ -133,8 +146,9 @@ class BrandingSettingsPage extends Page
         BrandingSetting::current()->update([
             'logo_path'    => $datos['logo_path'] ?? null,
             'favicon_path' => $datos['favicon_path'] ?? null,
-            'tema'         => self::tema($datos['tema'] ?? null)->value,
         ]);
+
+        BrandingSetting::cambiarTema(self::tema($datos['tema'] ?? null)->value);
 
         Notification::make()
             ->title('Configuración guardada')

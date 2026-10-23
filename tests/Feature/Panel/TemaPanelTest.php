@@ -6,9 +6,12 @@ use App\Enums\TemaPanel;
 use App\Filament\Pages\BrandingSettingsPage;
 use App\Models\BrandingSetting;
 use App\Models\User;
+use App\Providers\Filament\AdminPanelProvider;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
+use Filament\Panel;
+use Filament\Support\Colors\Color;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 use Openplain\FilamentShadcnTheme\Color as Shadcn;
@@ -40,4 +43,14 @@ test('el super admin cambia el tema desde Configuración', function (): void {
         ->assertHasNoFormErrors();
 
     expect(BrandingSetting::query()->firstOrFail()->tema)->toBe('blue');
+});
+
+test('el panel se pinta con el tema guardado', function (): void {
+    BrandingSetting::query()->delete();
+    BrandingSetting::query()->create(['primary_color' => '#f59e0b', 'tema' => TemaPanel::Azul->value]);
+
+    $colores = (new AdminPanelProvider(app()))->panel(Panel::make())->getColors();
+
+    expect($colores['primary'])->toBe(Shadcn::Blue)
+        ->and($colores['gray'])->toBe(Color::Zinc);
 });
