@@ -60,6 +60,9 @@ parameters:
           path: tests/*
         - identifier: method.staticCall
           path: tests/*
+        # Propiedades que Pest guarda en $this desde beforeEach ($this->bodega, …).
+        - identifier: property.notFound
+          path: tests/*
 
         # ── Seeders ─────────────────────────────────────────────────────────
         # ?->command es defensivo — el comando puede ser null.

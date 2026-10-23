@@ -53,6 +53,14 @@ class UsersTable
                     ->searchable()
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('codigo')
+                    ->label('Código')
+                    ->searchable()
+                    ->placeholder('—'),
+                TextColumn::make('bodega.nombre')
+                    ->label('Bodega')
+                    ->placeholder('—')
+                    ->toggleable(),
                 TextColumn::make('roles.name')
                     ->label('Roles')
                     ->badge()
@@ -91,6 +99,9 @@ class UsersTable
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
+                SelectFilter::make('bodega_id')
+                    ->label('Bodega')
+                    ->relationship('bodega', 'nombre'),
                 SelectFilter::make('roles')
                     ->label('Filtrar por rol')
                     ->relationship('roles', 'name')

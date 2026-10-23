@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Auth\Login;
 use App\Models\BrandingSetting;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Http\Middleware\Authenticate;
@@ -33,7 +34,8 @@ class AdminPanelProvider extends PanelProvider
             // Path '/' = panel en la raíz. URLs limpias: /, /login, /dashboard, /users.
             // El sistema es 100% panel admin, sin frontend público (decisión de la plantilla).
             ->path('/')
-            ->login()
+            // Login con correo o código de usuario (HO01…) para los vendedores.
+            ->login(Login::class)
             ->profile()
             // ── Branding dinámico desde BrandingSetting ─────────────────────
             // Cada proyecto que herede la plantilla configura su logo,
@@ -70,11 +72,14 @@ class AdminPanelProvider extends PanelProvider
                 Authenticate::class,
             ])
             ->plugins([
-                FilamentShieldPlugin::make(),
+                FilamentShieldPlugin::make()
+                    ->navigationGroup('Administración')
+                    ->navigationSort(3),
             ])
             ->databaseNotifications()
             ->databaseNotificationsPolling('30s')
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
+            ->navigationGroups(['Ventas', 'Precios', 'Administración'])
             ->sidebarCollapsibleOnDesktop();
     }
 

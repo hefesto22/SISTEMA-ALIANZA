@@ -1,0 +1,129 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Pedidos\AnularPedido;
+use App\Domain\Pedidos\RecalcularPedido;
+use App\Domain\Pedidos\ValidarDespacho;
+use App\Domain\Precios\ActualizarPrecioProducto;
+use App\Enums\EstadoPedido;
+use App\Enums\MotivoCambioPrecio;
+use App\Enums\Rol;
+use App\Enums\UnidadVenta;
+use App\Models\Bodega;
+use App\Models\Cliente;
+use App\Models\Pedido;
+use App\Models\Producto;
+use App\Models\User;
+use Database\Seeders\RolesSistemaSeeder;
+
+beforeEach(function (): void {
+    $this->seed(RolesSistemaSeeder::class);
+
+    $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);
+    $this->vendedor = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $this->vendedor->assignRole(Rol::Vendedor->value);
+
+    // Gravado: L 100 la unidad. Exento: L 50 la unidad, caja de 10 = L 500.
+    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['unidades_por_caja' => 12]);
+    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->create(['unidades_por_caja' => 10]);
+});
+
+/**
+ * Pedido de 2 unidades del gravado + 1 caja del exento.
+ */
+function crearPedido(Bodega $bodega, User $vendedor, Producto $gravado, Producto $exento): Pedido
+{
+    $pedido = Pedido::query()->create([
+        'bodega_id'   => $bodega->id,
+        'cliente_id'  => Cliente::factory()->create(['bodega_id' => $bodega->id])->id,
+        'vendedor_id' => $vendedor->id,
+        'fecha'       => now(),
+    ]);
+
+    $pedido->items()->create(['producto_id' => $gravado->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 2]);
+    $pedido->items()->create(['producto_id' => $exento->id, 'unidad' => UnidadVenta::Caja, 'cantidad' => 1]);
+
+    return app(RecalcularPedido::class)->ejecutar($pedido);
+}
+
+test('el pedido toma los precios de hoy y calcula ISV solo de lo gravado', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+
+    // 2 × 100 = 200 (+30 ISV) y 1 caja × 500 = 500 (exento)
+    expect($pedido->subtotal)->toBe(700.0)
+        ->and($pedido->isv)->toBe(30.0)
+        ->and($pedido->total)->toBe(730.0)
+        ->and($pedido->estado)->toBe(EstadoPedido::Pendiente)
+        ->and($pedido->numero)->toMatch('/^COP-\d{6}$/');
+});
+
+test('bodega despacha lo que hay y se cobra con el precio vigente al despachar', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    $encargado = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $encargado->assignRole(Rol::Bodega->value);
+
+    // Sube el precio después de la preventa.
+    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precioUnidad: 110.0);
+
+    [$lineaGravada, $lineaExenta] = $pedido->items->all();
+
+    $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [
+        $lineaGravada->id => 1,   // pidió 2, sale 1
+        $lineaExenta->id  => 0,   // no hay
+    ], $encargado);
+
+    expect($despachado->estado)->toBe(EstadoPedido::Despachado)
+        ->and($despachado->validado_por)->toBe($encargado->id)
+        ->and($despachado->subtotal)->toBe(110.0)
+        ->and($despachado->isv)->toBe(16.5)
+        ->and($despachado->total)->toBe(126.5)
+        ->and($lineaGravada->fresh()?->cantidad_despachada)->toBe(1)
+        ->and($lineaGravada->fresh()?->faltante())->toBe(1)
+        ->and($lineaExenta->fresh()?->cantidad_despachada)->toBe(0);
+});
+
+test('un pedido despachado no se puede validar otra vez', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    app(ValidarDespacho::class)->ejecutar($pedido, [], $this->vendedor);
+
+    app(ValidarDespacho::class)->ejecutar($pedido->fresh() ?? $pedido, [], $this->vendedor);
+})->throws(ReglaNegocioException::class);
+
+test('solo se anulan pedidos pendientes', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+
+    expect(app(AnularPedido::class)->ejecutar($pedido, 'Cliente cerrado')->estado)->toBe(EstadoPedido::Anulado);
+
+    app(AnularPedido::class)->ejecutar($pedido);
+})->throws(ReglaNegocioException::class);
+
+test('el vendedor solo ve sus pedidos y bodega solo los de su bodega', function (): void {
+    $mio = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+
+    $otroVendedor = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $otroVendedor->assignRole(Rol::Vendedor->value);
+
+    $otraBodega = Bodega::factory()->create(['codigo' => 'OCO']);
+    $encargadoOtra = User::factory()->create(['bodega_id' => $otraBodega->id]);
+    $encargadoOtra->assignRole(Rol::Bodega->value);
+
+    $encargado = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $encargado->assignRole(Rol::Bodega->value);
+
+    $admin = User::factory()->create();
+    $admin->assignRole(Rol::Administrador->value);
+
+    expect(Pedido::query()->visiblePara($this->vendedor)->pluck('id')->all())->toBe([$mio->id])
+        ->and(Pedido::query()->visiblePara($otroVendedor)->count())->toBe(0)
+        ->and(Pedido::query()->visiblePara($encargado)->count())->toBe(1)
+        ->and(Pedido::query()->visiblePara($encargadoOtra)->count())->toBe(0)
+        ->and(Pedido::query()->visiblePara($admin)->count())->toBe(1);
+
+    expect($encargado->can('validar', $mio))->toBeTrue()
+        ->and($encargadoOtra->can('validar', $mio))->toBeFalse()
+        ->and($this->vendedor->can('validar', $mio))->toBeFalse()
+        ->and($this->vendedor->can('update', $mio))->toBeTrue()
+        ->and($otroVendedor->can('update', $mio))->toBeFalse();
+});

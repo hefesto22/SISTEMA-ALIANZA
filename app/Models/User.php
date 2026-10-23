@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\Rol;
 use App\Traits\HasAuditFields;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use BezhanSalleh\FilamentShield\Traits\HasPanelShield;
@@ -12,6 +13,7 @@ use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -41,6 +43,8 @@ class User extends Authenticatable implements FilamentUser
         'email',
         'password',
         'phone',
+        'bodega_id',
+        'codigo',
         'avatar_url',
         'is_active',
         'last_login_at',
@@ -78,8 +82,13 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
-        return $this->hasRole(ShieldUtils::getSuperAdminName())
-            || $this->hasRole(ShieldUtils::getPanelUserRoleName());
+        return $this->hasAnyRole([
+            ShieldUtils::getSuperAdminName(),
+            ShieldUtils::getPanelUserRoleName(),
+            Rol::Administrador->value,
+            Rol::Bodega->value,
+            Rol::Vendedor->value,
+        ]);
     }
 
     /**
@@ -103,6 +112,32 @@ class User extends Authenticatable implements FilamentUser
             'last_login_at' => now(),
             'last_login_ip' => $ip,
         ]);
+    }
+
+    // ─── Bodega y rol de trabajo ──────────────────────────────
+
+    /**
+     * @return BelongsTo<Bodega, $this>
+     */
+    public function bodega(): BelongsTo
+    {
+        return $this->belongsTo(Bodega::class);
+    }
+
+    /**
+     * Super admin y administración ven y validan pedidos de todas las bodegas.
+     */
+    public function veTodasLasBodegas(): bool
+    {
+        return $this->hasAnyRole([ShieldUtils::getSuperAdminName(), Rol::Administrador->value]);
+    }
+
+    /**
+     * Vendedor de ruta: solo ve y edita los pedidos que él levantó.
+     */
+    public function esVendedor(): bool
+    {
+        return $this->hasRole(Rol::Vendedor->value) && ! $this->veTodasLasBodegas();
     }
 
     // ─── Relaciones jerárquicas ───────────────────────────────

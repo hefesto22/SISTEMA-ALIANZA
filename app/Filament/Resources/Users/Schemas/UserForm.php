@@ -47,6 +47,24 @@ class UserForm
                             ->placeholder('+504 9999-9999'),
                     ]),
 
+                Section::make('Bodega y código')
+                    ->description('Vendedores y encargados de bodega trabajan con los pedidos de su bodega. El código sirve para entrar sin escribir el correo.')
+                    ->icon('heroicon-o-building-storefront')
+                    ->aside()
+                    ->schema([
+                        Select::make('bodega_id')
+                            ->label('Bodega')
+                            ->relationship('bodega', 'nombre')
+                            ->preload()
+                            ->placeholder('Sin bodega (administración)'),
+                        TextInput::make('codigo')
+                            ->label('Código de usuario')
+                            ->placeholder('Ej: HO01')
+                            ->maxLength(20)
+                            ->unique(ignoreRecord: true)
+                            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? mb_strtoupper(trim((string) $state)) : null),
+                    ]),
+
                 Section::make('Foto de Perfil')
                     ->description('Imagen de avatar del usuario. Formato PNG o JPG, máximo 2MB.')
                     ->icon('heroicon-o-camera')

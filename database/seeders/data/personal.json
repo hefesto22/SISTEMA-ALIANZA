@@ -1,0 +1,20 @@
+[
+  {"codigo": "HO01", "nombre": "Alvaro Vidal Tabora", "bodega": "COP", "rol": "vendedor"},
+  {"codigo": "HO02", "nombre": "Humberto Martinez (Detalle)", "bodega": "COP", "rol": "vendedor"},
+  {"codigo": "HO04", "nombre": "Jesus Humberto Martinez", "bodega": "COP", "rol": "vendedor"},
+  {"codigo": "HO05", "nombre": "Josue María Cordova Ramírez", "bodega": "OCO", "rol": "vendedor"},
+  {"codigo": "HO06", "nombre": "Juan Antonio Torres", "bodega": "COP", "rol": "vendedor"},
+  {"codigo": "HO08", "nombre": "Mostrador Santa Rosa", "bodega": "COP", "rol": "vendedor"},
+  {"codigo": "HO09", "nombre": "Alvaro Jose Tabora De Leon", "bodega": "COP", "rol": "vendedor"},
+  {"codigo": "HO24", "nombre": "David Menjivar", "bodega": "OCO", "rol": "vendedor"},
+  {"codigo": "HO26", "nombre": "Cristian Espinoza", "bodega": "OCO", "rol": "vendedor"},
+  {"codigo": "HO28", "nombre": "Josue Cordova (Detalle)", "bodega": "OCO", "rol": "vendedor"},
+  {"codigo": "HO30", "nombre": "Mirna Arita", "bodega": "LUC", "rol": "bodega"},
+  {"codigo": "HO32", "nombre": "Darleny Morales", "bodega": "OCO", "rol": "bodega"},
+  {"codigo": "HO40", "nombre": "Mario Antonio Garcia Sanchez", "bodega": "SB", "rol": "vendedor"},
+  {"codigo": "HO41", "nombre": "Cesar Humberto Portillo Cartagena", "bodega": "SB", "rol": "vendedor"},
+  {"codigo": "HO45", "nombre": "Jose Angel Hernandez Pineda", "bodega": "SB", "rol": "vendedor"},
+  {"codigo": "HO46", "nombre": "Marlon Josue Henriquez Villeda", "bodega": "COP", "rol": "vendedor"},
+  {"codigo": "HO97", "nombre": "Ronald Gonzalez", "bodega": "COP", "rol": "bodega"},
+  {"codigo": "HO99", "nombre": "Alvaro Vidal Tabora Palencia", "bodega": "OCO", "rol": "vendedor"}
+]

@@ -25,6 +25,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Confiar en proxies (necesario detrás de Cloudflare, Nginx, etc.).
         $middleware->trustProxies(at: '*');
+
+        // Sin sesión, las rutas propias (ej. imprimir pedido) mandan al login del panel.
+        $middleware->redirectGuestsTo('/login');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Sentry captura excepciones automáticamente vía su Service Provider.

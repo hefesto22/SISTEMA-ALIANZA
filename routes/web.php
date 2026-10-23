@@ -18,3 +18,11 @@ declare(strict_types=1);
 | Las rutas internas del panel (/login, /dashboard, /users, /shield/roles,
 | /horizon, etc.) las gestiona Filament automáticamente.
 */
+
+use App\Http\Controllers\ImprimirPedidoController;
+use Illuminate\Support\Facades\Route;
+
+// Hoja imprimible del pedido (nota de despacho). Requiere sesión iniciada.
+Route::middleware('auth')
+    ->get('pedidos/{pedido}/imprimir', ImprimirPedidoController::class)
+    ->name('pedidos.imprimir');

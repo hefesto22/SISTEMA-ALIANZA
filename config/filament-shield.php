@@ -1,6 +1,8 @@
 <?php
 
 declare(strict_types=1);
+use App\Filament\Resources\CambiosPrecio\CambioPrecioResource;
+use App\Filament\Resources\Pedidos\PedidoResource;
 use BezhanSalleh\FilamentShield\Resources\Roles\RoleResource;
 use Filament\Pages\Dashboard;
 use Filament\Widgets\AccountWidget;
@@ -27,7 +29,7 @@ return [
             'pages'              => true,
             'widgets'            => true,
             'resources'          => true,
-            'custom_permissions' => false,
+            'custom_permissions' => true,
         ],
     ],
 
@@ -176,6 +178,20 @@ return [
                 'update',
                 'delete',
             ],
+            // "Validar" = bodega confirma el despacho del pedido.
+            PedidoResource::class => [
+                'viewAny',
+                'view',
+                'create',
+                'update',
+                'delete',
+                'validar',
+            ],
+            // El historial de precios es de solo lectura.
+            CambioPrecioResource::class => [
+                'viewAny',
+                'view',
+            ],
         ],
         'exclude' => [
             //
@@ -232,7 +248,15 @@ return [
     |
     */
 
-    'custom_permissions' => [],
+    // Categorías de proveedor (se manejan dentro de Proveedores, no tienen
+    // pantalla propia). Declararlas aquí evita que se pierdan al editar un rol.
+    'custom_permissions' => [
+        'ViewAny:Categoria',
+        'View:Categoria',
+        'Create:Categoria',
+        'Update:Categoria',
+        'Delete:Categoria',
+    ],
 
     /*
     |--------------------------------------------------------------------------

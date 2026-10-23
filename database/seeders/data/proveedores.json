@@ -1,0 +1,8 @@
+[
+  {"codigo": "1", "nombre": "UNILEVER HONDURAS", "razon_social": "UNILEVER HONDURAS", "direccion": null, "rtn": "34342325", "telefono": null},
+  {"codigo": "500001", "nombre": "DCASA", "razon_social": "DCASA", "direccion": "HONDURAS", "rtn": null, "telefono": null},
+  {"codigo": "500004", "nombre": "SURTIDORA INTERNACIONAL", "razon_social": "SURTIDORA INTERNACIONAL", "direccion": "HONDURAS", "rtn": null, "telefono": null},
+  {"codigo": "500006", "nombre": "DISTRIBUIDORA LICRA IMPORT(DILIMPORT)", "razon_social": "DISTRIBUIDORA LICRA IMPORT(DILIMPORT)", "direccion": "HONDURAS", "rtn": null, "telefono": null},
+  {"codigo": "500008", "nombre": "MERCANTIL DE HONDURAS, S.A.", "razon_social": "MERHONSA", "direccion": "Colonia Orquidea, Boulevard del sur, Frente a gasolinera Uno", "rtn": "05019995444491", "telefono": "2667-0340"},
+  {"codigo": "500011", "nombre": "INTERCOSMO S.A. DE CV.", "razon_social": "INTERCOSMO S.A. DE CV.", "direccion": "Barrio San Fernando, KM1 Carretera a La Lima", "rtn": "05019995109142", "telefono": null}
+]
