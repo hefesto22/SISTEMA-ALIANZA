@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Productos\Tables;
 
-use App\Domain\Precios\CalculadoraPrecio;
 use App\Filament\Resources\Productos\Actions\ActualizarPrecioAction;
 use App\Filament\Resources\Productos\ProductoResource;
 use App\Models\Producto;
@@ -18,8 +17,9 @@ use Filament\Tables\Table;
 
 /**
  * Lista de precios: una fila por producto con lo que el vendedor necesita
- * de un vistazo (precio por unidad y por caja, con y sin ISV) y, para
- * administración/bodega, el costo y el % de utilidad.
+ * de un vistazo. El precio grande es el de venta al cliente (con ISV si es
+ * gravado); abajo, chiquito, el precio sin ISV. Administración/bodega ven
+ * además el costo y el % de utilidad.
  */
 class ProductosTable
 {
@@ -66,16 +66,16 @@ class ProductosTable
                     ->visible($verCostos),
                 TextColumn::make('precio_unidad')
                     ->label('Unidad')
-                    ->formatStateUsing(fn (float $state): string => lempiras($state))
-                    ->description(fn (Producto $record): string => $record->gravado ? 'con ISV '.lempiras($record->precioUnidadConIsv()) : 'exento')
+                    ->formatStateUsing(fn (Producto $record): string => lempiras($record->precioUnidadConIsv()))
+                    ->description(fn (Producto $record): string => $record->gravado ? 'sin ISV '.lempiras($record->precio_unidad) : 'exento')
                     ->sortable()
                     ->alignEnd()
                     ->weight('bold')
                     ->color('primary'),
                 TextColumn::make('precio_caja')
                     ->label('Caja')
-                    ->state(fn (Producto $record): string => lempiras($record->precioCaja()))
-                    ->description(fn (Producto $record): string => $record->gravado ? 'con ISV '.lempiras(CalculadoraPrecio::conIsv($record->precioCaja(), true)) : 'exento')
+                    ->state(fn (Producto $record): string => lempiras($record->precioCajaConIsv()))
+                    ->description(fn (Producto $record): string => $record->gravado ? 'sin ISV '.lempiras($record->precioCaja()) : 'exento')
                     ->alignEnd()
                     ->weight('bold'),
                 TextColumn::make('precio_actualizado_at')

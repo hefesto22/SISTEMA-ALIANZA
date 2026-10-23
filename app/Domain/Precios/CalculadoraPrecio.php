@@ -15,6 +15,12 @@ use App\Domain\Exceptions\ReglaNegocioException;
  *   precio con ISV   = precio × 1.15                  ← solo si es gravado (G)
  *
  * Costo y precio se manejan sin ISV y con 4 decimales, igual que en los Excel.
+ *
+ * La utilidad queda DESPUÉS del impuesto: el producto gravado se compra
+ * pagando el 15% de ISV y se vende con el 15% incluido, así que el precio
+ * de venta con ISV deja el mismo % sobre el costo con ISV:
+ *
+ *   costo 9.2619 → con ISV 10.6512 → ÷ (1 − 14%) = 12.39 al cliente  (= 10.77 sin ISV × 1.15)
  */
 final class CalculadoraPrecio
 {

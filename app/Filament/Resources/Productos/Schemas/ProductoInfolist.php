@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Productos\Schemas;
 
+use App\Domain\Precios\CalculadoraPrecio;
 use App\Filament\Resources\Productos\ProductoResource;
 use App\Models\Producto;
 use Filament\Infolists\Components\TextEntry;
@@ -53,27 +54,30 @@ class ProductoInfolist
                     ]),
 
                 Section::make('Precios vigentes (todas las bodegas)')
+                    ->description(fn (Producto $record): string => $record->gravado
+                        ? 'Precio de venta con ISV incluido. La utilidad es sobre el costo con ISV.'
+                        : 'Producto exento: el precio de venta no lleva ISV.')
                     ->columns(3)
                     ->columnSpanFull()
                     ->schema([
-                        TextEntry::make('costo_unidad')
-                            ->label('Costo por unidad (sin ISV)')
-                            ->formatStateUsing(fn (float $state): string => lempiras($state, 4))
+                        TextEntry::make('precio_venta_unidad')
+                            ->label('Precio de venta por unidad')
+                            ->state(fn (Producto $record): string => lempiras($record->precioUnidadConIsv()))
+                            ->helperText(fn (Producto $record): ?string => $record->gravado ? 'sin ISV '.lempiras($record->precio_unidad) : null)
+                            ->size('lg')
+                            ->weight('bold')
+                            ->color('primary'),
+                        TextEntry::make('precio_venta_caja')
+                            ->label(fn (Producto $record): string => "Precio de venta por caja de {$record->unidades_por_caja}")
+                            ->state(fn (Producto $record): string => lempiras($record->precioCajaConIsv()))
+                            ->helperText(fn (Producto $record): ?string => $record->gravado ? 'sin ISV '.lempiras($record->precioCaja()) : null)
+                            ->size('lg')
+                            ->weight('bold'),
+                        TextEntry::make('costo_pagado')
+                            ->label(fn (Producto $record): string => $record->gravado ? 'Costo por unidad con ISV' : 'Costo por unidad')
+                            ->state(fn (Producto $record): string => lempiras(CalculadoraPrecio::conIsv($record->costo_unidad, $record->gravado), 4))
+                            ->helperText(fn (Producto $record): ?string => $record->gravado ? 'neto '.lempiras($record->costo_unidad, 4).' + ISV' : null)
                             ->visible($verCostos),
-                        TextEntry::make('precio_unidad')
-                            ->label('Precio por unidad')
-                            ->formatStateUsing(fn (float $state): string => lempiras($state))
-                            ->weight('bold'),
-                        TextEntry::make('precio_unidad_isv')
-                            ->label('Por unidad con ISV')
-                            ->state(fn (Producto $record): string => lempiras($record->precioUnidadConIsv())),
-                        TextEntry::make('precio_caja')
-                            ->label('Precio por caja')
-                            ->state(fn (Producto $record): string => lempiras($record->precioCaja()))
-                            ->weight('bold'),
-                        TextEntry::make('precio_caja_isv')
-                            ->label('Por caja con ISV')
-                            ->state(fn (Producto $record): string => lempiras($record->precioCajaConIsv())),
                         TextEntry::make('precio_actualizado_at')
                             ->label('Último cambio')
                             ->dateTime('d/m/Y H:i')

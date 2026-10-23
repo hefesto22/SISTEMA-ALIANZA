@@ -25,10 +25,19 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Auth;
 
 /**
- * "Actualizar precio": a la izquierda se mete el costo de la factura del
- * proveedor (por caja o por unidad, con descuento si hubo); a la derecha
- * una tarjeta muestra al instante el precio nuevo, la caja, la utilidad y
- * cuánto cambia contra el de hoy. Aplica a TODAS las bodegas y deja historial.
+ * "Actualizar precio": a la izquierda se mete el costo neto de la factura
+ * (por caja o por unidad); a la derecha una tarjeta muestra al instante el
+ * precio de venta, la caja y cuánto cambia contra el de hoy. Aplica a TODAS
+ * las bodegas y deja historial.
+ *
+ * La utilidad es DESPUÉS del impuesto: si el producto es gravado, el costo
+ * neto se paga con 15% de ISV, y el precio de venta (con ISV) deja el % de
+ * utilidad sobre ese costo con ISV:
+ *
+ *   9.2619 neto → 10.6512 con ISV → ÷ (1 − 14%) → L. 12.39 precio de venta
+ *
+ * En la base se sigue guardando el precio sin ISV (10.7697); el pedido le
+ * suma el ISV y da lo mismo: L. 12.39.
  *
  * La tarjeta es resources/views/filament/productos/precio-resultado.blade.php.
  */
@@ -54,16 +63,13 @@ final class ActualizarPrecioAction
                 'costo'     => $record->unidades_por_caja > 1
                     ? round($record->costo_unidad * $record->unidades_por_caja, 4)
                     : $record->costo_unidad,
-                'hay_descuento' => false,
-                'cantidad'      => 1,
-                'descuento'     => 0,
                 'precio_manual' => false,
             ])
             ->schema([
                 Grid::make(12)->schema([
                     Group::make([
                         ToggleButtons::make('costo_por')
-                            ->label('Costo de la factura (sin ISV)')
+                            ->label('Costo neto de la factura (sin ISV)')
                             ->options(['caja' => 'Por caja', 'unidad' => 'Por unidad'])
                             ->icons(['caja' => Heroicon::OutlinedArchiveBox, 'unidad' => Heroicon::OutlinedCube])
                             ->grouped()
@@ -82,43 +88,21 @@ final class ActualizarPrecioAction
                             ->autofocus()
                             ->live(debounce: 400),
 
-                        Toggle::make('hay_descuento')
-                            ->label('Hubo descuento en esta compra')
-                            ->helperText('Ej.: compró 10 cajas y el proveedor le rebajó L. 200 en total. El descuento se reparte en el costo de cada unidad.')
-                            ->live(),
-                        Grid::make(2)
-                            ->visible(fn (Get $get): bool => (bool) $get('hay_descuento'))
-                            ->schema([
-                                TextInput::make('cantidad')
-                                    ->label(fn (Get $get): string => $get('costo_por') === 'caja' ? 'Cajas compradas' : 'Unidades compradas')
-                                    ->numeric()
-                                    ->integer()
-                                    ->minValue(1)
-                                    ->required()
-                                    ->live(debounce: 400),
-                                TextInput::make('descuento')
-                                    ->label('Descuento total')
-                                    ->numeric()
-                                    ->minValue(0)
-                                    ->prefix('L.')
-                                    ->live(debounce: 400),
-                            ]),
-
                         Toggle::make('precio_manual')
                             ->label('Poner yo el precio de venta')
-                            ->helperText('Ej.: el sistema calcula L. 10.77 y usted lo quiere vender a L. 11.00. Se guarda la utilidad que realmente deja.')
+                            ->helperText('Para dejar un precio cerrado, por ejemplo L. 12.50 en vez de L. 12.39.')
                             ->live()
                             ->afterStateUpdated(function (bool $state, Get $get, Set $set, Producto $record): void {
                                 $calculo = self::calcular($get, $record);
 
-                                if ($state && blank($get('precio_unidad')) && is_array($calculo)) {
-                                    $set('precio_unidad', round($calculo['precio'], 2));
+                                if ($state && blank($get('precio_venta')) && is_array($calculo)) {
+                                    $set('precio_venta', round($calculo['venta'], 2));
                                 }
                             }),
-                        TextInput::make('precio_unidad')
-                            ->label('Precio por unidad (sin ISV)')
+                        TextInput::make('precio_venta')
+                            ->label(fn (Producto $record): string => $record->gravado ? 'Precio de venta por unidad (con ISV)' : 'Precio de venta por unidad')
                             ->numeric()
-                            ->minValue(0.0001)
+                            ->minValue(0.01)
                             ->prefix('L.')
                             ->live(debounce: 400)
                             ->required(fn (Get $get): bool => (bool) $get('precio_manual'))
@@ -139,12 +123,7 @@ final class ActualizarPrecioAction
                 /** @var User|null $usuario */
                 $usuario = Auth::user();
                 $manual = (bool) ($data['precio_manual'] ?? false);
-                $precioAnterior = $record->precio_unidad;
-
-                if (! ($data['hay_descuento'] ?? false)) {
-                    $data['cantidad'] = 1;
-                    $data['descuento'] = 0;
-                }
+                $ventaAnterior = $record->precioUnidadConIsv();
 
                 try {
                     $costoUnidad = self::costoUnidad($data, $record);
@@ -154,7 +133,7 @@ final class ActualizarPrecioAction
                         $costoUnidad,
                         $manual ? MotivoCambioPrecio::Manual : MotivoCambioPrecio::Compra,
                         $usuario,
-                        $manual ? (float) $data['precio_unidad'] : null,
+                        $manual ? self::sinIsv((float) $data['precio_venta'], $record) : null,
                         filled($data['nota'] ?? null) ? (string) $data['nota'] : null,
                     );
                 } catch (ReglaNegocioException $e) {
@@ -164,14 +143,18 @@ final class ActualizarPrecioAction
                 }
 
                 if ($cambio === null) {
-                    Notification::make()->title('El precio ya estaba así; no hubo cambios.')->info()->send();
+                    Notification::make()
+                        ->title('No se guardó nada')
+                        ->body('El costo y el precio de venta ya estaban así.')
+                        ->info()
+                        ->send();
 
                     return;
                 }
 
                 Notification::make()
                     ->title('Precio actualizado en todas las bodegas')
-                    ->body($record->codigo.': '.lempiras($precioAnterior).' → '.lempiras($cambio->precio_nuevo).' por unidad (sin ISV)')
+                    ->body($record->codigo.': '.lempiras($ventaAnterior).' → '.lempiras(CalculadoraPrecio::conIsv($cambio->precio_nuevo, $record->gravado)).' por unidad'.($record->gravado ? ' (con ISV)' : ''))
                     ->success()
                     ->send();
             });
@@ -180,7 +163,7 @@ final class ActualizarPrecioAction
     /**
      * Al pasar de "por caja" a "por unidad" (o al revés) se convierte el número
      * que ya estaba escrito, para que el precio no salte: L. 444.5712 la caja
-     * de 48 pasa a L. 9.2619 la unidad. Lo mismo con la cantidad comprada.
+     * de 48 pasa a L. 9.2619 la unidad.
      */
     private static function convertir(?string $nuevo, ?string $anterior, Get $get, Set $set, Producto $producto): void
     {
@@ -190,23 +173,10 @@ final class ActualizarPrecioAction
             return;
         }
 
-        $aCaja = $nuevo === 'caja';
         $costo = $get('costo');
 
         if (is_numeric($costo)) {
-            $set('costo', round($aCaja ? (float) $costo * $uxc : (float) $costo / $uxc, 4));
-        }
-
-        $cantidad = $get('cantidad');
-
-        if (is_numeric($cantidad) && (int) $cantidad > 0) {
-            $cantidad = (int) $cantidad;
-
-            if (! $aCaja) {
-                $set('cantidad', $cantidad * $uxc);
-            } elseif ($cantidad % $uxc === 0) {
-                $set('cantidad', intdiv($cantidad, $uxc));
-            }
+            $set('costo', round($nuevo === 'caja' ? (float) $costo * $uxc : (float) $costo / $uxc, 4));
         }
     }
 
@@ -219,7 +189,7 @@ final class ActualizarPrecioAction
             $producto->proveedor->etiqueta(),
             "Código {$producto->codigo}",
             $producto->unidades_por_caja > 1 ? "caja de {$producto->unidades_por_caja}" : null,
-            $producto->gravado ? 'gravado' : 'exento',
+            $producto->gravado ? 'gravado (paga ISV)' : 'exento',
             self::porcentaje($producto->margenAplicado()).' de utilidad',
         ])->filter()->implode(' · ');
     }
@@ -233,50 +203,74 @@ final class ActualizarPrecioAction
             costo: (float) ($data['costo'] ?? 0),
             porCaja: ($data['costo_por'] ?? 'unidad') === 'caja',
             unidadesPorCaja: max(1, $producto->unidades_por_caja),
-            cantidad: max(1, (int) ($data['cantidad'] ?? 1)),
-            descuento: (float) ($data['descuento'] ?? 0),
         );
     }
 
     /**
      * Lo que va quedando mientras se escribe, o qué falta / qué está mal.
      *
-     * @return array{costo: float, precio: float, margen: float}|string
+     *  costo        neto por unidad (lo que dice la factura sin ISV)
+     *  costoPagado  lo que de verdad se paga por unidad (con ISV si es gravado)
+     *  precio       precio sin ISV, que es lo que se guarda
+     *  venta        precio de venta al cliente (con ISV si es gravado)
+     *  margen       utilidad de venta sobre costoPagado (después del impuesto)
+     *
+     * @return array{costo: float, costoPagado: float, precio: float, venta: float, margen: float}|string
      */
     private static function calcular(Get $get, Producto $producto): array|string
     {
         if (! is_numeric($get('costo'))) {
-            return 'Escriba el costo de la factura para ver el precio nuevo.';
+            return 'Escriba el costo neto para ver el precio de venta.';
         }
-
-        $conDescuento = (bool) $get('hay_descuento');
 
         try {
             $costo = self::costoUnidad([
                 'costo'     => $get('costo'),
                 'costo_por' => $get('costo_por'),
-                'cantidad'  => $conDescuento ? $get('cantidad') : 1,
-                'descuento' => $conDescuento ? $get('descuento') : 0,
             ], $producto);
 
-            $manual = $get('precio_unidad');
+            $costoPagado = CalculadoraPrecio::conIsv($costo, $producto->gravado);
+            $manual = $get('precio_venta');
 
             if ($get('precio_manual') && is_numeric($manual) && (float) $manual > 0) {
-                $precio = round((float) $manual, 4);
+                $venta = round((float) $manual, 2);
 
-                return ['costo' => $costo, 'precio' => $precio, 'margen' => CalculadoraPrecio::margenReal($costo, $precio)];
+                return [
+                    'costo'       => $costo,
+                    'costoPagado' => $costoPagado,
+                    'precio'      => self::sinIsv($venta, $producto),
+                    'venta'       => $venta,
+                    'margen'      => CalculadoraPrecio::margenReal($costoPagado, $venta),
+                ];
             }
 
             $margen = $producto->margenAplicado();
+            $precio = CalculadoraPrecio::precioVenta($costo, $margen);
 
-            return ['costo' => $costo, 'precio' => CalculadoraPrecio::precioVenta($costo, $margen), 'margen' => $margen];
+            return [
+                'costo'       => $costo,
+                'costoPagado' => $costoPagado,
+                'precio'      => $precio,
+                'venta'       => CalculadoraPrecio::conIsv($precio, $producto->gravado),
+                'margen'      => $margen,
+            ];
         } catch (ReglaNegocioException $e) {
             return $e->getMessage();
         }
     }
 
     /**
-     * Datos para la tarjeta de la derecha.
+     * Precio de venta (con ISV) → precio sin ISV, que es lo que se guarda.
+     */
+    private static function sinIsv(float $venta, Producto $producto): float
+    {
+        return $producto->gravado
+            ? round($venta / (1 + CalculadoraPrecio::tasaIsv()), 4)
+            : round($venta, 4);
+    }
+
+    /**
+     * Datos para la tarjeta de la derecha. Todo en precio de venta (con ISV si es gravado).
      *
      * @return array<string, mixed>
      */
@@ -288,47 +282,50 @@ final class ActualizarPrecioAction
             return ['mensaje' => $calculo];
         }
 
+        $gravado = $producto->gravado;
         $uxc = max(1, $producto->unidades_por_caja);
-        $precioCaja = $calculo['precio'] * $uxc;
-        $diferencia = round($calculo['precio'] - $producto->precio_unidad, 2);
+        $hoy = $producto->precioUnidadConIsv();
+        $diferencia = round($calculo['venta'] - $hoy, 2);
 
         [$tono, $cambio] = match (true) {
             abs($diferencia) < 0.005 => ['igual', 'Queda igual que hoy'],
-            $diferencia > 0          => ['sube', 'Sube '.lempiras($diferencia).self::variacion($diferencia, $producto)],
-            default                  => ['baja', 'Baja '.lempiras(abs($diferencia)).self::variacion($diferencia, $producto)],
+            $diferencia > 0          => ['sube', 'Sube '.lempiras($diferencia).self::variacion($diferencia, $hoy)],
+            default                  => ['baja', 'Baja '.lempiras(abs($diferencia)).self::variacion($diferencia, $hoy)],
         };
 
         // Un cambio de más del 25% casi siempre es un error de dedo o de caja/unidad.
-        $exagerado = $producto->precio_unidad > 0 && abs($diferencia) / $producto->precio_unidad > self::CAMBIO_SOSPECHOSO;
+        $exagerado = $hoy > 0 && abs($diferencia) / $hoy > self::CAMBIO_SOSPECHOSO;
 
         return [
-            'mensaje'    => null,
-            'manual'     => (bool) $get('precio_manual'),
-            'precio'     => lempiras($calculo['precio']),
-            'precioIsv'  => $producto->gravado ? lempiras(CalculadoraPrecio::conIsv($calculo['precio'], true)) : null,
-            'uxc'        => $uxc > 1 ? $uxc : null,
-            'caja'       => lempiras($precioCaja),
-            'cajaIsv'    => $producto->gravado ? lempiras(CalculadoraPrecio::conIsv($precioCaja, true)) : null,
-            'costo'      => lempiras($calculo['costo'], 4),
-            'costoAntes' => lempiras($producto->costo_unidad, 4),
-            'margen'     => self::porcentaje($calculo['margen']),
-            'hoy'        => lempiras($producto->precio_unidad),
-            'tono'       => $exagerado ? 'alerta' : $tono,
-            'cambio'     => $cambio,
-            'aviso'      => $exagerado ? 'Es un cambio muy grande. Revise el costo y si es por caja o por unidad antes de guardar.' : null,
+            'mensaje'   => null,
+            'manual'    => (bool) $get('precio_manual'),
+            'gravado'   => $gravado,
+            'venta'     => lempiras($calculo['venta']),
+            'sinIsv'    => lempiras($calculo['precio']),
+            'uxc'       => $uxc > 1 ? $uxc : null,
+            'caja'      => lempiras(CalculadoraPrecio::conIsv($calculo['precio'] * $uxc, $gravado)),
+            'cajaSin'   => lempiras($calculo['precio'] * $uxc),
+            'costo'     => lempiras($calculo['costoPagado'], 4),
+            'costoNeto' => lempiras($calculo['costo'], 4),
+            'margen'    => self::porcentaje($calculo['margen']),
+            'ganancia'  => lempiras($calculo['venta'] - $calculo['costoPagado']),
+            'hoy'       => lempiras($hoy),
+            'tono'      => $exagerado ? 'alerta' : $tono,
+            'cambio'    => $cambio,
+            'aviso'     => $exagerado ? 'Es un cambio muy grande. Revise el costo y si es por caja o por unidad antes de guardar.' : null,
         ];
     }
 
     /**
      * " (+4.64%)" o " (−3.1%)" contra el precio de hoy.
      */
-    private static function variacion(float $diferencia, Producto $producto): string
+    private static function variacion(float $diferencia, float $hoy): string
     {
-        if ($producto->precio_unidad <= 0) {
+        if ($hoy <= 0) {
             return '';
         }
 
-        return ' ('.($diferencia > 0 ? '+' : '−').self::porcentaje(abs($diferencia) / $producto->precio_unidad).')';
+        return ' ('.($diferencia > 0 ? '+' : '−').self::porcentaje(abs($diferencia) / $hoy).')';
     }
 
     /**

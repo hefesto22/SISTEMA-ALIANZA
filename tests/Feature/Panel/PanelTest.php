@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\EstadoPedido;
+use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
@@ -69,8 +70,6 @@ test('actualizar precio desde el panel cambia el precio y deja historial', funct
         ->callAction('actualizarPrecio', data: [
             'costo_por'     => 'unidad',
             'costo'         => 60,
-            'cantidad'      => 1,
-            'descuento'     => 0,
             'precio_manual' => false,
         ])
         ->assertHasNoActionErrors();
@@ -78,6 +77,26 @@ test('actualizar precio desde el panel cambia el precio y deja historial', funct
     expect($this->producto->fresh()?->precio_unidad)->toBe(71.4286)
         ->and($this->producto->cambiosPrecio()->first()?->user_id)->toBe($this->encargado->id)
         ->and($this->producto->cambiosPrecio()->first()?->bodega_id)->toBe($this->bodega->id);
+});
+
+test('el precio de venta a mano se escribe con ISV y se guarda sin ISV', function (): void {
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->callAction('actualizarPrecio', data: [
+            'costo_por'     => 'unidad',
+            'costo'         => 50,
+            'precio_manual' => true,
+            'precio_venta'  => 70,
+        ])
+        ->assertHasNoActionErrors();
+
+    // 70 ÷ 1.15 = 60.8696 sin ISV; con ISV vuelve a dar 70.00 al cliente.
+    $producto = $this->producto->fresh();
+
+    expect($producto?->precio_unidad)->toBe(60.8696)
+        ->and($producto?->precioUnidadConIsv())->toBe(70.0)
+        ->and($this->producto->cambiosPrecio()->first()?->motivo)->toBe(MotivoCambioPrecio::Manual);
 });
 
 test('pasar de caja a unidad convierte el costo y el precio no salta', function (): void {

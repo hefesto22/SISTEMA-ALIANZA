@@ -46,9 +46,9 @@
     @if ($mensaje)
         <div class="ap-vacio">{{ $mensaje }}</div>
     @else
-        <div class="ap-eyebrow">{{ $manual ? 'Precio por unidad · a mano' : 'Nuevo precio por unidad' }}</div>
-        <div class="ap-precio">{{ $precio }}</div>
-        <div class="ap-sub">{{ $precioIsv ? 'Con ISV '.$precioIsv : 'Exento de ISV' }}</div>
+        <div class="ap-eyebrow">{{ $manual ? 'Precio de venta · a mano' : 'Precio de venta por unidad' }}</div>
+        <div class="ap-precio">{{ $venta }}</div>
+        <div class="ap-sub">{{ $gravado ? 'Con ISV incluido · sin ISV '.$sinIsv : 'Exento de ISV' }}</div>
 
         <div class="ap-sep"></div>
 
@@ -58,22 +58,30 @@
                     <dt>Caja de {{ $uxc }}</dt>
                     <dd>
                         {{ $caja }}
-                        @if ($cajaIsv)
-                            <small>con ISV {{ $cajaIsv }}</small>
+                        @if ($gravado)
+                            <small>sin ISV {{ $cajaSin }}</small>
                         @endif
                     </dd>
                 </div>
             @endif
             <div class="ap-fila">
-                <dt>Costo por unidad</dt>
-                <dd>{{ $costo }}<small>antes {{ $costoAntes }}</small></dd>
+                <dt>{{ $gravado ? 'Costo con ISV' : 'Costo por unidad' }}</dt>
+                <dd>
+                    {{ $costo }}
+                    @if ($gravado)
+                        <small>neto {{ $costoNeto }} + ISV</small>
+                    @endif
+                </dd>
             </div>
             <div class="ap-fila">
                 <dt>Utilidad</dt>
-                <dd>{{ $margen }}</dd>
+                <dd>
+                    {{ $margen }}
+                    <small>{{ $ganancia }} por unidad</small>
+                </dd>
             </div>
             <div class="ap-fila">
-                <dt>Precio de hoy</dt>
+                <dt>Precio de venta hoy</dt>
                 <dd>{{ $hoy }}</dd>
             </div>
         </dl>

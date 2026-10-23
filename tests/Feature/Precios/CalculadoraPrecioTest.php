@@ -30,6 +30,17 @@ test('el ISV solo se suma a los productos gravados', function (): void {
         ->and(CalculadoraPrecio::conIsv(100, false))->toBe(100.0);
 });
 
+test('la utilidad es después del ISV: el precio con ISV deja el mismo % sobre el costo con ISV', function (): void {
+    // MERHONSA: jabón DK12, costo neto 9.2619, 14% → L. 12.39 al cliente
+    $precio = CalculadoraPrecio::precioVenta(9.2619, 0.14);
+    $venta = CalculadoraPrecio::conIsv($precio, true);
+    $costoConIsv = CalculadoraPrecio::conIsv(9.2619, true);
+
+    expect(round($venta, 2))->toBe(12.39)
+        ->and($costoConIsv)->toBe(10.6512)
+        ->and(round(1 - $costoConIsv / $venta, 4))->toBe(0.14);
+});
+
 test('no acepta margen de 100% o más', function (): void {
     CalculadoraPrecio::precioVenta(10, 1.0);
 })->throws(ReglaNegocioException::class);
