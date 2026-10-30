@@ -42,7 +42,7 @@ class ImprimirPedidosController extends Controller
 
         return response()->view('pedidos.imprimir', [
             'pedidos'    => $pedidos,
-            'titulo'     => $pedidos->count() === 1 ? 'Pedido '.$pedidos->first()?->numero : $pedidos->count().' facturas',
+            'titulo'     => $pedidos->count() === 1 ? 'Pedido '.$pedidos->firstOrFail()->numero : $pedidos->count().' facturas',
             'fiscales'   => DatosFiscales::actual(),
             'firmado'    => $firmado,
             'originales' => $firmado ? self::ids($request->string('originales')->toString()) : [],
