@@ -15,7 +15,7 @@ use App\Models\User;
  * Emite la factura de un pedido con el siguiente número del CAI de su
  * bodega (el propio o, si no tiene, el global).
  *
- * Se llama dentro de la transacción de MarcarImpreso: el CAI queda tomado
+ * Se llama dentro de la transacción de ImprimirFacturas: el CAI queda tomado
  * (lockForUpdate) hasta terminar, así dos impresiones al mismo tiempo no
  * sacan el mismo número.
  *
@@ -37,6 +37,12 @@ final class EmitirFactura
         }
 
         $correlativo = $cai->siguiente;
+
+        // Última defensa: nunca un número fuera del rango autorizado por el SAR.
+        if (! $cai->enRango($correlativo)) {
+            throw new ReglaNegocioException("El CAI {$cai->cai} tiene el siguiente número ({$correlativo}) fuera de su rango autorizado. Revíselo en Administración > CAI y datos fiscales.");
+        }
+
         $cai->siguiente = $correlativo + 1;
         $cai->save();
 

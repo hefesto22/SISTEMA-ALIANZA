@@ -76,7 +76,7 @@ class PedidoPolicy
     }
 
     /**
-     * Administración, o el encargado de la bodega de ese vendedor.
+     * Administración, o el encargado de la bodega del pedido.
      */
     private function leTocaABodega(User $user, Pedido $pedido): bool
     {
@@ -85,6 +85,6 @@ class PedidoPolicy
         }
 
         return $user->veTodasLasBodegas()
-            || ($user->bodega_id !== null && $pedido->vendedor->bodega_id === $user->bodega_id);
+            || ($user->bodega_id !== null && $pedido->bodega_id === $user->bodega_id);
     }
 }

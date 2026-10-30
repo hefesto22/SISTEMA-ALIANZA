@@ -1,7 +1,10 @@
 {{--
     Factura(s) del pedido para imprimir. Una sola (ImprimirPedidoController) o
     varias de un solo, una por página (ImprimirPedidosController).
-    Datos: $pedidos (pedidos con sus relaciones), $titulo, $fiscales (DatosFiscales).
+    Datos: $pedidos (pedidos con sus relaciones), $titulo, $fiscales (DatosFiscales),
+    $firmado (el enlace viene firmado de la acción Imprimir) y $originales (ids
+    de los pedidos que salen como ORIGINAL). Sin firma, toda factura sale
+    "COPIA · SIN VALOR FISCAL"; firmada y no original, "REIMPRESIÓN · COPIA".
 
     Con factura vigente sale como FACTURA con los requisitos del Acuerdo
     481-2017 (datos del emisor, CAI, número, rango autorizado, fecha límite,
@@ -87,6 +90,7 @@
         /** @var \App\Models\Pedido $pedido */
         /** @var \App\Models\DatosFiscales $fiscales */
         $factura = $pedido->factura;
+        $esOriginal = ($firmado ?? false) && in_array($pedido->id, $originales ?? [], true);
         $validado = $pedido->estaValidado();
         $conPromo = $pedido->descuento > 0;
         $promociones = $pedido->items->pluck('promocion')->filter()->unique('id');
@@ -132,8 +136,12 @@
                     <div class="numero">N° {{ $factura->numero }}</div>
                     <div>Fecha de emisión: {{ $factura->fecha_emision->format('d/m/Y H:i') }}</div>
                     <div class="cai">CAI: {{ $factura->cai }}</div>
-                    @if ($factura->impresiones > 1)
+                    @if ($esOriginal)
+                        {{-- Original: sin sello. --}}
+                    @elseif ($firmado ?? false)
                         <span class="reimpresion">REIMPRESIÓN · COPIA</span>
+                    @else
+                        <span class="reimpresion">COPIA · SIN VALOR FISCAL</span>
                     @endif
                 @else
                     <div class="tipo">PEDIDO</div>

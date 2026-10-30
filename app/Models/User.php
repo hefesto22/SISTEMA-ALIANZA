@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\Rol;
 use App\Models\Concerns\GuardaEnMayusculas;
 use App\Traits\HasAuditFields;
@@ -21,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Permission\Traits\HasRoles;
@@ -100,7 +102,7 @@ class User extends Authenticatable implements FilamentUser
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['name', 'email', 'phone', 'is_active'])
+            ->logOnly(['name', 'email', 'phone', 'bodega_id', 'is_active'])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
             ->setDescriptionForEvent(fn (string $eventName): string => "Usuario {$eventName}");
@@ -115,6 +117,61 @@ class User extends Authenticatable implements FilamentUser
             'last_login_at' => now(),
             'last_login_ip' => $ip,
         ]);
+    }
+
+    // ─── Super admin y bajas ───────────────────────────────────
+
+    /**
+     * Nunca se queda el sistema sin un super admin activo, y al desactivar a
+     * alguien se le cierra el "Recordarme" (la cookie deja de servir).
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (User $user): void {
+            if (! $user->isDirty('is_active') || $user->is_active) {
+                return;
+            }
+
+            if ((bool) $user->getOriginal('is_active') && $user->esSuperAdmin() && ! $user->hayOtroSuperAdminActivo()) {
+                throw new ReglaNegocioException('No se puede desactivar al único super administrador activo.');
+            }
+
+            $user->setRememberToken(Str::random(60));
+        });
+
+        static::deleting(function (User $user): void {
+            if ($user->esSuperAdmin() && ! $user->hayOtroSuperAdminActivo()) {
+                throw new ReglaNegocioException('No se puede eliminar al único super administrador activo.');
+            }
+        });
+    }
+
+    public function esSuperAdmin(): bool
+    {
+        return $this->hasRole(ShieldUtils::getSuperAdminName());
+    }
+
+    public function hayOtroSuperAdminActivo(): bool
+    {
+        return self::query()
+            ->whereKeyNot($this->id)
+            ->where('is_active', true)
+            ->whereHas('roles', fn (Builder $q): Builder => $q->where('name', ShieldUtils::getSuperAdminName()))
+            ->exists();
+    }
+
+    public function esUltimoSuperAdminActivo(): bool
+    {
+        return $this->is_active && $this->esSuperAdmin() && ! $this->hayOtroSuperAdminActivo();
+    }
+
+    /**
+     * Tiene pedidos (como vendedor): no se elimina, se desactiva, para que
+     * sus pedidos y facturas sigan con su nombre.
+     */
+    public function tienePedidos(): bool
+    {
+        return Pedido::query()->where('vendedor_id', $this->id)->exists();
     }
 
     // ─── Bodega y rol de trabajo ──────────────────────────────

@@ -42,6 +42,9 @@ use Illuminate\Support\Carbon;
  * @property float $isv
  * @property float $total
  * @property int $impresiones
+ * @property int $reintentos
+ * @property Carbon|null $reintento_at
+ * @property int|null $reintento_por
  * @property EstadoFactura $estado
  * @property int|null $reemplaza_a_id
  * @property int|null $emitida_por
@@ -69,6 +72,7 @@ class Factura extends Model
     protected $attributes = [
         'estado'      => 'vigente',
         'impresiones' => 0,
+        'reintentos'  => 0,
     ];
 
     /**
@@ -87,6 +91,8 @@ class Factura extends Model
             'isv'             => 'float',
             'total'           => 'float',
             'impresiones'     => 'integer',
+            'reintentos'      => 'integer',
+            'reintento_at'    => 'datetime',
             'estado'          => EstadoFactura::class,
             'anulada_at'      => 'datetime',
         ];
@@ -143,7 +149,7 @@ class Factura extends Model
      */
     public function emisor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'emitida_por');
+        return $this->belongsTo(User::class, 'emitida_por')->withTrashed();
     }
 
     /**
@@ -151,7 +157,7 @@ class Factura extends Model
      */
     public function anulador(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'anulada_por');
+        return $this->belongsTo(User::class, 'anulada_por')->withTrashed();
     }
 
     /**

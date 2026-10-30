@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Users\Schemas;
 
 use App\Enums\Rol;
+use App\Filament\Support\Acceso;
 use App\Models\Ruta;
+use App\Models\User;
 use App\Support\Texto;
+use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -16,6 +19,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
 use Spatie\Permission\Models\Role;
@@ -115,12 +119,16 @@ class UserForm
                     ->schema([
                         Select::make('roles')
                             ->label('Roles')
-                            ->relationship('roles', 'name')
+                            // Solo un super admin puede dar el rol de super admin.
+                            ->relationship('roles', 'name', fn (Builder $query): Builder => self::rolesQuePuedeDar($query))
                             ->multiple()
                             ->preload()
                             ->searchable()
                             ->live()
-                            ->placeholder('Seleccionar roles'),
+                            ->placeholder('Seleccionar roles')
+                            // Nadie se cambia sus propios roles.
+                            ->disabled(fn (?User $record): bool => self::esElMismo($record))
+                            ->helperText(fn (?User $record): ?string => self::esElMismo($record) ? 'Sus propios roles los cambia otro administrador.' : null),
                     ]),
 
                 Section::make('Rutas')
@@ -153,9 +161,35 @@ class UserForm
                             ->default(true)
                             ->onColor('success')
                             ->offColor('danger')
-                            ->helperText('Si se desactiva, el usuario no podrá iniciar sesión en el panel.'),
+                            // Ni uno mismo ni el único super admin activo se pueden desactivar.
+                            ->disabled(fn (?User $record): bool => self::esElMismo($record) || ($record?->esUltimoSuperAdminActivo() ?? false))
+                            ->helperText('Si se desactiva, el usuario no podrá iniciar sesión en el panel y se le cierra la sesión.'),
                     ]),
             ]);
+    }
+
+    /**
+     * Los roles que puede asignar quien edita: todos menos super admin,
+     * salvo que él mismo sea super admin.
+     *
+     * @param Builder<Model> $query
+     *
+     * @return Builder<Model>
+     */
+    private static function rolesQuePuedeDar(Builder $query): Builder
+    {
+        $usuario = Acceso::usuario();
+
+        return $usuario !== null && $usuario->esSuperAdmin()
+            ? $query
+            : $query->where('name', '!=', Utils::getSuperAdminName());
+    }
+
+    private static function esElMismo(?User $record): bool
+    {
+        $usuario = Acceso::usuario();
+
+        return $record !== null && $usuario !== null && $record->is($usuario);
     }
 
     /**

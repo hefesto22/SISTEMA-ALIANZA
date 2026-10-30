@@ -13,7 +13,6 @@ use App\Filament\Resources\Users\Schemas\UserInfolist;
 use App\Filament\Resources\Users\Tables\UsersTable;
 use App\Models\User;
 use BackedEnum;
-use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -69,59 +68,76 @@ class UserResource extends Resource
     }
 
     /**
-     * Verificar si el usuario puede ver un registro específico.
+     * Ver: el permiso (UserPolicy) y que sea de su rama. Super admin, todos.
      */
     public static function canView(Model $record): bool
     {
-        /** @var User $user */
-        $user = Auth::user();
-
-        if ($user->hasRole(Utils::getSuperAdminName())) {
-            return true;
-        }
-
-        return in_array($record->id, $user->getVisibleUserIds());
+        return parent::canView($record) && self::esDeSuRama($record);
     }
 
     /**
-     * Verificar si el usuario puede editar un registro específico.
+     * Editar: el permiso y que sea de su rama. A un super admin solo lo
+     * edita otro super admin.
      */
     public static function canEdit(Model $record): bool
     {
-        /** @var User $user */
-        $user = Auth::user();
-
-        if ($user->hasRole(Utils::getSuperAdminName())) {
-            return true;
-        }
-
-        return in_array($record->id, $user->getVisibleUserIds());
+        return parent::canEdit($record) && self::esDeSuRama($record) && self::puedeTocarSuperAdmin($record);
     }
 
     /**
-     * Verificar si el usuario puede eliminar un registro específico.
-     * No se puede eliminar a sí mismo ni al super admin.
+     * Eliminar: el permiso (que ya impide eliminarse a sí mismo, a un super
+     * admin o a quien tiene pedidos) y que sea de su rama.
      */
     public static function canDelete(Model $record): bool
+    {
+        return parent::canDelete($record) && self::esDeSuRama($record);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function nombresDeRoles(User $usuario): array
+    {
+        /** @var list<string> $nombres */
+        $nombres = $usuario->roles()->orderBy('name')->pluck('name')->values()->all();
+
+        return $nombres;
+    }
+
+    /**
+     * Deja en el registro de actividad quién le cambió los roles a quién.
+     *
+     * @param list<string> $antes
+     * @param list<string> $despues
+     */
+    public static function registrarCambioDeRoles(User $usuario, array $antes, array $despues): void
+    {
+        if ($antes === $despues) {
+            return;
+        }
+
+        activity('usuarios')
+            ->performedOn($usuario)
+            ->causedBy(Auth::user())
+            ->event('roles')
+            ->withProperties(['antes' => $antes, 'despues' => $despues])
+            ->log('Roles: '.(implode(', ', $antes) ?: 'ninguno').' → '.(implode(', ', $despues) ?: 'ninguno'));
+    }
+
+    private static function esDeSuRama(Model $record): bool
     {
         /** @var User $user */
         $user = Auth::user();
 
-        // No puede borrarse a sí mismo
-        if ($record->id === $user->id) {
-            return false;
-        }
+        return $user->esSuperAdmin() || in_array($record->getKey(), $user->getVisibleUserIds());
+    }
 
-        // No puede borrar super admins
-        if ($record->hasRole(Utils::getSuperAdminName())) {
-            return false;
-        }
+    private static function puedeTocarSuperAdmin(Model $record): bool
+    {
+        /** @var User $user */
+        $user = Auth::user();
 
-        if ($user->hasRole(Utils::getSuperAdminName())) {
-            return true;
-        }
-
-        return in_array($record->id, $user->getVisibleUserIds());
+        return $user->esSuperAdmin() || ! ($record instanceof User && $record->esSuperAdmin());
     }
 
     public static function getRelations(): array

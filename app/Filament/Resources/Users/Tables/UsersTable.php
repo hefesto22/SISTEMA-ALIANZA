@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Users\Tables;
 
+use App\Filament\Resources\Users\UserResource;
+use App\Filament\Support\Acceso;
+use App\Models\User;
 use Exception;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -79,6 +82,10 @@ class UsersTable
                     ->label('Activo')
                     ->onColor('success')
                     ->offColor('danger')
+                    // Solo si lo puede editar, y nunca a uno mismo ni al único super admin activo.
+                    ->disabled(fn (User $record): bool => ! UserResource::canEdit($record)
+                        || $record->is(Acceso::usuario())
+                        || $record->esUltimoSuperAdminActivo())
                     ->beforeStateUpdated(function (Model $record) {
                         if ($record->hasRole('super_admin')) {
                             throw new Exception('No se puede desactivar al super administrador.');
@@ -137,7 +144,9 @@ class UsersTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    // Cada uno pasa por UserPolicy: los que no se pueden eliminar se saltan.
                     DeleteBulkAction::make()
+                        ->authorizeIndividualRecords('delete')
                         ->before(function ($records) {
                             $records->each(function (Model $record) {
                                 if ($record->hasRole('super_admin')) {
@@ -146,7 +155,8 @@ class UsersTable
                             });
                         }),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    ForceDeleteBulkAction::make()
+                        ->authorizeIndividualRecords('forceDelete'),
                 ]),
             ])
             ->modifyQueryUsing(fn (Builder $query) => $query->withoutGlobalScopes([

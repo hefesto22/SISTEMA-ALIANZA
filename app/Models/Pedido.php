@@ -144,7 +144,8 @@ class Pedido extends Model
      */
     public function vendedor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'vendedor_id');
+        // Aunque el usuario se haya eliminado, sus pedidos siguen siendo suyos.
+        return $this->belongsTo(User::class, 'vendedor_id')->withTrashed();
     }
 
     /**
@@ -152,7 +153,7 @@ class Pedido extends Model
      */
     public function validador(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'validado_por');
+        return $this->belongsTo(User::class, 'validado_por')->withTrashed();
     }
 
     /**
@@ -162,7 +163,7 @@ class Pedido extends Model
      */
     public function impresor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'impreso_por');
+        return $this->belongsTo(User::class, 'impreso_por')->withTrashed();
     }
 
     /**
@@ -172,7 +173,7 @@ class Pedido extends Model
      */
     public function corrector(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'corregido_por');
+        return $this->belongsTo(User::class, 'corregido_por')->withTrashed();
     }
 
     /**
@@ -242,7 +243,9 @@ class Pedido extends Model
      * Quién ve qué:
      *  - Super admin y administración: todos los pedidos, de todas las bodegas.
      *  - Vendedor: solo los que él levantó.
-     *  - Encargado de bodega: los de los vendedores de su bodega.
+     *  - Encargado de bodega: los de su bodega (la del pedido, que es la del
+     *    vendedor cuando lo levantó). Si después mueven al vendedor a otra
+     *    bodega, su historial no se va con él.
      *
      * @param Builder<Pedido> $query
      *
@@ -262,7 +265,7 @@ class Pedido extends Model
             return $query->whereRaw('1 = 0');
         }
 
-        return $query->whereHas('vendedor', fn (Builder $vendedor): Builder => $vendedor->where('bodega_id', $user->bodega_id));
+        return $query->where('pedidos.bodega_id', $user->bodega_id);
     }
 
     public function esVisiblePara(User $user): bool
@@ -275,7 +278,7 @@ class Pedido extends Model
             return $this->vendedor_id === $user->id;
         }
 
-        return $user->bodega_id !== null && $this->vendedor->bodega_id === $user->bodega_id;
+        return $user->bodega_id !== null && $this->bodega_id === $user->bodega_id;
     }
 
     /**

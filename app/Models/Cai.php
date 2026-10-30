@@ -88,12 +88,20 @@ class Cai extends Model
     }
 
     /**
-     * El primer número que se usa es el inicio del rango.
+     * El primer número que se usa es el inicio del rango. Si se corrige el
+     * inicio antes de emitir la primera factura, el siguiente se mueve con él
+     * (si no, saldrían números fuera del rango autorizado).
      */
     protected static function booted(): void
     {
         static::creating(function (Cai $cai): void {
             if ($cai->getAttribute('siguiente') === null) {
+                $cai->siguiente = $cai->rango_desde;
+            }
+        });
+
+        static::updating(function (Cai $cai): void {
+            if ($cai->isDirty('rango_desde') && ! $cai->facturas()->exists()) {
                 $cai->siguiente = $cai->rango_desde;
             }
         });
@@ -118,7 +126,8 @@ class Cai extends Model
     }
 
     /**
-     * Activo, con fecha límite de hoy en adelante y con números disponibles.
+     * Activo, con fecha límite de hoy en adelante y con el siguiente número
+     * dentro del rango autorizado.
      *
      * @param Builder<Cai> $query
      *
@@ -129,6 +138,7 @@ class Cai extends Model
         return $query
             ->where('activo', true)
             ->whereDate('fecha_limite', '>=', today())
+            ->whereColumn('siguiente', '>=', 'rango_desde')
             ->whereColumn('siguiente', '<=', 'rango_hasta');
     }
 
@@ -200,6 +210,11 @@ class Cai extends Model
     public function estaAgotado(): bool
     {
         return $this->siguiente > $this->rango_hasta;
+    }
+
+    public function enRango(int $correlativo): bool
+    {
+        return $correlativo >= $this->rango_desde && $correlativo <= $this->rango_hasta;
     }
 
     public function estaVigente(): bool

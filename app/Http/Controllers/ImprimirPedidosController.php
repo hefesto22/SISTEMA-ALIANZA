@@ -4,60 +4,56 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Domain\Exceptions\ReglaNegocioException;
-use App\Domain\Pedidos\MarcarImpreso;
+use App\Domain\Facturacion\ImprimirFacturas;
 use App\Models\DatosFiscales;
 use App\Models\Pedido;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
 
 /**
- * Varios pedidos de un solo, uno por página ("Imprimir todos" en la pestaña
- * Por imprimir o "Imprimir seleccionados"). Solo entran los que esta persona
- * puede imprimir; todos pasan a Impreso con su factura.
+ * Hoja de uno o varios pedidos, una por página. Solo muestra: las facturas
+ * ya las emitió la acción Imprimir (ImprimirFacturas), que manda aquí con
+ * un enlace firmado que dice cuáles van como ORIGINAL. Sin firma (enlace
+ * copiado, vencido o armado a mano) todas salen COPIA · SIN VALOR FISCAL.
  *
- * Todo o nada: si alguno no se puede facturar (su bodega no tiene CAI
- * vigente…) no se imprime ninguno ni se gasta ningún número.
- *
- * Uso: /imprimir/pedidos?ids=12,15,18
+ * Uso: /imprimir/pedidos?ids=12,15,18&originales=12,18&signature=…
  */
 class ImprimirPedidosController extends Controller
 {
-    public function __invoke(Request $request, MarcarImpreso $marcar): Response
+    public function __invoke(Request $request): Response
     {
         $usuario = $request->user();
         abort_unless($usuario instanceof User, 403);
 
-        $ids = array_values(array_filter(array_map(intval(...), explode(',', $request->string('ids')->toString()))));
+        $ids = self::ids($request->string('ids')->toString());
+        abort_if($ids === [] || count($ids) > ImprimirFacturas::MAXIMO, 404, 'No hay pedidos para imprimir.');
+
+        $firmado = $request->hasValidSignature();
 
         $pedidos = Pedido::query()
             ->visiblePara($usuario)
             ->whereKey($ids)
             ->with(ImprimirPedidoController::RELACIONES)
             ->orderBy('id')
-            ->get()
-            ->filter(fn (Pedido $pedido): bool => Gate::forUser($usuario)->allows('imprimir', $pedido))
-            ->values();
+            ->get();
 
         abort_if($pedidos->isEmpty(), 404, 'No hay pedidos para imprimir.');
 
-        try {
-            DB::transaction(function () use ($pedidos, $marcar, $usuario): void {
-                foreach ($pedidos as $pedido) {
-                    $marcar->ejecutar($pedido, $usuario);
-                }
-            });
-        } catch (ReglaNegocioException $e) {
-            return ImprimirPedidoController::sinImprimir($e->getMessage());
-        }
-
         return response()->view('pedidos.imprimir', [
-            'pedidos'  => $pedidos,
-            'titulo'   => $pedidos->count().' facturas',
-            'fiscales' => DatosFiscales::actual(),
+            'pedidos'    => $pedidos,
+            'titulo'     => $pedidos->count() === 1 ? 'Pedido '.$pedidos->first()?->numero : $pedidos->count().' facturas',
+            'fiscales'   => DatosFiscales::actual(),
+            'firmado'    => $firmado,
+            'originales' => $firmado ? self::ids($request->string('originales')->toString()) : [],
         ]);
+    }
+
+    /**
+     * @return list<int>
+     */
+    private static function ids(string $texto): array
+    {
+        return array_values(array_unique(array_filter(array_map(intval(...), explode(',', $texto)))));
     }
 }

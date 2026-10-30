@@ -30,13 +30,15 @@ class AdminPanelProvider extends PanelProvider
 {
     /**
      * Los campos de texto se ven en mayúsculas mientras se escribe (menos
-     * correo, contraseña y la pantalla de entrada). Lo que se guarda lo
-     * pasa a mayúsculas el modelo.
+     * correo, contraseña y la pantalla de entrada; los ejemplos en gris
+     * quedan como se escribieron). Lo que se guarda lo pasa a mayúsculas el
+     * modelo.
      */
     private const ESTILO_MAYUSCULAS = '<style>'
         .'.fi-fo-text-input input:not([type=email]):not([type=password]):not([type=url]),'
         .'.fi-fo-textarea textarea{text-transform:uppercase}'
-        .'.fi-simple-layout .fi-fo-text-input input{text-transform:none}'
+        .'.fi-simple-layout .fi-fo-text-input input,'
+        .'.fi-fo-text-input input::placeholder,.fi-fo-textarea textarea::placeholder{text-transform:none}'
         .'</style>';
 
     public function panel(Panel $panel): Panel

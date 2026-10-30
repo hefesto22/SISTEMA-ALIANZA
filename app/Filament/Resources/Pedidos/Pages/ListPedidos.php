@@ -5,17 +5,16 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Enums\EstadoPedido;
+use App\Enums\ModoImpresion;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
-use App\Models\Pedido;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\On;
 
 class ListPedidos extends ListRecords
@@ -33,7 +32,14 @@ class ListPedidos extends ListRecords
                 ->label(fn (): string => 'Imprimir todos ('.count($this->idsPorImprimir()).')')
                 ->icon(Heroicon::OutlinedPrinter)
                 ->color('info')
-                ->dispatch(ImprimirPedidoAction::EVENTO, fn (): array => ImprimirPedidoAction::datos(ImprimirPedidoAction::urlDeVarios($this->idsPorImprimir())))
+                ->requiresConfirmation()
+                ->modalIcon(Heroicon::OutlinedPrinter)
+                ->modalHeading(fn (): string => 'Imprimir '.count($this->idsPorImprimir()).' factura(s)')
+                ->modalDescription('Salen como original, una por página, con los filtros y la búsqueda que tiene puestos. Si otra persona ya imprimió alguno, se salta.')
+                ->modalSubmitActionLabel('Imprimir')
+                ->action(function (): void {
+                    ImprimirPedidoAction::ejecutar($this, $this->idsPorImprimir(), ModoImpresion::Originales);
+                })
                 ->visible(fn (): bool => $this->activeTab === EstadoPedido::PorImprimir->value && $this->idsPorImprimir() !== []),
             CreateAction::make()->label('Nueva preventa'),
         ];
@@ -102,6 +108,17 @@ class ListPedidos extends ListRecords
     }
 
     /**
+     * Botones de los avisos ("Imprimir" al validar o corregir, "No salió").
+     *
+     * @param array<int|string, mixed> $ids
+     */
+    #[On(ImprimirPedidoAction::PEDIR)]
+    public function imprimirPedidos(array $ids = [], string $modo = 'originales'): void
+    {
+        ImprimirPedidoAction::desdeAviso($this, $ids, $modo);
+    }
+
+    /**
      * Después de imprimir (resources/views/filament/imprimir-hoja.blade.php):
      * se vuelve a dibujar para que los impresos pasen a su pestaña.
      */
@@ -112,22 +129,26 @@ class ListPedidos extends ListRecords
     }
 
     /**
-     * Los que están Por imprimir en la tabla (con filtros y búsqueda) y que
-     * esta persona puede imprimir.
+     * Los que están Por imprimir en la tabla (con filtros y búsqueda). La
+     * tabla ya muestra solo lo de su bodega (o todo a administración), así
+     * que basta con que pueda validar/imprimir.
      *
      * @return list<int>
      */
     private function idsPorImprimir(): array
     {
-        return $this->idsPorImprimir ??= array_values(
+        if (! Acceso::puede('Validar:Pedido')) {
+            return $this->idsPorImprimir = [];
+        }
+
+        return $this->idsPorImprimir ??= array_values(array_map(
+            intval(...),
             ($this->getFilteredTableQuery() ?? PedidoResource::getEloquentQuery())
-                ->where('estado', EstadoPedido::PorImprimir)
-                ->with('vendedor')
-                ->orderBy('id')
-                ->get()
-                ->filter(fn (Pedido $pedido): bool => Gate::allows('imprimir', $pedido))
-                ->map(fn (Pedido $pedido): int => $pedido->id)
+                ->where('pedidos.estado', EstadoPedido::PorImprimir)
+                ->reorder()
+                ->orderBy('pedidos.id')
+                ->pluck('pedidos.id')
                 ->all(),
-        );
+        ));
     }
 }

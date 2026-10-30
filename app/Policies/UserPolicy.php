@@ -4,9 +4,16 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
 use Illuminate\Foundation\Auth\User as AuthUser;
 
+/**
+ * Usuarios. Además del permiso:
+ *  - nadie se elimina a sí mismo ni elimina a un super admin;
+ *  - quien tiene pedidos no se elimina (se desactiva), para que sus pedidos
+ *    y facturas sigan con su nombre.
+ */
 class UserPolicy
 {
     use HandlesAuthorization;
@@ -31,7 +38,12 @@ class UserPolicy
         return $authUser->can('Update:User');
     }
 
-    public function delete(AuthUser $authUser): bool
+    public function delete(AuthUser $authUser, User $user): bool
+    {
+        return $authUser->can('Delete:User') && $this->sePuedeEliminar($authUser, $user);
+    }
+
+    public function deleteAny(AuthUser $authUser): bool
     {
         return $authUser->can('Delete:User');
     }
@@ -41,9 +53,9 @@ class UserPolicy
         return $authUser->can('Restore:User');
     }
 
-    public function forceDelete(AuthUser $authUser): bool
+    public function forceDelete(AuthUser $authUser, User $user): bool
     {
-        return $authUser->can('ForceDelete:User');
+        return $authUser->can('ForceDelete:User') && $this->sePuedeEliminar($authUser, $user);
     }
 
     public function forceDeleteAny(AuthUser $authUser): bool
@@ -64,5 +76,12 @@ class UserPolicy
     public function reorder(AuthUser $authUser): bool
     {
         return $authUser->can('Reorder:User');
+    }
+
+    private function sePuedeEliminar(AuthUser $authUser, User $user): bool
+    {
+        return $user->getKey() !== $authUser->getKey()
+            && ! $user->esSuperAdmin()
+            && ! $user->tienePedidos();
     }
 }

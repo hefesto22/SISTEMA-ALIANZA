@@ -6,13 +6,26 @@ namespace App\Filament\Resources\Facturas\Pages;
 
 use App\Enums\EstadoFactura;
 use App\Filament\Resources\Facturas\FacturaResource;
+use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
 use Illuminate\Database\Eloquent\Builder;
+use Livewire\Attributes\On;
 
 class ListFacturas extends ListRecords
 {
     protected static string $resource = FacturaResource::class;
+
+    /**
+     * Botón "No salió" del aviso después de imprimir una copia.
+     *
+     * @param array<int|string, mixed> $ids
+     */
+    #[On(ImprimirPedidoAction::PEDIR)]
+    public function imprimirPedidos(array $ids = [], string $modo = 'originales'): void
+    {
+        ImprimirPedidoAction::desdeAviso($this, $ids, $modo);
+    }
 
     public function getSubheading(): string
     {

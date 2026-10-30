@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Facturas;
 
 use App\Enums\EstadoFactura;
+use App\Enums\ModoImpresion;
 use App\Filament\Resources\Facturas\Pages\ListFacturas;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
@@ -22,6 +23,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
+use Livewire\Component;
 
 /**
  * Historial de facturas: las vigentes y las anuladas (con quién, cuándo,
@@ -136,7 +138,9 @@ class FacturaResource extends Resource
                     ->icon(Heroicon::OutlinedPrinter)
                     ->color('gray')
                     ->visible(fn (Factura $record): bool => ! $record->estaAnulada() && Gate::allows('imprimir', $record->pedido))
-                    ->dispatch(ImprimirPedidoAction::EVENTO, fn (Factura $record): array => ImprimirPedidoAction::datos(route('pedidos.imprimir', $record->pedido_id))),
+                    ->action(function (Factura $record, Component $livewire): void {
+                        ImprimirPedidoAction::ejecutar($livewire, [$record->pedido_id], ModoImpresion::Copia);
+                    }),
             ]);
     }
 
@@ -156,6 +160,14 @@ class FacturaResource extends Resource
 
         if ($factura->reemplazaA !== null) {
             $partes[] = "Sustituye a {$factura->reemplazaA->numero}";
+        }
+
+        if ($factura->impresiones > 1) {
+            $partes[] = ($factura->impresiones - 1).' copia(s)';
+        }
+
+        if ($factura->reintentos > 0) {
+            $partes[] = "Reimpresa {$factura->reintentos} vez(es) porque no salió";
         }
 
         if ($factura->estaAnulada()) {

@@ -11,6 +11,7 @@ use App\Filament\Resources\Cais\Pages\ManageCais;
 use App\Filament\Resources\CambiosPrecio\Pages\ListCambiosPrecio;
 use App\Filament\Resources\Clientes\Pages\ManageClientes;
 use App\Filament\Resources\Facturas\Pages\ListFacturas;
+use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
@@ -210,6 +211,10 @@ test('el vendedor levanta la preventa y bodega la despacha', function (): void {
 
     facturacionLista();
 
+    Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
+        ->callAction('imprimir')
+        ->assertDispatched(ImprimirPedidoAction::EVENTO);
+
     $this->get(route('pedidos.imprimir', $pedido))
         ->assertOk()
         ->assertSee((string) $pedido->numero);
@@ -231,6 +236,21 @@ test('un vendedor no puede imprimir el pedido de otro', function (): void {
     ]);
 
     $this->actingAs($otro)->get(route('pedidos.imprimir', $pedido))->assertForbidden();
+});
+
+test('un usuario desactivado ya no abre las hojas aunque tenga la sesión abierta', function (): void {
+    $pedido = Pedido::query()->create([
+        'bodega_id'   => $this->bodega->id,
+        'cliente_id'  => Cliente::factory()->create(['bodega_id' => $this->bodega->id])->id,
+        'vendedor_id' => $this->vendedor->id,
+        'fecha'       => now(),
+    ]);
+
+    $this->actingAs($this->encargado)->get(route('pedidos.imprimir', $pedido))->assertOk();
+
+    $this->encargado->update(['is_active' => false]);
+
+    $this->actingAs($this->encargado->fresh())->get(route('pedidos.imprimir', $pedido))->assertForbidden();
 });
 
 test('el personal entra con su código de usuario', function (): void {

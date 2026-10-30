@@ -21,14 +21,19 @@ declare(strict_types=1);
 
 use App\Http\Controllers\ImprimirPedidoController;
 use App\Http\Controllers\ImprimirPedidosController;
+use Filament\Http\Middleware\Authenticate;
+use Filament\Http\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
 
-// Hoja imprimible del pedido. Requiere sesión iniciada.
-Route::middleware('auth')
-    ->get('pedidos/{pedido}/imprimir', ImprimirPedidoController::class)
-    ->name('pedidos.imprimir');
+// Hojas para imprimir. Solo muestran (no emiten facturas): eso lo hace la
+// acción Imprimir. Pasan por el mismo acceso que el panel, así un usuario
+// desactivado ya no entra aunque tenga la sesión abierta.
+Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::class, 'throttle:120,1'])->group(function (): void {
+    // Vista previa de un pedido.
+    Route::get('pedidos/{pedido}/imprimir', ImprimirPedidoController::class)
+        ->name('pedidos.imprimir');
 
-// Varios pedidos de un solo (?ids=1,2,3), uno por página.
-Route::middleware('auth')
-    ->get('imprimir/pedidos', ImprimirPedidosController::class)
-    ->name('pedidos.imprimir-lote');
+    // Uno o varios de un solo (?ids=1,2,3), uno por página.
+    Route::get('imprimir/pedidos', ImprimirPedidosController::class)
+        ->name('pedidos.imprimir-lote');
+});

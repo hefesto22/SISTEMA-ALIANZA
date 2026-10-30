@@ -8,10 +8,12 @@ use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
 use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
+use App\Enums\ModoImpresion;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
 use App\Filament\Resources\Cais\Pages\ManageCais;
 use App\Filament\Resources\Facturas\Pages\ListFacturas;
+use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
 use App\Models\Bodega;
 use App\Models\Cai;
@@ -94,7 +96,7 @@ test('al imprimir se emite la factura con el CAI de la bodega; las copias usan e
 
     $this->actingAs($this->encargados['COP']);
 
-    $this->get(route('pedidos.imprimir', $primero))
+    $this->get(imprimir($primero, $this->encargados['COP'], ModoImpresion::Originales)->url())
         ->assertOk()
         ->assertSee('FACTURA')
         ->assertSee('000-001-01-00000120')
@@ -106,12 +108,12 @@ test('al imprimir se emite la factura con el CAI de la bodega; las copias usan e
         ->assertSee('SON: SETECIENTOS TREINTA LEMPIRAS CON 00/100')
         ->assertDontSee('REIMPRESIÓN');
 
-    $this->get(route('pedidos.imprimir', $primero))
+    $this->get(imprimir($primero, $this->encargados['COP'], ModoImpresion::Copia)->url())
         ->assertOk()
         ->assertSee('000-001-01-00000120')
         ->assertSee('REIMPRESIÓN');
 
-    $this->get(route('pedidos.imprimir', $segundo))
+    $this->get(imprimir($segundo, $this->encargados['COP'], ModoImpresion::Originales)->url())
         ->assertOk()
         ->assertSee('000-001-01-00000121');
 
@@ -145,10 +147,8 @@ test('el CAI puede ser de una bodega, global para las demás, o compartido por v
     $deSb = pedidoValidado($sb, $vendedorSb, $this->gravado, $this->exento);
     $deLuc = pedidoValidado($lucerna, $vendedorLuc, $this->gravado, $this->exento);
 
-    $this->actingAs($this->admin);
-
     foreach ([$deCop, $deOco, $deSb, $deLuc] as $pedido) {
-        $this->get(route('pedidos.imprimir', $pedido))->assertOk();
+        imprimir($pedido, $this->admin, ModoImpresion::Originales);
     }
 
     $numero = fn (Pedido $pedido): string => Factura::query()->where('pedido_id', $pedido->id)->sole()->numero;
@@ -168,11 +168,16 @@ test('si el CAI se acaba o vence se usa otro que sirva; sin ninguno no se imprim
 
     $this->actingAs($this->encargados['COP']);
 
-    $this->get(route('pedidos.imprimir', $primero))->assertOk()->assertSee('000-010-01-00000001');
+    $this->get(imprimir($primero, $this->encargados['COP'], ModoImpresion::Originales)->url())->assertOk()->assertSee('000-010-01-00000001');
 
-    $this->get(route('pedidos.imprimir', $segundo))
-        ->assertStatus(422)
-        ->assertSee('no tiene un CAI vigente');
+    expect(fn () => imprimir($segundo, $this->encargados['COP'], ModoImpresion::Originales))
+        ->toThrow(ReglaNegocioException::class, 'no tiene un CAI vigente');
+
+    // En pantalla sale como aviso, sin romper nada.
+    Livewire::test(ViewPedido::class, ['record' => $segundo->getRouteKey()])
+        ->callAction('imprimir')
+        ->assertNotified('No se imprimió')
+        ->assertNotDispatched(ImprimirPedidoAction::EVENTO);
 
     expect($segundo->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($segundo->fresh()?->impresiones)->toBe(0)
@@ -181,7 +186,7 @@ test('si el CAI se acaba o vence se usa otro que sirva; sin ninguno no se imprim
 
     Cai::factory()->create(['punto_emision' => '020']);
 
-    $this->get(route('pedidos.imprimir', $segundo))->assertOk()->assertSee('000-020-01-00000001');
+    $this->get(imprimir($segundo, $this->encargados['COP'], ModoImpresion::Originales)->url())->assertOk()->assertSee('000-020-01-00000001');
 });
 
 test('sin datos fiscales completos no se emite la factura', function (): void {
@@ -190,10 +195,8 @@ test('sin datos fiscales completos no se emite la factura', function (): void {
 
     $pedido = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
 
-    $this->actingAs($this->encargados['COP'])
-        ->get(route('pedidos.imprimir', $pedido))
-        ->assertStatus(422)
-        ->assertSee('Faltan los datos fiscales');
+    expect(fn () => imprimir($pedido, $this->encargados['COP'], ModoImpresion::Originales))
+        ->toThrow(ReglaNegocioException::class, 'Faltan los datos fiscales');
 
     expect(Factura::query()->count())->toBe(0);
 });
@@ -204,10 +207,8 @@ test('imprimir varios es todo o nada: si una bodega no tiene CAI no se gasta nin
     $deCop = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
     $deOco = pedidoValidado($this->oco, $this->vendedores['OCO'], $this->gravado, $this->exento);
 
-    $this->actingAs($this->admin)
-        ->get(route('pedidos.imprimir-lote', ['ids' => "{$deCop->id},{$deOco->id}"]))
-        ->assertStatus(422)
-        ->assertSee('OCOTEPEQUE');
+    expect(fn () => imprimir([$deCop, $deOco], $this->admin, ModoImpresion::Originales))
+        ->toThrow(ReglaNegocioException::class, 'OCOTEPEQUE');
 
     expect(Factura::query()->count())->toBe(0)
         ->and($cai->fresh()?->siguiente)->toBe(1)
@@ -221,7 +222,7 @@ test('corregir un impreso anula su factura; la nueva la sustituye y todo queda e
     $lineas = $pedido->items()->orderBy('id')->pluck('id')->all();
 
     $this->actingAs($this->encargados['COP']);
-    $this->get(route('pedidos.imprimir', $pedido))->assertOk();
+    imprimir($pedido, $this->encargados['COP'], ModoImpresion::Originales);
 
     // Sin cambiar nada no se corrige: no se anula ni se gasta un número.
     expect(fn () => app(CorregirPedido::class)->ejecutar($pedido, [], $this->encargados['COP'], 'nada'))
@@ -238,7 +239,7 @@ test('corregir un impreso anula su factura; la nueva la sustituye y todo queda e
         ->and($pedido->fresh()?->facturaPorSustituir()?->id)->toBe($original->id)
         ->and($pedido->fresh()?->factura)->toBeNull();
 
-    $this->get(route('pedidos.imprimir', $pedido))
+    $this->get(imprimir($pedido, $this->encargados['COP'], ModoImpresion::Originales)->url())
         ->assertOk()
         ->assertSee('000-001-01-00000002')
         ->assertSee('Sustituye a la factura N° 000-001-01-00000001');
@@ -265,8 +266,7 @@ test('en Facturas el encargado ve solo las de su bodega', function (): void {
     $deCop = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
     $deOco = pedidoValidado($this->oco, $this->vendedores['OCO'], $this->gravado, $this->exento);
 
-    $this->actingAs($this->admin);
-    $this->get(route('pedidos.imprimir-lote', ['ids' => "{$deCop->id},{$deOco->id}"]))->assertOk();
+    imprimir([$deCop, $deOco], $this->admin, ModoImpresion::Originales);
 
     $facturaCop = Factura::query()->where('pedido_id', $deCop->id)->sole();
     $facturaOco = Factura::query()->where('pedido_id', $deOco->id)->sole();
@@ -342,4 +342,41 @@ test('los datos fiscales se guardan desde la pantalla de CAI', function (): void
         ->and($fiscales->rtn)->toBe('05019000999999')
         ->and($fiscales->correo)->toBe('facturas@alianza.hn')
         ->and($fiscales->estanCompletos())->toBeTrue();
+});
+
+test('dos bodegas imprimiendo con el mismo CAI global sacan números seguidos, sin repetir ni saltar', function (): void {
+    $cai = Cai::factory()->create(['punto_emision' => '001']);
+
+    $deCop = [];
+    $deOco = [];
+
+    foreach (range(1, 3) as $n) {
+        $deCop[] = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
+        $deOco[] = pedidoValidado($this->oco, $this->vendedores['OCO'], $this->gravado, $this->exento);
+    }
+
+    // Lotes que se cruzan: cada bodega imprime lo suyo, una y otra vez.
+    imprimir([$deCop[0], $deCop[1]], $this->encargados['COP'], ModoImpresion::Originales);
+    imprimir([$deOco[0]], $this->encargados['OCO'], ModoImpresion::Originales);
+    imprimir([$deCop[2]], $this->encargados['COP'], ModoImpresion::Originales);
+    imprimir([$deOco[1], $deOco[2]], $this->encargados['OCO'], ModoImpresion::Originales);
+
+    $correlativos = Factura::query()->orderBy('correlativo')->pluck('correlativo')->all();
+
+    expect($correlativos)->toBe([1, 2, 3, 4, 5, 6])
+        ->and($cai->fresh()?->siguiente)->toBe(7)
+        ->and(Factura::query()->distinct()->count('numero'))->toBe(6);
+});
+
+test('si se corrige el inicio del rango antes de usarlo, el primer número sale de ahí', function (): void {
+    $cai = Cai::factory()->rango(1, 5000)->create(['punto_emision' => '001']);
+
+    $cai->update(['rango_desde' => 501, 'rango_hasta' => 1000]);
+
+    expect($cai->fresh()?->siguiente)->toBe(501);
+
+    $pedido = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
+    imprimir($pedido, $this->encargados['COP'], ModoImpresion::Originales);
+
+    expect(Factura::query()->sole()->numero)->toBe('000-001-01-00000501');
 });

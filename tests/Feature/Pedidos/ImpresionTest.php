@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Pedidos\CorregirPedido;
-use App\Domain\Pedidos\MarcarImpreso;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
 use App\Domain\Precios\ActualizarPrecioProducto;
 use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
+use App\Enums\ModoImpresion;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
@@ -23,15 +23,17 @@ use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
 use Database\Seeders\RolesSistemaSeeder;
-use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 /**
- * Después de validar: Por imprimir → Imprimir → Impreso (con factura). Si se
- * corrige después de impreso, la factura se anula, vuelve a Por imprimir y
- * al reimprimir sale una factura nueva que sustituye a la anulada.
+ * Imprimir: la acción (en el servidor) emite la factura y cuenta la
+ * impresión; la hoja (GET) solo muestra. Con enlace firmado sale ORIGINAL;
+ * sin firma, COPIA · SIN VALOR FISCAL. "No salió" repite la hoja sin
+ * contarla como copia. Corregir un impreso anula su factura y al
+ * reimprimir sale una nueva que la sustituye.
  */
 beforeEach(function (): void {
     $this->seed(RolesSistemaSeeder::class);
@@ -70,65 +72,167 @@ function pedidoParaImprimir(Bodega $bodega, User $vendedor, Producto $gravado, P
     return app(RecalcularPedido::class)->ejecutar($pedido);
 }
 
-test('al validar queda por imprimir; al imprimir pasa a impreso y la copia sale como reimpresión', function (): void {
-    $pedido = pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento);
-    $pedido = app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
+test('el botón Imprimir emite y cuenta; la hoja firmada sale original y sin firma sale copia sin valor fiscal', function (): void {
+    $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
     expect($pedido->estado)->toBe(EstadoPedido::PorImprimir)
-        ->and($pedido->impresiones)->toBe(0)
-        ->and($pedido->esReimpresion())->toBeFalse();
+        ->and($pedido->impresiones)->toBe(0);
 
     $this->actingAs($this->encargado);
 
-    // El botón manda a imprimir la hoja ahí mismo (sin otra pestaña).
+    $url = null;
+
     Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
         ->assertActionVisible('imprimir')
-        ->assertActionExists('imprimir', fn (Action $action): bool => $action->getEvent() === ImprimirPedidoAction::EVENTO
-            && $action->getEventData() === ['url' => route('pedidos.imprimir', $pedido)]);
+        ->callAction('imprimir')
+        ->assertDispatched(ImprimirPedidoAction::EVENTO, function (string $nombre, array $datos) use (&$url): bool {
+            $url = $datos['url'] ?? null;
 
-    $this->get(route('pedidos.imprimir', $pedido))
-        ->assertOk()
-        ->assertSee((string) $pedido->numero)
-        ->assertDontSee('REIMPRESIÓN');
+            return is_string($url) && str_contains($url, 'signature=');
+        });
+
+    $factura = Factura::query()->where('pedido_id', $pedido->id)->sole();
 
     expect($pedido->fresh()?->estado)->toBe(EstadoPedido::Impreso)
         ->and($pedido->fresh()?->impresiones)->toBe(1)
         ->and($pedido->fresh()?->impreso_por)->toBe($this->encargado->id)
-        ->and($pedido->fresh()?->impreso_at)->not->toBeNull();
+        ->and($factura->impresiones)->toBe(1);
 
-    $this->get(route('pedidos.imprimir', $pedido))
+    // La hoja firmada: original, sin sello.
+    $this->get((string) $url)
         ->assertOk()
-        ->assertSee('REIMPRESIÓN');
+        ->assertSee($factura->numero)
+        ->assertDontSee('REIMPRESIÓN')
+        ->assertDontSee('SIN VALOR FISCAL');
 
-    expect($pedido->fresh()?->impresiones)->toBe(2);
+    // Abrir la hoja no cambia nada; sin firma (o con la firma alterada) sale como copia.
+    $this->get(route('pedidos.imprimir', $pedido))->assertOk()->assertSee('COPIA · SIN VALOR FISCAL');
+    $this->get(route('pedidos.imprimir-lote', ['ids' => $pedido->id, 'originales' => $pedido->id]))
+        ->assertOk()
+        ->assertSee('COPIA · SIN VALOR FISCAL');
+    $this->get(str_replace('originales='.$pedido->id, 'originales=0', (string) $url))->assertOk()->assertSee('COPIA · SIN VALOR FISCAL');
+
+    expect($pedido->fresh()?->impresiones)->toBe(1)
+        ->and($factura->fresh()?->impresiones)->toBe(1)
+        ->and(Factura::query()->count())->toBe(1);
 });
 
-test('el vendedor ve la hoja pero no cuenta como impresa; la de un pendiente es vista previa', function (): void {
+test('copia sale como reimpresión; "No salió" repite la hoja igual sin contarla como copia', function (): void {
+    $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+
+    $this->actingAs($this->encargado);
+
+    imprimir($pedido, $this->encargado, ModoImpresion::Originales);
+
+    // La impresora se atascó: sale otra vez el original.
+    $otraVez = imprimir($pedido, $this->encargado, ModoImpresion::NoSalio);
+    $this->get($otraVez->url())->assertOk()->assertDontSee('REIMPRESIÓN');
+
+    $factura = Factura::query()->where('pedido_id', $pedido->id)->sole();
+
+    expect($otraVez->originales)->toBe([$pedido->id])
+        ->and($factura->impresiones)->toBe(1)
+        ->and($factura->reintentos)->toBe(1)
+        ->and($factura->reintento_por)->toBe($this->encargado->id);
+
+    $copia = imprimir($pedido, $this->encargado, ModoImpresion::Copia);
+    $this->get($copia->url())->assertOk()->assertSee('REIMPRESIÓN · COPIA');
+
+    // Si la copia no salió, sale otra copia (no un original).
+    $copiaOtraVez = imprimir($pedido, $this->encargado, ModoImpresion::NoSalio);
+    $this->get($copiaOtraVez->url())->assertOk()->assertSee('REIMPRESIÓN · COPIA');
+
+    expect($factura->fresh()?->impresiones)->toBe(2)
+        ->and($factura->fresh()?->reintentos)->toBe(2)
+        ->and($pedido->fresh()?->impresiones)->toBe(2)
+        ->and(Factura::query()->count())->toBe(1);
+});
+
+test('nunca salen dos originales: si otra persona ya lo imprimió, se salta', function (): void {
+    $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+
+    $otro = User::factory()->create(['bodega_id' => $this->bodega->id, 'name' => 'ANA']);
+    $otro->assignRole(Rol::Bodega->value);
+
+    imprimir($pedido, $otro, ModoImpresion::Originales);
+    $segundo = imprimir($pedido, $this->encargado, ModoImpresion::Originales);
+
+    expect($segundo->hayQueImprimir())->toBeFalse()
+        ->and($segundo->saltados[0] ?? '')->toContain('ya lo imprimió ANA')
+        ->and(Factura::query()->count())->toBe(1)
+        ->and(Factura::query()->sole()->impresiones)->toBe(1);
+});
+
+test('si otra persona está imprimiendo el mismo pedido, avisa y no imprime nada', function (): void {
+    $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+
+    // Alguien (en esta u otra bodega) lo tiene tomado en este momento.
+    $candado = Cache::lock("imprimir:pedido:{$pedido->id}", 120);
+    expect($candado->get())->toBeTrue();
+
+    expect(fn () => imprimir($pedido, $this->encargado, ModoImpresion::Originales))
+        ->toThrow(ReglaNegocioException::class, 'Otra persona está imprimiendo');
+
+    expect(Factura::query()->count())->toBe(0)
+        ->and($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir);
+
+    $candado->release();
+
+    expect(imprimir($pedido, $this->encargado, ModoImpresion::Originales)->hayQueImprimir())->toBeTrue()
+        ->and(Factura::query()->count())->toBe(1);
+});
+
+test('en un lote, el que otra persona está imprimiendo se salta y los demás salen', function (): void {
+    $tomado = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+    $libre = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+
+    $candado = Cache::lock("imprimir:pedido:{$tomado->id}", 120);
+    expect($candado->get())->toBeTrue();
+
+    $resultado = imprimir([$tomado, $libre], $this->encargado, ModoImpresion::Originales);
+
+    $candado->release();
+
+    expect($resultado->pedidos)->toBe([$libre->id])
+        ->and($resultado->saltados)->toBe(["{$tomado->numero}: lo está imprimiendo otra persona en este momento"])
+        ->and($tomado->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
+        ->and($libre->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and(Factura::query()->count())->toBe(1);
+});
+
+test('el vendedor ve la hoja pero no imprime; la de un pendiente es vista previa', function (): void {
     $pendiente = pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento);
-    $validado = app(ValidarDespacho::class)->ejecutar(
-        pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento),
-        [],
-        $this->encargado,
-    );
+    $validado = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
-    $this->actingAs($this->vendedor)
-        ->get(route('pedidos.imprimir', $validado))
+    $this->actingAs($this->vendedor);
+
+    Livewire::test(ViewPedido::class, ['record' => $validado->getRouteKey()])
+        ->assertActionHidden('imprimir')
+        ->assertActionVisible('hoja');
+
+    $this->get(route('pedidos.imprimir', $validado))
         ->assertOk()
-        ->assertSee((string) $validado->numero);
+        ->assertSee('sin factura todavía');
 
-    expect($validado->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
-        ->and($validado->fresh()?->impresiones)->toBe(0);
+    $intento = imprimir($validado, $this->vendedor, ModoImpresion::Seleccionados);
+
+    expect($intento->hayQueImprimir())->toBeFalse()
+        ->and(Factura::query()->count())->toBe(0)
+        ->and($validado->fresh()?->estado)->toBe(EstadoPedido::PorImprimir);
+
+    // Ya impresa por bodega, el vendedor la ve como copia sin valor fiscal.
+    imprimir($validado, $this->encargado, ModoImpresion::Originales);
+    $this->get(route('pedidos.imprimir', $validado))->assertOk()->assertSee('COPIA · SIN VALOR FISCAL');
 
     $this->actingAs($this->encargado)
         ->get(route('pedidos.imprimir', $pendiente))
         ->assertOk()
         ->assertSee('vista previa');
 
-    expect($pendiente->fresh()?->estado)->toBe(EstadoPedido::Pendiente)
-        ->and($pendiente->fresh()?->impresiones)->toBe(0);
+    expect($pendiente->fresh()?->estado)->toBe(EstadoPedido::Pendiente);
 });
 
-test('imprimir todos: solo entran los validados de su bodega, uno por página', function (): void {
+test('imprimir todos: solo los Por imprimir de su bodega, uno por página', function (): void {
     $validar = fn (Pedido $pedido): Pedido => app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
 
     $primero = $validar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento));
@@ -141,11 +245,13 @@ test('imprimir todos: solo entran los validados de su bodega, uno por página', 
     $deOtra = pedidoParaImprimir($otraBodega, $otroVendedor, $this->gravado, $this->exento);
     $deOtra->forceFill(['estado' => EstadoPedido::PorImprimir, 'validado_at' => now()])->save();
 
-    $this->actingAs($this->encargado);
+    $resultado = imprimir([$primero, $segundo, $pendiente, $deOtra], $this->encargado, ModoImpresion::Originales);
 
-    $ids = implode(',', [$primero->id, $segundo->id, $pendiente->id, $deOtra->id]);
+    expect($resultado->pedidos)->toBe([$primero->id, $segundo->id])
+        ->and($resultado->saltados)->toHaveCount(2);
 
-    $this->get(route('pedidos.imprimir-lote', ['ids' => $ids]))
+    $this->actingAs($this->encargado)
+        ->get($resultado->url())
         ->assertOk()
         ->assertSee((string) $primero->numero)
         ->assertSee((string) $segundo->numero)
@@ -157,10 +263,10 @@ test('imprimir todos: solo entran los validados de su bodega, uno por página', 
         ->and($pendiente->fresh()?->estado)->toBe(EstadoPedido::Pendiente)
         ->and($deOtra->fresh()?->estado)->toBe(EstadoPedido::PorImprimir);
 
-    $this->get(route('pedidos.imprimir-lote', ['ids' => (string) $pendiente->id]))->assertNotFound();
+    $this->get(route('pedidos.imprimir-lote', ['ids' => (string) $deOtra->id]))->assertNotFound();
 });
 
-test('el botón Imprimir todos sale en la pestaña Por imprimir con los que se ven', function (): void {
+test('el botón Imprimir todos pide confirmación e imprime los que se ven', function (): void {
     $primero = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
     $segundo = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
@@ -172,8 +278,12 @@ test('el botón Imprimir todos sale en la pestaña Por imprimir con los que se v
         ->assertCanSeeTableRecords([$primero, $segundo])
         ->assertActionVisible('imprimirTodos')
         ->assertActionHasLabel('imprimirTodos', 'Imprimir todos (2)')
-        ->assertActionExists('imprimirTodos', fn (Action $action): bool => $action->getEvent() === ImprimirPedidoAction::EVENTO
-            && $action->getEventData() === ['url' => route('pedidos.imprimir-lote', ['ids' => "{$primero->id},{$segundo->id}"])]);
+        ->callAction('imprimirTodos')
+        ->assertDispatched(ImprimirPedidoAction::EVENTO);
+
+    expect($primero->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and($segundo->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and(Factura::query()->count())->toBe(2);
 
     // El vendedor no imprime: no le sale.
     $this->actingAs($this->vendedor);
@@ -183,29 +293,33 @@ test('el botón Imprimir todos sale en la pestaña Por imprimir con los que se v
         ->assertActionHidden('imprimirTodos');
 });
 
-test('se marcan varias tarjetas y se imprimen de un solo; los pendientes no se pueden marcar', function (): void {
+test('se marcan varias y se imprimen de un solo: las por imprimir salen original, las impresas copia', function (): void {
     $validar = fn (): Pedido => app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
-    $impreso = app(MarcarImpreso::class)->ejecutar($validar(), $this->encargado);
+    $impreso = $validar();
+    imprimir($impreso, $this->encargado, ModoImpresion::Originales);
     $porImprimir = $validar();
     $pendiente = pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento);
 
     $this->actingAs($this->encargado);
+
+    $url = null;
 
     Livewire::test(ListPedidos::class)
         ->assertTableBulkActionHidden('imprimirSeleccionados')
         ->set('activeTab', 'todos')
         ->assertTableBulkActionVisible('imprimirSeleccionados')
         ->callTableBulkAction('imprimirSeleccionados', [$impreso, $porImprimir, $pendiente])
-        ->assertDispatched(ImprimirPedidoAction::EVENTO, url: ImprimirPedidoAction::urlDeVarios([$impreso->id, $porImprimir->id]));
+        ->assertDispatched(ImprimirPedidoAction::EVENTO, function (string $nombre, array $datos) use (&$url): bool {
+            $url = $datos['url'] ?? null;
 
-    // Al abrir la hoja quedan impresos; el que ya estaba, como reimpresión.
-    $this->get(ImprimirPedidoAction::urlDeVarios([$impreso->id, $porImprimir->id]))
-        ->assertOk()
-        ->assertSee('REIMPRESIÓN');
+            return is_string($url);
+        });
 
-    expect($impreso->fresh()?->impresiones)->toBe(2)
-        ->and($porImprimir->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+    $this->get((string) $url)->assertOk()->assertSee('REIMPRESIÓN · COPIA');
+
+    expect(Factura::query()->where('pedido_id', $impreso->id)->sole()->impresiones)->toBe(2)
+        ->and(Factura::query()->where('pedido_id', $porImprimir->id)->sole()->impresiones)->toBe(1)
         ->and($pendiente->fresh()?->estado)->toBe(EstadoPedido::Pendiente);
 
     // El vendedor no imprime: no puede marcar.
@@ -219,11 +333,12 @@ test('se marcan varias tarjetas y se imprimen de un solo; los pendientes no se p
 test('corregir un pedido impreso: anula la factura, vuelve a por imprimir y al reimprimir sale una nueva, con los precios de cuando se validó', function (): void {
     $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
-    $this->actingAs($this->encargado)->get(route('pedidos.imprimir', $pedido))->assertOk();
+    imprimir($pedido, $this->encargado, ModoImpresion::Originales);
 
     // Sube el precio después de validado: la corrección no lo cambia.
     app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precioUnidad: 110.0);
 
+    $this->actingAs($this->encargado);
     $undoRepeaterFake = Repeater::fake();
 
     // Avisan que del gravado solo salió 1.
@@ -251,23 +366,26 @@ test('corregir un pedido impreso: anula la factura, vuelve a por imprimir y al r
         ->set('activeTab', EstadoPedido::PorImprimir->value)
         ->assertSee('Por reimprimir');
 
-    $anulada = Factura::query()->where('pedido_id', $pedido?->id)->firstOrFail();
+    $anulada = Factura::query()->where('pedido_id', $pedido?->id)->sole();
 
-    $this->get(route('pedidos.imprimir', $pedido))
+    /** @var Pedido $pedido */
+    $nueva = imprimir($pedido, $this->encargado, ModoImpresion::Originales);
+
+    $this->get($nueva->url())
         ->assertOk()
         ->assertSee('Sustituye a la factura N° '.$anulada->numero)
         ->assertDontSee('REIMPRESIÓN');
 
-    $facturas = $pedido?->facturas()->get();
+    $facturas = $pedido->facturas()->get();
 
-    expect($pedido?->fresh()?->estado)->toBe(EstadoPedido::Impreso)
-        ->and($pedido?->fresh()?->impresiones)->toBe(2)
+    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and($pedido->fresh()?->impresiones)->toBe(2)
         ->and($facturas)->toHaveCount(2)
-        ->and($facturas?->first()?->estado)->toBe(EstadoFactura::Anulada)
-        ->and($facturas?->first()?->motivo_anulacion)->toBe('PEDIDO CORREGIDO: EL CLIENTE DEVOLVIÓ UNO')
-        ->and($facturas?->last()?->estado)->toBe(EstadoFactura::Vigente)
-        ->and($facturas?->last()?->reemplaza_a_id)->toBe($anulada->id)
-        ->and($facturas?->last()?->total)->toBe(615.0);
+        ->and($facturas->first()?->estado)->toBe(EstadoFactura::Anulada)
+        ->and($facturas->first()?->motivo_anulacion)->toBe('PEDIDO CORREGIDO: EL CLIENTE DEVOLVIÓ UNO')
+        ->and($facturas->last()?->estado)->toBe(EstadoFactura::Vigente)
+        ->and($facturas->last()?->reemplaza_a_id)->toBe($anulada->id)
+        ->and($facturas->last()?->total)->toBe(615.0);
 });
 
 test('solo se corrige lo validado, y solo bodega', function (): void {

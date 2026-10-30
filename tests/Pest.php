@@ -1,9 +1,13 @@
 <?php
 
 declare(strict_types=1);
+use App\Domain\Facturacion\ImprimirFacturas;
+use App\Domain\Facturacion\ResultadoImpresion;
 use App\Domain\ValueObjects\Monto;
+use App\Enums\ModoImpresion;
 use App\Models\Cai;
 use App\Models\DatosFiscales;
+use App\Models\Pedido;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Pest\Expectation;
@@ -80,4 +84,17 @@ function facturacionLista(): Cai
     ]);
 
     return Cai::factory()->create();
+}
+
+/**
+ * Imprime como el botón Imprimir (emite la factura, cuenta la impresión) y
+ * devuelve el resultado; la hoja se ve con $this->get($resultado->url()).
+ *
+ * @param list<Pedido>|Pedido $pedidos
+ */
+function imprimir(array|Pedido $pedidos, User $usuario, ModoImpresion $modo = ModoImpresion::Seleccionados): ResultadoImpresion
+{
+    $lista = $pedidos instanceof Pedido ? [$pedidos] : $pedidos;
+
+    return app(ImprimirFacturas::class)->ejecutar(array_map(fn (Pedido $pedido): int => $pedido->id, $lista), $usuario, $modo);
 }

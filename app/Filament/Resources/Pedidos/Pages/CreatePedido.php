@@ -9,6 +9,7 @@ use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
 use App\Filament\Support\Acceso;
 use App\Models\Pedido;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 
@@ -59,6 +60,20 @@ class CreatePedido extends CreateRecord
         $pedido = $this->getRecord();
 
         app(RecalcularPedido::class)->ejecutar($pedido, preciosVigentes: true);
+    }
+
+    /**
+     * "Guardar pedido" va en la barra de abajo con el total (PedidoForm); aquí
+     * quedan las demás.
+     *
+     * @return array<Action>
+     */
+    protected function getFormActions(): array
+    {
+        return [
+            $this->getCreateAnotherFormAction()->label('Guardar y hacer otro'),
+            $this->getCancelFormAction(),
+        ];
     }
 
     protected function getRedirectUrl(): string

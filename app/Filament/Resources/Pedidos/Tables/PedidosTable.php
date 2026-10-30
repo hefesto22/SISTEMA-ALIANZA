@@ -90,7 +90,8 @@ class PedidosTable
                     ->visible($veTodo),
                 SelectFilter::make('vendedor_id')
                     ->label('Vendedor')
-                    ->relationship('vendedor', 'name')
+                    // Solo los vendedores de los pedidos que esta persona ve.
+                    ->relationship('vendedor', 'name', fn (Builder $query): Builder => self::vendedoresConPedidos($query))
                     ->searchable()
                     ->visible(! $esVendedor),
                 TernaryFilter::make('fuera_de_ruta')
@@ -125,7 +126,9 @@ class PedidosTable
                     ->outlined(),
                 ActionGroup::make([
                     EditAction::make(),
-                    ImprimirPedidoAction::hoja(),
+                    ImprimirPedidoAction::copia(),
+                    ImprimirPedidoAction::noSalio(),
+                    ImprimirPedidoAction::vistaPrevia(),
                     AnularPedidoAction::make(),
                 ])
                     ->icon(Heroicon::EllipsisHorizontal)
@@ -164,6 +167,26 @@ class PedidosTable
                 ->orWhereHas('cliente', fn (Builder $c): Builder => $c->where('nombre', 'ilike', $like)->orWhere('codigo', 'ilike', $like))
                 ->orWhereHas('vendedor', fn (Builder $v): Builder => $v->where('name', 'ilike', $like)->orWhere('codigo', 'ilike', $like));
         });
+    }
+
+    /**
+     * En el filtro solo salen vendedores con pedidos que esta persona puede ver.
+     *
+     * @param Builder<Model> $query
+     *
+     * @return Builder<Model>
+     */
+    private static function vendedoresConPedidos(Builder $query): Builder
+    {
+        $usuario = Acceso::usuario();
+
+        if ($usuario === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query
+            ->whereIn('users.id', Pedido::query()->visiblePara($usuario)->select('vendedor_id'))
+            ->orderBy('name');
     }
 
     /**
