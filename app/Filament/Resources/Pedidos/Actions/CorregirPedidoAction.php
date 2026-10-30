@@ -32,9 +32,9 @@ final class CorregirPedidoAction
             ->authorize('corregir')
             ->modalHeading(fn (Pedido $record): string => "Corregir · {$record->numero} · {$record->cliente->nombre}")
             ->modalDescription(fn (Pedido $record): string => $record->factura !== null
-                ? "Ya se imprimió con la factura N° {$record->factura->numero}. Al guardar, esa factura queda ANULADA (hay que retirarla al cliente) y al reimprimir sale una nueva. Cambie lo que sale (basurero o 0 = no sale)."
-                : 'Cambie lo que sale (basurero o 0 = no sale). Sigue por imprimir.')
-            ->modalWidth(Width::FiveExtraLarge)
+                ? "Ya se imprimió con la factura N° {$record->factura->numero}. Al guardar, esa factura queda ANULADA (hay que retirarla al cliente) y al reimprimir sale una nueva. Cambie lo que sale (\"No hay\" o 0 = no sale)."
+                : 'Cambie lo que sale ("No hay" o 0 = no sale). Sigue por imprimir.')
+            ->modalWidth(Width::ThreeExtraLarge)
             ->modalSubmitActionLabel('Guardar corrección')
             ->fillForm(fn (Pedido $record): array => LineasPedido::datos($record))
             ->schema(fn (Pedido $record): array => [

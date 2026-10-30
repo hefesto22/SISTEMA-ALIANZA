@@ -240,9 +240,11 @@ class Pedido extends Model
     }
 
     /**
-     * Quién ve qué:
+     * Quién ve qué (lista, ver, editar, hoja):
      *  - Super admin y administración: todos los pedidos, de todas las bodegas.
-     *  - Vendedor: solo los que él levantó.
+     *  - Vendedor: los que él levantó MIENTRAS están pendientes, para
+     *    editarlos o anularlos. En cuanto bodega los valida dejan de salirle;
+     *    de ahí en adelante solo bodega los corrige.
      *  - Encargado de bodega: los de su bodega (la del pedido, que es la del
      *    vendedor cuando lo levantó). Si después mueven al vendedor a otra
      *    bodega, su historial no se va con él.
@@ -253,12 +255,31 @@ class Pedido extends Model
      */
     public function scopeVisiblePara(Builder $query, User $user): Builder
     {
+        if (! $user->veTodasLasBodegas() && $user->esVendedor()) {
+            return $query->where('pedidos.vendedor_id', $user->id)
+                ->where('pedidos.estado', EstadoPedido::Pendiente);
+        }
+
+        return $this->scopeDelAlcanceDe($query, $user);
+    }
+
+    /**
+     * Lo que le toca a cada quien en CUALQUIER estado (el vendedor: todos los
+     * suyos). No es para mostrarle pedidos al vendedor: solo para repetir el
+     * último pedido de un cliente y para los números del escritorio.
+     *
+     * @param Builder<Pedido> $query
+     *
+     * @return Builder<Pedido>
+     */
+    public function scopeDelAlcanceDe(Builder $query, User $user): Builder
+    {
         if ($user->veTodasLasBodegas()) {
             return $query;
         }
 
         if ($user->esVendedor()) {
-            return $query->where('vendedor_id', $user->id);
+            return $query->where('pedidos.vendedor_id', $user->id);
         }
 
         if ($user->bodega_id === null) {
@@ -275,7 +296,7 @@ class Pedido extends Model
         }
 
         if ($user->esVendedor()) {
-            return $this->vendedor_id === $user->id;
+            return $this->vendedor_id === $user->id && $this->estaPendiente();
         }
 
         return $user->bodega_id !== null && $this->bodega_id === $user->bodega_id;

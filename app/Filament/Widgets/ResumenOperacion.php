@@ -36,10 +36,11 @@ class ResumenOperacion extends StatsOverviewWidget
      */
     protected function getStats(): array
     {
+        $esVendedor = Acceso::esVendedor();
         $pendientes = $this->pedidos()->where('estado', EstadoPedido::Pendiente)->count();
-        $porImprimir = $this->pedidos()->where('estado', EstadoPedido::PorImprimir)->count();
 
-        $validadosHoy = $this->pedidos()
+        // Lo validado hoy cuenta aunque el vendedor ya no vea esos pedidos.
+        $validadosHoy = $this->pedidos(cualquierEstado: true)
             ->whereIn('estado', [EstadoPedido::PorImprimir, EstadoPedido::Impreso])
             ->whereDate('validado_at', today());
 
@@ -48,17 +49,24 @@ class ResumenOperacion extends StatsOverviewWidget
                 ->description($pendientes > 0 ? 'Esperan validación de bodega' : 'Todo al día')
                 ->descriptionIcon($pendientes > 0 ? Heroicon::OutlinedClock : Heroicon::OutlinedCheckBadge)
                 ->color($pendientes > 0 ? 'warning' : 'success')
-                ->url(PedidoResource::getUrl('index', ['tab' => EstadoPedido::Pendiente->value])),
-            Stat::make('Por imprimir', $porImprimir)
+                ->url(PedidoResource::getUrl('index', $esVendedor ? [] : ['tab' => EstadoPedido::Pendiente->value])),
+        ];
+
+        // Lo que sigue después de validar ya es de bodega.
+        if (! $esVendedor) {
+            $porImprimir = $this->pedidos()->where('estado', EstadoPedido::PorImprimir)->count();
+
+            $stats[] = Stat::make('Por imprimir', $porImprimir)
                 ->description($porImprimir > 0 ? 'Validados, falta la hoja' : 'Nada en cola')
                 ->descriptionIcon(Heroicon::OutlinedPrinter)
                 ->color($porImprimir > 0 ? 'info' : 'success')
-                ->url(PedidoResource::getUrl('index', ['tab' => EstadoPedido::PorImprimir->value])),
-            Stat::make('Validado hoy', lempiras((float) (clone $validadosHoy)->sum('total')))
-                ->description((clone $validadosHoy)->count().' pedido(s) con ISV incluido')
-                ->descriptionIcon(Heroicon::OutlinedShoppingCart)
-                ->color('success'),
-        ];
+                ->url(PedidoResource::getUrl('index', ['tab' => EstadoPedido::PorImprimir->value]));
+        }
+
+        $stats[] = Stat::make('Validado hoy', lempiras((float) (clone $validadosHoy)->sum('total')))
+            ->description((clone $validadosHoy)->count().' pedido(s) con ISV incluido')
+            ->descriptionIcon(Heroicon::OutlinedShoppingCart)
+            ->color('success');
 
         $promociones = Acceso::puede('ViewAny:Promocion') ? Promocion::query()->vigentes()->count() : 0;
 
@@ -92,14 +100,21 @@ class ResumenOperacion extends StatsOverviewWidget
     }
 
     /**
+     * Los que ve (el vendedor: sus pendientes) o, con $cualquierEstado, todos
+     * los que le tocan (el vendedor: todos los suyos).
+     *
      * @return Builder<Pedido>
      */
-    private function pedidos(): Builder
+    private function pedidos(bool $cualquierEstado = false): Builder
     {
         $usuario = Acceso::usuario();
 
-        return $usuario === null
-            ? Pedido::query()->whereRaw('1 = 0')
+        if ($usuario === null) {
+            return Pedido::query()->whereRaw('1 = 0');
+        }
+
+        return $cualquierEstado
+            ? Pedido::query()->delAlcanceDe($usuario)
             : Pedido::query()->visiblePara($usuario);
     }
 }

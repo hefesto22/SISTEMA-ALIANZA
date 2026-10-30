@@ -55,14 +55,16 @@ class ListPedidos extends ListRecords
         $cuantos = (clone $pendientes)->count();
         $monto = (float) (clone $pendientes)->sum('total');
         $fuera = (clone $pendientes)->where('fuera_de_ruta', true)->count();
+
+        // El vendedor solo ve sus pendientes: al validarlos, bodega se los lleva.
+        if (Acceso::esVendedor()) {
+            return "Sus pedidos por validar: {$cuantos} · ".lempiras($monto).'. Cuando bodega los valida ya no salen aquí.';
+        }
+
         $porImprimir = PedidoResource::getEloquentQuery()->where('estado', EstadoPedido::PorImprimir)->count();
 
         $partes = [
-            match (true) {
-                Acceso::esVendedor() => 'Sus pedidos',
-                Acceso::veTodo()     => 'Todas las bodegas',
-                default              => 'Vendedores de su bodega',
-            },
+            Acceso::veTodo() ? 'Todas las bodegas' : 'Vendedores de su bodega',
             $cuantos.' '.($cuantos === 1 ? 'pendiente' : 'pendientes'),
             lempiras($monto).' por validar',
             "{$porImprimir} por imprimir",
@@ -80,6 +82,11 @@ class ListPedidos extends ListRecords
      */
     public function getTabs(): array
     {
+        // El vendedor solo tiene pendientes: sin pestañas.
+        if (Acceso::esVendedor()) {
+            return [];
+        }
+
         $tabs = [];
 
         foreach (EstadoPedido::cases() as $estado) {

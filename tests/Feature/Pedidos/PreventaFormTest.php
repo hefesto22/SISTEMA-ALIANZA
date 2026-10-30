@@ -79,12 +79,13 @@ test('el buscador trae solo productos activos, con sus precios con ISV', functio
         ->and($resultados[0]['precioCajaIsv'])->toBe(1380.0);
 });
 
-test('el último pedido del cliente se puede repetir: solo lo que se vende y lo que el vendedor puede ver', function (): void {
+test('el último pedido del cliente se puede repetir aunque ya esté validado: solo lo que se vende y lo del mismo vendedor', function (): void {
     $viejo = Producto::factory()->precio(10.0, 20.0)->create(['activo' => false]);
     $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id]);
 
     $anterior = pedidoConLineas($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Caja, 2], [$viejo, UnidadVenta::Unidad, 5]]);
-    $anterior->update(['cliente_id' => $cliente->id]);
+    // Ya validado: el vendedor no lo ve en su lista, pero sí sirve para repetirlo.
+    $anterior->forceFill(['cliente_id' => $cliente->id, 'estado' => EstadoPedido::PorImprimir])->save();
 
     // Uno anulado más reciente no cuenta, ni uno de otro vendedor.
     $anulado = pedidoConLineas($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Unidad, 9]]);

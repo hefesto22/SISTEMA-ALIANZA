@@ -12,7 +12,9 @@ use App\Enums\Rol;
 use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Pedidos\Pages\EditPedido;
+use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
+use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\Pedido;
@@ -169,4 +171,35 @@ test('no se anula un pedido que bodega validó un instante antes', function (): 
         ->and(fn () => app(AnularPedido::class)->ejecutar($pedido, 'Cliente cerrado'))
         ->toThrow(ReglaNegocioException::class, 'Solo se pueden anular pedidos pendientes')
         ->and($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir);
+});
+
+test('el vendedor ve sus pedidos solo mientras están pendientes; ya validados solo bodega los corrige', function (): void {
+    $pendiente = pedidoDeAlcance($this->bodega, $this->vendedor, $this->producto);
+    $validado = app(ValidarDespacho::class)->ejecutar(pedidoDeAlcance($this->bodega, $this->vendedor, $this->producto), [], $this->encargado);
+    $anulado = app(AnularPedido::class)->ejecutar(pedidoDeAlcance($this->bodega, $this->vendedor, $this->producto));
+
+    expect(Pedido::query()->visiblePara($this->vendedor)->pluck('id')->all())->toBe([$pendiente->id])
+        ->and(Pedido::query()->delAlcanceDe($this->vendedor)->count())->toBe(3)
+        ->and(Pedido::query()->visiblePara($this->encargado)->count())->toBe(3)
+        ->and($this->vendedor->can('view', $validado))->toBeFalse()
+        ->and($this->vendedor->can('update', $validado))->toBeFalse()
+        ->and($this->vendedor->can('view', $anulado))->toBeFalse()
+        ->and($this->vendedor->can('update', $pendiente))->toBeTrue()
+        ->and($this->vendedor->can('delete', $pendiente))->toBeTrue()
+        ->and($this->encargado->can('view', $validado))->toBeTrue()
+        ->and($this->encargado->can('corregir', $validado))->toBeTrue();
+
+    $this->actingAs($this->vendedor);
+
+    Livewire::test(ListPedidos::class)
+        ->assertCanSeeTableRecords([$pendiente])
+        ->assertCanNotSeeTableRecords([$validado, $anulado]);
+
+    // Si lo anula desde la pantalla del pedido, vuelve a la lista: ya no lo ve.
+    Livewire::test(ViewPedido::class, ['record' => $pendiente->getRouteKey()])
+        ->callAction('anular')
+        ->assertRedirect(PedidoResource::getUrl('index'));
+
+    expect($pendiente->fresh()?->estado)->toBe(EstadoPedido::Anulado)
+        ->and(Pedido::query()->visiblePara($this->vendedor)->count())->toBe(0);
 });

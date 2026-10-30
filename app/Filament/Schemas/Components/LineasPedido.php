@@ -175,10 +175,11 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     }
 
     /**
-     * El último pedido de este cliente que puede ver quien levanta la
-     * preventa, para agregar los mismos productos de un toque (las rutas se
-     * repiten cada semana). Con los precios de hoy; los productos que ya no
-     * están activos no se agregan.
+     * El último pedido de este cliente que le toca a quien levanta la
+     * preventa (el vendedor: uno suyo, aunque ya esté validado), para agregar
+     * los mismos productos de un toque (las rutas se repiten cada semana).
+     * Con los precios de hoy; los productos que ya no están activos no se
+     * agregan.
      *
      * @return array{numero: string, fecha: string, lineas: list<array{producto_id: int, unidad: string, cantidad: int}>, productos: array<int, array<string, mixed>>, fuera: int}|null
      */
@@ -194,7 +195,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         }
 
         $pedido = Pedido::query()
-            ->visiblePara($usuario)
+            ->delAlcanceDe($usuario)
             ->where('cliente_id', $clienteId)
             ->where('estado', '!=', EstadoPedido::Anulado)
             ->whereHas('items')

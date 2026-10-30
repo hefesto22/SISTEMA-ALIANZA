@@ -16,6 +16,7 @@ use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
+use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\Factura;
@@ -200,19 +201,14 @@ test('en un lote, el que otra persona está imprimiendo se salta y los demás sa
         ->and(Factura::query()->count())->toBe(1);
 });
 
-test('el vendedor ve la hoja pero no imprime; la de un pendiente es vista previa', function (): void {
+test('ya validado, el vendedor no ve el pedido ni su hoja y no lo imprime; la hoja de un pendiente es vista previa', function (): void {
     $pendiente = pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento);
     $validado = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
     $this->actingAs($this->vendedor);
 
-    Livewire::test(ViewPedido::class, ['record' => $validado->getRouteKey()])
-        ->assertActionHidden('imprimir')
-        ->assertActionVisible('hoja');
-
-    $this->get(route('pedidos.imprimir', $validado))
-        ->assertOk()
-        ->assertSee('sin factura todavía');
+    expect($this->get(PedidoResource::getUrl('view', ['record' => $validado]))->status())->toBeIn([403, 404])
+        ->and($this->get(route('pedidos.imprimir', $validado))->status())->toBeIn([403, 404]);
 
     $intento = imprimir($validado, $this->vendedor, ModoImpresion::Seleccionados);
 
@@ -220,12 +216,13 @@ test('el vendedor ve la hoja pero no imprime; la de un pendiente es vista previa
         ->and(Factura::query()->count())->toBe(0)
         ->and($validado->fresh()?->estado)->toBe(EstadoPedido::PorImprimir);
 
-    // Ya impresa por bodega, el vendedor la ve como copia sin valor fiscal.
+    // Ya impreso por bodega, tampoco.
     imprimir($validado, $this->encargado, ModoImpresion::Originales);
-    $this->get(route('pedidos.imprimir', $validado))->assertOk()->assertSee('COPIA · SIN VALOR FISCAL');
+    expect($this->get(route('pedidos.imprimir', $validado))->status())->toBeIn([403, 404]);
 
-    $this->actingAs($this->encargado)
-        ->get(route('pedidos.imprimir', $pendiente))
+    // Su pendiente sí: la hoja sale como vista previa.
+    $this->get(PedidoResource::getUrl('view', ['record' => $pendiente]))->assertOk();
+    $this->get(route('pedidos.imprimir', $pendiente))
         ->assertOk()
         ->assertSee('vista previa');
 
@@ -398,11 +395,11 @@ test('solo se corrige lo validado, y solo bodega', function (): void {
         ->assertActionHidden('corregir')
         ->assertActionVisible('validarDespacho');
 
-    $this->actingAs($this->vendedor);
-
-    Livewire::test(ViewPedido::class, ['record' => $validado->getRouteKey()])
-        ->assertActionHidden('corregir')
-        ->assertActionHidden('imprimir');
+    // El vendedor ya ni lo ve.
+    expect($this->vendedor->can('view', $validado))->toBeFalse()
+        ->and($this->vendedor->can('corregir', $validado))->toBeFalse()
+        ->and($this->vendedor->can('imprimir', $validado))->toBeFalse()
+        ->and($this->encargado->can('corregir', $validado))->toBeTrue();
 
     expect(fn () => app(CorregirPedido::class)->ejecutar($pendiente, [], $this->encargado))
         ->toThrow(ReglaNegocioException::class);
