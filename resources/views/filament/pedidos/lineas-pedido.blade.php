@@ -13,8 +13,10 @@
     El buscador se queda arriba al bajar por la lista. Los estilos van aquí
     mismo, sin compilar.
 
-    Existencia ("Hay"): la de la bodega del pedido. Con "controlar existencias"
-    encendido el buscador solo trae lo que hay y no deja pedir más de eso.
+    Existencia ("Hay"): la de la bodega del pedido (administración sin bodega
+    escogida: la de todas). En el buscador salen primero los que tienen. Con
+    "controlar existencias" encendido solo salen los que hay y no se deja
+    pedir más de eso.
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
@@ -54,7 +56,18 @@
         .pv-carrito .fi-input-wrp-prefix { color: var(--gray-400); }
         .pv-resultados { margin-top: 0.5rem; border-radius: 0.75rem; background: #fff; outline: 1px solid rgb(3 7 18 / 0.1); box-shadow: 0 8px 20px rgb(0 0 0 / 0.12); max-height: min(22rem, 55vh); overflow-y: auto; overscroll-behavior: contain; }
         .dark .pv-resultados { background: var(--gray-800); outline-color: rgb(255 255 255 / 0.12); }
-        .pv-resultado { display: grid; gap: 0.1rem; width: 100%; padding: 0.7rem 0.875rem; text-align: start; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
+        .pv-resultado { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 0.75rem; width: 100%; padding: 0.7rem 0.875rem; text-align: start; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
+        .pv-resultado-texto { display: grid; gap: 0.1rem; min-width: 0; }
+        .pv-resultado-hay { display: grid; justify-items: center; min-width: 4.75rem; padding: 0.3rem 0.5rem; border-radius: 0.5rem; background: var(--success-50); color: var(--success-700); line-height: 1.15; text-align: center; }
+        .pv-resultado-hay strong { font-size: 0.85rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .pv-resultado-hay span { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.8; }
+        .dark .pv-resultado-hay { background: rgb(34 197 94 / 0.12); color: var(--success-400); }
+        .pv-resultado-hay.pv-hay-poco { background: var(--warning-50); color: var(--warning-700); }
+        .dark .pv-resultado-hay.pv-hay-poco { background: rgb(245 158 11 / 0.12); color: var(--warning-400); }
+        .pv-resultado-hay.pv-hay-nada { background: var(--gray-100); color: var(--gray-500); }
+        .dark .pv-resultado-hay.pv-hay-nada { background: rgb(255 255 255 / 0.06); color: var(--gray-400); }
+        .pv-resultado.pv-agotado .pv-resultado-nombre { color: var(--gray-500); }
+        .dark .pv-resultado.pv-agotado .pv-resultado-nombre { color: var(--gray-400); }
         .dark .pv-resultado { border-bottom-color: rgb(255 255 255 / 0.06); }
         .pv-resultado:last-child { border-bottom: 0; }
         .pv-resultado:hover, .pv-resultado:focus-visible { background: var(--gray-50); outline: none; }
@@ -395,6 +408,15 @@
                 return p?.hay === null || p?.hay === undefined ? '' : 'Hay ' + this.enCajas(p.hay, p.caja)
             },
 
+            {{-- En el buscador, a la derecha: "hay 2 CJ", "en todas 2 CJ" o "sin existencia". --}}
+            etiquetaHay(p) {
+                if (Number(p?.hay ?? 0) <= 0) {
+                    return 'existencia'
+                }
+
+                return this.sinBodegaEscogida() ? 'en todas' : 'hay'
+            },
+
             {{-- Poco: menos de lo que trae una caja. --}}
             hayPoco(p) {
                 return Number(p?.hay ?? 0) < Math.max(2, Number(p?.caja ?? 1))
@@ -404,7 +426,7 @@
             maximoPara(id, unidad) {
                 const hay = this.hayDe(id)
 
-                if (! @js($config['controlar']) || hay === null) {
+                if (! @js($config['controlar']) || hay === null || this.sinBodegaEscogida()) {
                     return @js($config['maximo'])
                 }
 
@@ -420,9 +442,14 @@
                 this.esperaTope = setTimeout(() => this.topado = null, 2500)
             },
 
-            {{-- Administración: sin bodega escogida no se sabe qué hay. --}}
+            {{-- Administración sin bodega escogida: lo que hay es lo de todas las bodegas. --}}
+            sinBodegaEscogida() {
+                return @js($config['veTodo']) && ! this.$wire.get('data.bodega_id')
+            },
+
+            {{-- Controlando la existencia, sin bodega no se sabe qué se puede despachar. --}}
             sinBodega() {
-                return @js($config['controlar']) && @js($config['veTodo']) && ! this.$wire.get('data.bodega_id')
+                return @js($config['controlar']) && this.sinBodegaEscogida()
             },
 
             recordar(id) {
@@ -601,11 +628,20 @@
 
             <div class="pv-resultados" x-show="buscado || (buscar.trim().length === 1 && ! /^\d+$/.test(buscar.trim()))" x-cloak>
                 <template x-for="p in resultados" x-bind:key="p.id">
-                    <button type="button" class="pv-resultado" x-on:click="agregar(p)">
-                        <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
-                        <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
-                        <span class="pv-hay" x-show="textoHay(p) !== ''" x-bind:class="{ 'pv-hay-poco': hayPoco(p) }" x-text="textoHay(p)"></span>
-                        <span class="pv-resultado-lleva" x-show="lleva(p.id) !== ''" x-text="'Ya lleva ' + lleva(p.id) + ' · tocar suma 1 UN'"></span>
+                    <button type="button" class="pv-resultado" x-bind:class="{ 'pv-agotado': Number(p.hay ?? 0) <= 0 }" x-on:click="agregar(p)">
+                        <span class="pv-resultado-texto">
+                            <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
+                            <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
+                            <span class="pv-resultado-lleva" x-show="lleva(p.id) !== ''" x-text="'Ya lleva ' + lleva(p.id) + ' · tocar suma 1 UN'"></span>
+                        </span>
+                        <span
+                            class="pv-resultado-hay"
+                            x-show="p.hay !== null && p.hay !== undefined"
+                            x-bind:class="{ 'pv-hay-nada': Number(p.hay ?? 0) <= 0, 'pv-hay-poco': Number(p.hay ?? 0) > 0 && hayPoco(p) }"
+                        >
+                            <span x-text="etiquetaHay(p) === 'existencia' ? 'sin' : etiquetaHay(p)"></span>
+                            <strong x-text="Number(p.hay ?? 0) > 0 ? enCajas(p.hay, p.caja) : 'existencia'"></strong>
+                        </span>
                     </button>
                 </template>
 
@@ -659,7 +695,7 @@
                         </div>
 
                         <div class="pv-linea-precio" x-text="precioDe(id)"></div>
-                        <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]) }" x-text="'Hay ' + enCajas(hayDe(id), productos[id]?.caja) + ' en la bodega'"></div>
+                        <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]) }" x-text="'Hay ' + enCajas(hayDe(id), productos[id]?.caja) + (sinBodegaEscogida() ? ' entre todas las bodegas' : ' en la bodega')"></div>
                         <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: en la bodega hay ' + enCajas(hayDe(id), productos[id]?.caja)"></div>
 
                         <div class="pv-cantidades">

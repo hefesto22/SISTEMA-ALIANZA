@@ -386,7 +386,7 @@ test('el super admin escoge en Configuración el costo, el precio al despachar y
         ->and($configuracion->controlar_existencias)->toBeTrue();
 });
 
-test('controlando la existencia, el buscador de la preventa solo trae lo que hay en la bodega del pedido y dice cuánto', function (): void {
+test('el buscador de la preventa dice cuánto hay y pone primero lo que tiene; controlando la existencia, solo eso', function (): void {
     Configuracion::actual()->update(['controlar_existencias' => true]);
 
     $this->producto->forceFill(['descripcion' => 'JABON A TOCADOR 12X100G'])->save();
@@ -409,11 +409,18 @@ test('controlando la existencia, el buscador de la preventa solo trae lo que hay
     expect(buscarEnPreventa('jabon'))->toBe([])
         ->and(array_column(buscarEnPreventa('jabon', $this->otra->id), 'id'))->toBe([$enLaOtra->id]);
 
-    // Sin controlar la existencia salen todos, con lo que hay.
+    // Sin controlar la existencia salen todos: primero los que tienen.
     Configuracion::actual()->update(['controlar_existencias' => false]);
     $this->actingAs($this->vendedor);
     $todos = buscarEnPreventa('jabon');
 
     expect(array_column($todos, 'id'))->toBe([$this->producto->id, $sinExistencia->id, $enLaOtra->id])
         ->and(array_column($todos, 'hay'))->toBe([29, 0, 0]);
+
+    // Administración sin bodega escogida: lo de todas las bodegas.
+    $this->actingAs($this->admin);
+    $deTodas = buscarEnPreventa('jabon');
+
+    expect(array_column($deTodas, 'id'))->toBe([$this->producto->id, $enLaOtra->id, $sinExistencia->id])
+        ->and(array_column($deTodas, 'hay'))->toBe([29, 10, 0]);
 });
