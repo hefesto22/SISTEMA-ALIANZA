@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Pedidos\RecalcularPedido;
+use App\Enums\EstadoPedido;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
@@ -78,6 +79,34 @@ test('el buscador trae solo productos activos, con sus precios con ISV', functio
         ->and($resultados[0]['precioCajaIsv'])->toBe(1380.0);
 });
 
+test('el último pedido del cliente se puede repetir: solo lo que se vende y lo que el vendedor puede ver', function (): void {
+    $viejo = Producto::factory()->precio(10.0, 20.0)->create(['activo' => false]);
+    $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id]);
+
+    $anterior = pedidoConLineas($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Caja, 2], [$viejo, UnidadVenta::Unidad, 5]]);
+    $anterior->update(['cliente_id' => $cliente->id]);
+
+    // Uno anulado más reciente no cuenta, ni uno de otro vendedor.
+    $anulado = pedidoConLineas($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Unidad, 9]]);
+    $anulado->forceFill(['cliente_id' => $cliente->id, 'estado' => EstadoPedido::Anulado])->save();
+    $otroVendedor = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $otroVendedor->assignRole(Rol::Vendedor->value);
+    $ajeno = pedidoConLineas($this->bodega, $otroVendedor, [[$this->producto, UnidadVenta::Unidad, 7]]);
+    $ajeno->update(['cliente_id' => $cliente->id]);
+
+    $this->actingAs($this->vendedor);
+
+    /** @var array{numero: string, lineas: list<array<string, mixed>>, productos: array<int, mixed>, fuera: int} $ultimo */
+    $ultimo = Livewire::test(CreatePedido::class)
+        ->instance()
+        ->callSchemaComponentMethod('form.items', 'ultimoPedido', ['clienteId' => $cliente->id]);
+
+    expect($ultimo['numero'])->toBe($anterior->numero)
+        ->and($ultimo['lineas'])->toBe([['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2]])
+        ->and(array_keys($ultimo['productos']))->toBe([$this->producto->id])
+        ->and($ultimo['fuera'])->toBe(1);
+});
+
 test('el total que pide el teléfono trae las promociones', function (): void {
     $toffee = Producto::factory()->precio(20.0, 30.0)->create();
     $nutrine = Producto::factory()->precio(20.0, 25.30)->create();
@@ -131,7 +160,8 @@ test('al editar se cargan las líneas, y al guardar se cambian, se quitan y se a
         ]])
         ->fillForm(['items' => [
             ['id' => $primera->id, 'producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2],
-            ['producto_id' => $otro->id, 'unidad' => 'caja', 'cantidad' => 1],
+            // Línea nueva (sin id): en las pruebas fillForm mezcla con lo que había, por eso el id va en null.
+            ['id' => null, 'producto_id' => $otro->id, 'unidad' => 'caja', 'cantidad' => 1],
         ]])
         ->call('save')
         ->assertHasNoFormErrors();

@@ -4,7 +4,12 @@
 
     Todo lo de la lista pasa en el teléfono (Alpine): agregar, unidad o caja,
     − y +, quitar. Al servidor solo van la búsqueda, el total con promociones
-    (cuando se deja de tocar) y Guardar. Los estilos van aquí mismo, sin compilar.
+    (cuando se deja de tocar), el último pedido del cliente y Guardar.
+
+    Cada producto se ve en una fila corta (cantidad, nombre, subtotal); al
+    tocarla se abre para cambiarla. El que se acaba de agregar queda abierto.
+    El buscador se queda arriba al bajar por la lista. Los estilos van aquí
+    mismo, sin compilar.
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
@@ -26,16 +31,20 @@
         'tasa'      => CalculadoraPrecio::tasaIsv(),
         'simbolo'   => (string) config('honduras.moneda.simbolo', 'L.'),
         'maximo'    => LineasPedido::MAXIMO_CANTIDAD,
+        'edicion'   => $edicion,
     ];
 @endphp
 
 <x-dynamic-component :component="$getFieldWrapperView()" :field="$field">
     <style>
-        /* ── Buscador ── */
-        .pv-carrito { display: grid; gap: 1rem; }
+        .pv-carrito > * + * { margin-top: 1rem; }
+
+        /* ── Buscador: se queda arriba al bajar por la lista ── */
+        .pv-buscador { position: sticky; top: var(--topbar-height, 4rem); z-index: 6; margin: -0.5rem -0.5rem 0; padding: 0.5rem; border-radius: 0 0 0.875rem 0.875rem; background: #fff; }
+        .dark .pv-buscador { background: var(--gray-900); }
         .pv-carrito .fi-input-wrp-prefix { color: var(--gray-400); }
-        .pv-resultados { margin-top: 0.5rem; border-radius: 0.75rem; background: #fff; outline: 1px solid rgb(3 7 18 / 0.1); box-shadow: 0 6px 16px rgb(0 0 0 / 0.08); max-height: 22rem; overflow-y: auto; }
-        .dark .pv-resultados { background: var(--gray-900); outline-color: rgb(255 255 255 / 0.12); }
+        .pv-resultados { margin-top: 0.5rem; border-radius: 0.75rem; background: #fff; outline: 1px solid rgb(3 7 18 / 0.1); box-shadow: 0 8px 20px rgb(0 0 0 / 0.12); max-height: min(22rem, 55vh); overflow-y: auto; overscroll-behavior: contain; }
+        .dark .pv-resultados { background: var(--gray-800); outline-color: rgb(255 255 255 / 0.12); }
         .pv-resultado { display: grid; gap: 0.1rem; width: 100%; padding: 0.7rem 0.875rem; text-align: start; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
         .dark .pv-resultado { border-bottom-color: rgb(255 255 255 / 0.06); }
         .pv-resultado:last-child { border-bottom: 0; }
@@ -48,23 +57,44 @@
         .dark .pv-resultado-lleva { color: var(--primary-400); }
         .pv-aviso { padding: 0.75rem 0.875rem; font-size: 0.8rem; color: var(--gray-500); }
 
+        /* ── Último pedido del cliente ── */
+        .pv-ultimo { display: grid; gap: 0.5rem; padding: 0.875rem 1rem; border-radius: 0.75rem; background: color-mix(in oklab, var(--primary-500) 8%, transparent); outline: 1px solid color-mix(in oklab, var(--primary-500) 35%, transparent); }
+        .pv-ultimo-titulo { font-size: 0.875rem; font-weight: 600; }
+        .pv-ultimo-detalle { font-size: 0.78rem; color: var(--gray-500); }
+        .dark .pv-ultimo-detalle { color: var(--gray-400); }
+        .pv-ultimo button { justify-self: start; padding: 0.5rem 0.875rem; border-radius: 0.5rem; font-size: 0.85rem; font-weight: 600; color: #fff; background: var(--primary-600); }
+
         /* ── Lista ── */
-        .pv-lista-titulo { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; font-weight: 600; color: var(--gray-500); }
+        .pv-lista-titulo { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--gray-500); }
+        .pv-lista-titulo button { font-weight: 600; color: var(--primary-600); }
+        .dark .pv-lista-titulo button { color: var(--primary-400); }
         .pv-lista { display: grid; border-radius: 0.75rem; outline: 1px solid rgb(3 7 18 / 0.08); overflow: hidden; }
         .dark .pv-lista { outline-color: rgb(255 255 255 / 0.1); }
-        .pv-linea { display: grid; gap: 0.4rem; padding: 0.75rem 0.875rem; border-bottom: 1px solid var(--gray-100); transition: background-color 0.6s ease; }
+        .pv-linea { border-bottom: 1px solid var(--gray-100); transition: background-color 0.6s ease; }
         .dark .pv-linea { border-bottom-color: rgb(255 255 255 / 0.06); }
         .pv-linea:last-child { border-bottom: 0; }
         .pv-linea.pv-resaltada { background: color-mix(in oklab, var(--primary-500) 14%, transparent); transition: none; }
-        .pv-linea-arriba { display: flex; align-items: flex-start; gap: 0.5rem; }
+        .pv-linea.pv-abierta { background: color-mix(in oklab, var(--primary-500) 5%, transparent); }
+
+        /* Fila corta: cantidad, nombre y subtotal. Al tocarla se abre. */
+        .pv-corta { display: flex; align-items: center; gap: 0.625rem; width: 100%; padding: 0.6rem 0.875rem; text-align: start; cursor: pointer; }
+        .pv-cant { flex-shrink: 0; min-width: 2.4rem; padding: 0.15rem 0.4rem; border-radius: 0.375rem; text-align: center; font-size: 0.78rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--primary-700); background: color-mix(in oklab, var(--primary-500) 14%, transparent); }
+        .dark .pv-cant { color: var(--primary-300); }
+        .pv-corta-nombre { flex: 1 1 auto; min-width: 0; font-size: 0.85rem; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .pv-linea-subtotal { flex-shrink: 0; font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+        /* Fila abierta. */
+        .pv-detalle { display: grid; gap: 0.45rem; padding: 0.7rem 0.875rem 0.8rem; }
+        .pv-linea-arriba { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; }
         .pv-linea-nombre { flex: 1 1 auto; min-width: 0; font-size: 0.875rem; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-        .pv-linea-subtotal { flex-shrink: 0; font-size: 0.95rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .pv-quitar { flex-shrink: 0; display: grid; place-items: center; width: 2rem; height: 2rem; margin: -0.35rem -0.4rem 0 0; border-radius: 0.5rem; color: var(--gray-400); }
         .pv-quitar:hover { color: var(--danger-600); background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
         .pv-quitar svg, .pv-paso svg { width: 1.1rem; height: 1.1rem; }
         .pv-linea-precio { font-size: 0.75rem; color: var(--gray-500); font-variant-numeric: tabular-nums; }
         .dark .pv-linea-precio { color: var(--gray-400); }
         .pv-linea-controles { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+        .pv-listo { margin-inline-start: auto; font-size: 0.8rem; font-weight: 600; color: var(--primary-600); padding: 0.4rem 0.25rem; }
+        .dark .pv-listo { color: var(--primary-400); }
 
         /* Unidad o caja. */
         .pv-seg { display: inline-flex; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.12); overflow: hidden; }
@@ -104,7 +134,8 @@
         @media (max-width: 639.98px) {
             .fi-main .pv > .fi-section:not(.fi-section-not-contained):not(.fi-aside) > .fi-section-header { padding: 0.875rem 1rem; }
             .fi-main .pv > .fi-section:not(.fi-section-not-contained):not(.fi-divided) > .fi-section-content-ctn > .fi-section-content { padding: 1rem; }
-            .pv-linea { padding: 0.7rem 0.75rem; }
+            .pv-corta { padding: 0.6rem 0.75rem; }
+            .pv-detalle { padding: 0.7rem 0.75rem 0.8rem; }
         }
 
         /* Teléfono y tableta: la barra fija abajo; con el teclado abierto se esconde. */
@@ -128,9 +159,12 @@
             buscado: false,
             turnoBusqueda: 0,
             turnoResumen: 0,
+            turnoUltimo: 0,
             esperaBusqueda: null,
             esperaResumen: null,
             resaltada: null,
+            abierta: null,
+            ultimo: null,
             total: @js($config['total']),
             ahorro: @js($config['ahorro']),
             promociones: @js($config['promos']),
@@ -141,6 +175,12 @@
                 }
 
                 this.$watch('lineas', () => this.recalcular())
+
+                {{-- Al crear: si el cliente ya tiene pedidos, ofrecer los mismos productos. --}}
+                if (! @js($config['edicion'])) {
+                    this.$wire.$watch('data.cliente_id', (id) => this.pedirUltimo(id))
+                    this.pedirUltimo(this.$wire.get('data.cliente_id'))
+                }
             },
 
             llamar(metodo, argumentos) {
@@ -159,7 +199,11 @@
                 return this.productos[linea.producto_id] ?? null
             },
 
-            {{-- Igual que el servidor: precio sin ISV × cantidad, más 15% si es gravado. --}}
+            nombre(linea) {
+                return this.producto(linea)?.descripcion ?? ('Producto ' + linea.producto_id)
+            },
+
+            {{-- Igual que el servidor: precio sin ISV × cantidad (a 2 decimales), más el 15% si es gravado. --}}
             subtotal(linea) {
                 const p = this.producto(linea)
 
@@ -182,6 +226,15 @@
                 return p.codigo + ' · ' + (linea.unidad === 'caja'
                     ? this.dinero(p.precioCajaIsv) + ' la caja de ' + p.caja
                     : this.dinero(p.precioUnidadIsv) + ' c/u') + (p.gravado ? '' : ' · exento')
+            },
+
+            cantidadCorta(linea) {
+                return linea.cantidad + (linea.unidad === 'caja' ? ' cj' : '')
+            },
+
+            {{-- La caja solo se ofrece si trae más de 1 (o si la línea ya venía en caja). --}}
+            tieneCaja(linea) {
+                return linea.unidad === 'caja' || (this.producto(linea)?.caja ?? 1) > 1
             },
 
             get orden() {
@@ -221,6 +274,44 @@
                     this.ahorro = r.ahorro
                     this.promociones = r.promociones
                 } catch (e) {}
+            },
+
+            async pedirUltimo(id) {
+                const turno = ++this.turnoUltimo
+                this.ultimo = null
+
+                if (! id) {
+                    return
+                }
+
+                try {
+                    const r = await this.llamar('ultimoPedido', { clienteId: Number(id) })
+
+                    if (turno === this.turnoUltimo && r && r.lineas.length > 0) {
+                        this.ultimo = r
+                    }
+                } catch (e) {}
+            },
+
+            repetirUltimo() {
+                if (! this.ultimo) {
+                    return
+                }
+
+                Object.assign(this.productos, this.ultimo.productos)
+
+                for (const l of this.ultimo.lineas) {
+                    const i = this.lineas.findIndex((x) => Number(x.producto_id) === Number(l.producto_id) && x.unidad === l.unidad)
+
+                    if (i >= 0) {
+                        this.lineas[i].cantidad = Math.min(@js($config['maximo']), Number(this.lineas[i].cantidad) + Number(l.cantidad))
+                    } else {
+                        this.lineas.push({ producto_id: l.producto_id, unidad: l.unidad, cantidad: l.cantidad })
+                    }
+                }
+
+                this.ultimo = null
+                this.abierta = null
             },
 
             alEscribir() {
@@ -273,21 +364,26 @@
                 this.buscando = false
             },
 
-            {{-- Tocar un producto: entra a la lista; si ya estaba por unidad, le suma uno. --}}
+            {{-- Tocar un producto: entra a la lista y queda abierto; si ya estaba por unidad, le suma uno. --}}
             agregar(p) {
                 this.productos[p.id] = p
-                const i = this.lineas.findIndex((l) => Number(l.producto_id) === Number(p.id) && l.unidad === 'unidad')
+                let i = this.lineas.findIndex((l) => Number(l.producto_id) === Number(p.id) && l.unidad === 'unidad')
 
                 if (i >= 0) {
                     this.lineas[i].cantidad = Math.min(@js($config['maximo']), Number(this.lineas[i].cantidad || 0) + 1)
-                    this.resaltar(i)
                 } else {
                     this.lineas.push({ producto_id: p.id, unidad: 'unidad', cantidad: 1 })
-                    this.resaltar(this.lineas.length - 1)
+                    i = this.lineas.length - 1
                 }
 
+                this.abierta = i
+                this.resaltar(i)
                 this.cerrarBusqueda()
                 this.$refs.buscador.blur()
+            },
+
+            abrir(i) {
+                this.abierta = this.abierta === i ? null : i
             },
 
             resaltar(i) {
@@ -311,11 +407,17 @@
 
             quitar(i) {
                 this.lineas.splice(i, 1)
+
+                if (this.abierta === i) {
+                    this.abierta = null
+                } else if (this.abierta !== null && this.abierta > i) {
+                    this.abierta--
+                }
             },
         }"
     >
-        {{-- Buscador --}}
-        <div>
+        {{-- Buscador (se queda arriba al bajar por la lista) --}}
+        <div class="pv-buscador">
             <div class="fi-input-wrp">
                 <div class="fi-input-wrp-prefix fi-input-wrp-prefix-has-content fi-inline">
                     {{ svg('heroicon-m-magnifying-glass', 'fi-icon fi-size-md') }}
@@ -346,7 +448,7 @@
                 <template x-for="p in resultados" x-bind:key="p.id">
                     <button type="button" class="pv-resultado" x-on:click="agregar(p)">
                         <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
-                        <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv)"></span>
+                        <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
                         <span class="pv-resultado-lleva" x-show="cuantos(p.id) > 0" x-text="'Ya lleva ' + cuantos(p.id) + ' · tocar suma uno'"></span>
                     </button>
                 </template>
@@ -356,6 +458,15 @@
             </div>
         </div>
 
+        {{-- Último pedido de este cliente (al crear, con la lista vacía) --}}
+        <div class="pv-ultimo" x-show="ultimo && lineas.length === 0" x-cloak>
+            <div>
+                <div class="pv-ultimo-titulo" x-text="'Último pedido de este cliente: ' + (ultimo?.numero ?? '') + ' del ' + (ultimo?.fecha ?? '')"></div>
+                <div class="pv-ultimo-detalle" x-text="(ultimo?.lineas.length ?? 0) + ((ultimo?.lineas.length ?? 0) === 1 ? ' producto' : ' productos') + ', con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + ' ya no se venden)' : '') + '.'"></div>
+            </div>
+            <button type="button" x-on:click="repetirUltimo()">Agregar los mismos productos</button>
+        </div>
+
         {{-- Lista: lo último que se agregó queda arriba --}}
         <div class="pv-vacio" x-show="lineas.length === 0" @if ($cuantas > 0) style="display: none" @endif>
             Todavía no hay productos. Búsquelos arriba y tóquelos para agregarlos.
@@ -363,44 +474,57 @@
 
         <div class="pv-lista-titulo" x-show="lineas.length > 0" @if ($cuantas === 0) style="display: none" @endif>
             <span x-text="lineas.length === 1 ? '1 producto en el pedido' : lineas.length + ' productos en el pedido'">{{ $cuantas === 1 ? '1 producto en el pedido' : "{$cuantas} productos en el pedido" }}</span>
+            <span x-show="abierta === null" class="pv-aviso" style="padding: 0">Toque uno para cambiarlo</span>
         </div>
 
         <div class="pv-lista" x-show="lineas.length > 0" @if ($cuantas === 0) style="display: none" @endif>
             <template x-for="i in orden" x-bind:key="i">
-                <div class="pv-linea" x-bind:class="{ 'pv-resaltada': resaltada === i }">
-                    <div class="pv-linea-arriba">
-                        <div class="pv-linea-nombre" x-text="producto(lineas[i])?.descripcion ?? ('Producto ' + lineas[i].producto_id)"></div>
-                        <div class="pv-linea-subtotal" x-text="dinero(subtotal(lineas[i]))"></div>
-                        <button type="button" class="pv-quitar" x-on:click="quitar(i)" aria-label="Quitar del pedido" title="Quitar">
-                            {{ svg('heroicon-m-x-mark') }}
-                        </button>
-                    </div>
+                <div class="pv-linea" x-bind:class="{ 'pv-resaltada': resaltada === i, 'pv-abierta': abierta === i }">
+                    {{-- Corta --}}
+                    <button type="button" class="pv-corta" x-show="abierta !== i" x-on:click="abrir(i)">
+                        <span class="pv-cant" x-text="cantidadCorta(lineas[i])"></span>
+                        <span class="pv-corta-nombre" x-text="nombre(lineas[i])"></span>
+                        <span class="pv-linea-subtotal" x-text="dinero(subtotal(lineas[i]))"></span>
+                    </button>
 
-                    <div class="pv-linea-precio" x-text="precio(lineas[i])"></div>
-
-                    <div class="pv-linea-controles">
-                        <div class="pv-seg" role="group" aria-label="Vende en">
-                            <button type="button" x-bind:class="{ 'pv-on': lineas[i].unidad !== 'caja' }" x-on:click="lineas[i].unidad = 'unidad'">Unidad</button>
-                            <button type="button" x-bind:class="{ 'pv-on': lineas[i].unidad === 'caja' }" x-on:click="lineas[i].unidad = 'caja'" x-text="'Caja de ' + (producto(lineas[i])?.caja ?? '')">Caja</button>
+                    {{-- Abierta --}}
+                    <div class="pv-detalle" x-show="abierta === i">
+                        <div class="pv-linea-arriba" x-on:click="abrir(i)">
+                            <div class="pv-linea-nombre" x-text="nombre(lineas[i])"></div>
+                            <div class="pv-linea-subtotal" x-text="dinero(subtotal(lineas[i]))"></div>
+                            <button type="button" class="pv-quitar" x-on:click.stop="quitar(i)" aria-label="Quitar del pedido" title="Quitar">
+                                {{ svg('heroicon-m-x-mark') }}
+                            </button>
                         </div>
 
-                        <div class="pv-stepper">
-                            <button type="button" class="pv-paso" x-on:click="cambiar(i, -1)" aria-label="Uno menos">
-                                {{ svg('heroicon-m-minus') }}
-                            </button>
-                            <input
-                                type="number"
-                                inputmode="numeric"
-                                min="1"
-                                aria-label="Cantidad"
-                                x-bind:value="lineas[i].cantidad"
-                                x-on:change="fijar(i, $event.target.value)"
-                                x-on:focus="$event.target.select()"
-                                x-on:keydown.enter.prevent="$event.target.blur()"
-                            />
-                            <button type="button" class="pv-paso" x-on:click="cambiar(i, 1)" aria-label="Uno más">
-                                {{ svg('heroicon-m-plus') }}
-                            </button>
+                        <div class="pv-linea-precio" x-text="precio(lineas[i])"></div>
+
+                        <div class="pv-linea-controles">
+                            <div class="pv-seg" role="group" aria-label="Vende en" x-show="tieneCaja(lineas[i])">
+                                <button type="button" x-bind:class="{ 'pv-on': lineas[i].unidad !== 'caja' }" x-on:click="lineas[i].unidad = 'unidad'">Unidad</button>
+                                <button type="button" x-bind:class="{ 'pv-on': lineas[i].unidad === 'caja' }" x-on:click="lineas[i].unidad = 'caja'" x-text="'Caja de ' + (producto(lineas[i])?.caja ?? '')">Caja</button>
+                            </div>
+
+                            <div class="pv-stepper">
+                                <button type="button" class="pv-paso" x-on:click="cambiar(i, -1)" aria-label="Uno menos">
+                                    {{ svg('heroicon-m-minus') }}
+                                </button>
+                                <input
+                                    type="number"
+                                    inputmode="numeric"
+                                    min="1"
+                                    aria-label="Cantidad"
+                                    x-bind:value="lineas[i].cantidad"
+                                    x-on:change="fijar(i, $event.target.value)"
+                                    x-on:focus="$event.target.select()"
+                                    x-on:keydown.enter.prevent="$event.target.blur()"
+                                />
+                                <button type="button" class="pv-paso" x-on:click="cambiar(i, 1)" aria-label="Uno más">
+                                    {{ svg('heroicon-m-plus') }}
+                                </button>
+                            </div>
+
+                            <button type="button" class="pv-listo" x-on:click="abierta = null">Listo</button>
                         </div>
                     </div>
                 </div>

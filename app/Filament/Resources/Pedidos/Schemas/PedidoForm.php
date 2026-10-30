@@ -97,13 +97,10 @@ class PedidoForm
                             ->maxLength(255)
                             ->visible(fn (Get $get): bool => $esVendedor && (bool) $get('fuera_de_ruta'))
                             ->columnSpanFull(),
-                        Select::make('bodega_id')
-                            ->label('Bodega que despacha')
-                            ->relationship('bodega', 'nombre', fn (Builder $query): Builder => $query->where('activa', true))
-                            ->preload()
-                            ->required()
-                            ->default(fn (): ?int => Acceso::usuario()?->bodega_id)
-                            ->visible($veTodo),
+                        // Quién ve qué: el vendedor no escoge vendedor ni bodega (son los
+                        // suyos); el encargado escoge el vendedor y la bodega es la suya;
+                        // administración escoge los dos (al escoger el vendedor se pone
+                        // su bodega, y se puede cambiar).
                         Select::make('vendedor_id')
                             ->label('Vendedor')
                             ->relationship(
@@ -111,10 +108,30 @@ class PedidoForm
                                 'name',
                                 fn (Builder $query): Builder => self::vendedoresQuePuedeEscoger($query),
                             )
-                            ->searchable()
+                            ->getOptionLabelFromRecordUsing(fn (User $record): string => collect([$record->codigo, $record->name])->filter()->implode(' · '))
+                            ->searchable(['name', 'codigo'])
                             ->preload()
                             ->required()
+                            ->live(condition: $veTodo)
+                            ->afterStateUpdated(function (mixed $state, Set $set) use ($veTodo): void {
+                                if (! $veTodo || ! is_numeric($state)) {
+                                    return;
+                                }
+
+                                $bodega = User::query()->whereKey((int) $state)->value('bodega_id');
+
+                                if ($bodega !== null) {
+                                    $set('bodega_id', $bodega);
+                                }
+                            })
                             ->visible(! $esVendedor),
+                        Select::make('bodega_id')
+                            ->label('Bodega que despacha')
+                            ->relationship('bodega', 'nombre', fn (Builder $query): Builder => $query->where('activa', true))
+                            ->preload()
+                            ->required()
+                            ->default(fn (): ?int => Acceso::usuario()?->bodega_id)
+                            ->visible($veTodo),
                         DatePicker::make('fecha')
                             ->label('Fecha')
                             ->default(now())

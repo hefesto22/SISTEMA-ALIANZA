@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Filament\Schemas\Components;
 
 use App\Domain\Precios\CalculadoraPrecio;
+use App\Enums\EstadoPedido;
 use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
+use App\Filament\Support\Acceso;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Producto;
@@ -117,15 +119,14 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             return [];
         }
 
-        return Producto::query()
+        return array_values(Producto::query()
             ->activos()
             ->buscar($buscar)
             ->orderBy('descripcion')
             ->limit(25)
             ->get()
             ->map(fn (Producto $producto): array => self::datosDe($producto))
-            ->values()
-            ->all();
+            ->all());
     }
 
     /**
@@ -143,6 +144,62 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $this->sinRedibujar();
 
         return PedidoForm::resumenDe(self::normalizar($lineas));
+    }
+
+    /**
+     * El último pedido de este cliente que puede ver quien levanta la
+     * preventa, para agregar los mismos productos de un toque (las rutas se
+     * repiten cada semana). Con los precios de hoy; los productos que ya no
+     * están activos no se agregan.
+     *
+     * @return array{numero: string, fecha: string, lineas: list<array{producto_id: int, unidad: string, cantidad: int}>, productos: array<int, array<string, mixed>>, fuera: int}|null
+     */
+    #[ExposedLivewireMethod]
+    #[Renderless]
+    public function ultimoPedido(int $clienteId): ?array
+    {
+        $this->sinRedibujar();
+        $usuario = Acceso::usuario();
+
+        if ($usuario === null || $clienteId < 1) {
+            return null;
+        }
+
+        $pedido = Pedido::query()
+            ->visiblePara($usuario)
+            ->where('cliente_id', $clienteId)
+            ->where('estado', '!=', EstadoPedido::Anulado)
+            ->whereHas('items')
+            ->with('items.producto')
+            ->latest('id')
+            ->first();
+
+        if (! $pedido instanceof Pedido) {
+            return null;
+        }
+
+        $lineas = [];
+        $productos = [];
+        $fuera = 0;
+
+        foreach ($pedido->items as $item) {
+            if (! $item->producto->activo) {
+                $fuera++;
+
+                continue;
+            }
+
+            $lineas[] = ['producto_id' => $item->producto_id, 'unidad' => $item->unidad->value, 'cantidad' => $item->cantidad];
+            $productos[$item->producto_id] = self::datosDe($item->producto);
+        }
+
+        return [
+            'numero'    => $pedido->numero ?? '',
+            'fecha'     => $pedido->fecha->format('d/m'),
+            'lineas'    => $lineas,
+            'productos' => $productos,
+            'fuera'     => $fuera,
+        ];
     }
 
     /**
@@ -201,9 +258,21 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             'activo'          => $producto->activo,
             'precioUnidad'    => $unidad,
             'precioCaja'      => $caja,
-            'precioUnidadIsv' => CalculadoraPrecio::conIsv($unidad, $producto->gravado),
-            'precioCajaIsv'   => CalculadoraPrecio::conIsv($caja, $producto->gravado),
+            'precioUnidadIsv' => self::comoEnElPedido($unidad, $producto->gravado),
+            'precioCajaIsv'   => self::comoEnElPedido($caja, $producto->gravado),
         ];
+    }
+
+    /**
+     * Lo que cuesta 1 (unidad o caja) con ISV, redondeado igual que la línea
+     * del pedido (precio a 2 decimales y el ISV sobre eso). Así el precio que
+     * se ve y el subtotal de 1 nunca difieren por un centavo.
+     */
+    private static function comoEnElPedido(float $precio, bool $gravado): float
+    {
+        $bruto = round($precio, 2);
+
+        return round($bruto + ($gravado ? round($bruto * CalculadoraPrecio::tasaIsv(), 2) : 0.0), 2);
     }
 
     /**
