@@ -1,0 +1,279 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Filament\Schemas\Components;
+
+use App\Domain\Precios\CalculadoraPrecio;
+use App\Enums\UnidadVenta;
+use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
+use App\Models\Pedido;
+use App\Models\PedidoItem;
+use App\Models\Producto;
+use Filament\Forms\Components\Contracts\HasNestedRecursiveValidationRules;
+use Filament\Forms\Components\Field;
+use Filament\Support\Components\Attributes\ExposedLivewireMethod;
+use Illuminate\Validation\Rule;
+use Livewire\Attributes\Renderless;
+
+/**
+ * Productos de la preventa como lista tipo carrito, pensada para el
+ * teléfono y para pedidos largos (30 productos o más).
+ *
+ * Arriba un buscador: se toca un producto y entra a la lista (si ya está,
+ * le suma uno). Cada línea es una fila corta con unidad o caja, − y +,
+ * subtotal y quitar. Todo eso pasa en el teléfono, sin ir al servidor por
+ * cada toque; al servidor solo van la búsqueda, el total con promociones
+ * (cada que se deja de tocar) y Guardar.
+ *
+ * Estado: list<array{id?: int, producto_id: int, unidad: string, cantidad: int}>.
+ * Se guarda en pedido_items (crea, cambia y quita líneas) y después
+ * RecalcularPedido pone los precios.
+ *
+ * Vista: resources/views/filament/pedidos/lineas-pedido.blade.php (también
+ * trae la barra de abajo con el total y Guardar).
+ */
+class LineasPedido extends Field implements HasNestedRecursiveValidationRules
+{
+    /** Más líneas que esto en un solo pedido es un error de dedo. */
+    public const MAXIMO_LINEAS = 200;
+
+    public const MAXIMO_CANTIDAD = 99999;
+
+    /** @var view-string */
+    protected string $view = 'filament.pedidos.lineas-pedido';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->default([]);
+        $this->required();
+        $this->rule('array');
+        $this->rule('max:'.self::MAXIMO_LINEAS);
+        $this->validationMessages([
+            'required' => 'Agregue al menos un producto.',
+            'max'      => 'Un pedido puede tener hasta '.self::MAXIMO_LINEAS.' productos.',
+        ]);
+
+        // No es una columna del pedido: se guarda aparte, en sus líneas.
+        $this->dehydrated(false);
+
+        $this->loadStateFromRelationshipsUsing(function (LineasPedido $component, Pedido $record): void {
+            $component->state($record->items()->orderBy('id')->get()
+                ->map(fn (PedidoItem $item): array => [
+                    'id'          => $item->id,
+                    'producto_id' => $item->producto_id,
+                    'unidad'      => $item->unidad->value,
+                    'cantidad'    => $item->cantidad,
+                ])
+                ->values()
+                ->all());
+        });
+
+        $this->saveRelationshipsUsing(function (LineasPedido $component, Pedido $record): void {
+            self::guardar($record, self::normalizar($component->getState()));
+        });
+    }
+
+    /**
+     * Cada línea: producto que existe, unidad o caja, cantidad entera de 1 en adelante.
+     *
+     * @return array<mixed>
+     */
+    public function getNestedRecursiveValidationRules(): array
+    {
+        return ['array'];
+    }
+
+    /**
+     * @param array<string, array<mixed>> $rules
+     */
+    public function dehydrateValidationRules(array &$rules): void
+    {
+        parent::dehydrateValidationRules($rules);
+
+        $statePath = $this->getStatePath();
+
+        $rules["{$statePath}.*.id"] = ['nullable', 'integer'];
+        $rules["{$statePath}.*.producto_id"] = ['required', 'integer', Rule::exists('productos', 'id')];
+        $rules["{$statePath}.*.unidad"] = ['required', Rule::enum(UnidadVenta::class)];
+        $rules["{$statePath}.*.cantidad"] = ['required', 'integer', 'min:1', 'max:'.self::MAXIMO_CANTIDAD];
+    }
+
+    /**
+     * Buscador de arriba: productos activos por código o nombre, con sus precios.
+     *
+     * @return list<array<string, mixed>>
+     */
+    #[ExposedLivewireMethod]
+    #[Renderless]
+    public function buscarProductos(string $buscar): array
+    {
+        $this->sinRedibujar();
+        $buscar = trim($buscar);
+
+        if ($buscar === '') {
+            return [];
+        }
+
+        return Producto::query()
+            ->activos()
+            ->buscar($buscar)
+            ->orderBy('descripcion')
+            ->limit(25)
+            ->get()
+            ->map(fn (Producto $producto): array => self::datosDe($producto))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Total con promociones de las líneas que tiene el teléfono (se pide
+     * cuando se deja de tocar). Lo mismo que verá bodega al despachar.
+     *
+     * @param array<mixed> $lineas
+     *
+     * @return array{total: float, ahorro: float, promociones: string}
+     */
+    #[ExposedLivewireMethod]
+    #[Renderless]
+    public function resumen(array $lineas): array
+    {
+        $this->sinRedibujar();
+
+        return PedidoForm::resumenDe(self::normalizar($lineas));
+    }
+
+    /**
+     * La búsqueda y el total no vuelven a dibujar la página: la lista vive en
+     * el teléfono. Sin esto, como el pedido va junto con la llamada, Livewire
+     * mandaría la página entera de regreso en cada una.
+     */
+    private function sinRedibujar(): void
+    {
+        $this->getLivewire()->skipRender();
+    }
+
+    /**
+     * Datos de los productos que ya están en las líneas (al editar o al volver
+     * de un error), para dibujarlas.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getProductosDeLineas(): array
+    {
+        $ids = array_values(array_unique(array_map(
+            fn (array $linea): int => $linea['producto_id'],
+            self::normalizar($this->getState()),
+        )));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $productos = [];
+
+        foreach (Producto::query()->whereKey($ids)->get() as $producto) {
+            $productos[$producto->id] = self::datosDe($producto);
+        }
+
+        return $productos;
+    }
+
+    /**
+     * Lo que el teléfono necesita de un producto para mostrarlo y sacar su
+     * subtotal igual que el servidor (precio sin ISV × cantidad, más ISV).
+     *
+     * @return array<string, mixed>
+     */
+    public static function datosDe(Producto $producto): array
+    {
+        $unidad = $producto->precioPara(UnidadVenta::Unidad);
+        $caja = $producto->precioPara(UnidadVenta::Caja);
+
+        return [
+            'id'              => $producto->id,
+            'codigo'          => $producto->codigo,
+            'descripcion'     => $producto->descripcion,
+            'caja'            => $producto->unidades_por_caja,
+            'gravado'         => $producto->gravado,
+            'activo'          => $producto->activo,
+            'precioUnidad'    => $unidad,
+            'precioCaja'      => $caja,
+            'precioUnidadIsv' => CalculadoraPrecio::conIsv($unidad, $producto->gravado),
+            'precioCajaIsv'   => CalculadoraPrecio::conIsv($caja, $producto->gravado),
+        ];
+    }
+
+    /**
+     * Deja solo líneas bien formadas: producto, unidad válida y cantidad de 1
+     * en adelante. Lo demás que mande el navegador se ignora.
+     *
+     * @return list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}>
+     */
+    public static function normalizar(mixed $estado): array
+    {
+        if (! is_array($estado)) {
+            return [];
+        }
+
+        $lineas = [];
+
+        foreach ($estado as $linea) {
+            if (! is_array($linea) || ! is_numeric($linea['producto_id'] ?? null)) {
+                continue;
+            }
+
+            $unidad = $linea['unidad'] ?? null;
+            $unidad = $unidad instanceof UnidadVenta ? $unidad : UnidadVenta::tryFrom(is_string($unidad) ? $unidad : '');
+            $cantidad = is_numeric($linea['cantidad'] ?? null) ? (int) $linea['cantidad'] : 0;
+
+            if ($unidad === null || $cantidad < 1) {
+                continue;
+            }
+
+            $lineas[] = [
+                'id'          => is_numeric($linea['id'] ?? null) ? (int) $linea['id'] : null,
+                'producto_id' => (int) $linea['producto_id'],
+                'unidad'      => $unidad->value,
+                'cantidad'    => min($cantidad, self::MAXIMO_CANTIDAD),
+            ];
+        }
+
+        return $lineas;
+    }
+
+    /**
+     * Pasa las líneas a pedido_items: cambia las que ya estaban (solo las de
+     * este pedido), crea las nuevas y quita las que ya no vienen.
+     *
+     * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
+     */
+    private static function guardar(Pedido $pedido, array $lineas): void
+    {
+        $actuales = $pedido->items()->get()->keyBy('id');
+        $quedan = [];
+
+        foreach ($lineas as $linea) {
+            $datos = [
+                'producto_id' => $linea['producto_id'],
+                'unidad'      => $linea['unidad'],
+                'cantidad'    => $linea['cantidad'],
+            ];
+
+            $item = $linea['id'] !== null ? $actuales->get($linea['id']) : null;
+
+            if ($item instanceof PedidoItem && ! in_array($item->id, $quedan, true)) {
+                $item->fill($datos)->save();
+            } else {
+                $item = $pedido->items()->create($datos);
+            }
+
+            $quedan[] = $item->id;
+        }
+
+        $pedido->items()->whereKeyNot($quedan)->delete();
+        $pedido->unsetRelation('items');
+    }
+}
