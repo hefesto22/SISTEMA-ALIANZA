@@ -249,13 +249,15 @@ return [
     */
 
     // Categorías de proveedor (se manejan dentro de Proveedores, no tienen
-    // pantalla propia). Declararlas aquí evita que se pierdan al editar un rol.
+    // pantalla propia) y ajustar existencia (acción en Productos). Declararlas
+    // aquí evita que se pierdan al editar un rol.
     'custom_permissions' => [
         'ViewAny:Categoria',
         'View:Categoria',
         'Create:Categoria',
         'Update:Categoria',
         'Delete:Categoria',
+        'AjustarExistencia:Producto',
     ],
 
     /*

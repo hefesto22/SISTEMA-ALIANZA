@@ -5,15 +5,26 @@ declare(strict_types=1);
 namespace App\Domain\Pedidos;
 
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Inventario\SalidaDePedido;
 use App\Enums\EstadoPedido;
+use App\Enums\PrecioAlDespachar;
+use App\Enums\TipoMovimiento;
+use App\Models\Configuracion;
 use App\Models\Pedido;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Bodega confirma qué sale de cada línea. Lo que no hay se baja (hasta 0)
- * y el pedido se recalcula con el precio vigente: eso es lo que le llega
- * al cliente. Después de esto el pedido queda Por imprimir.
+ * y el pedido se recalcula: eso es lo que le llega al cliente. Después de
+ * esto el pedido queda Por imprimir.
+ *
+ * Precio (Configuración): el del día del despacho, o el del pedido salvo que
+ * ya quede por debajo del costo (ahí el de hoy, para no vender a pérdida).
+ *
+ * Lo que sale se descuenta de la existencia de la bodega del pedido. Con
+ * "controlar existencias" encendido no deja sacar más de lo que hay: no se
+ * valida nada y se avisa qué producto no alcanza.
  *
  * Las promociones se vuelven a calcular con lo que de verdad sale: si ya no
  * se cumple la condición, el regalo se cobra. Se respetan las promociones con
@@ -21,7 +32,10 @@ use Illuminate\Support\Facades\DB;
  */
 final class ValidarDespacho
 {
-    public function __construct(private readonly RecalcularPedido $recalcular) {}
+    public function __construct(
+        private readonly RecalcularPedido $recalcular,
+        private readonly SalidaDePedido $salida,
+    ) {}
 
     /**
      * @param array<int, int|string|null> $despachado [id de línea => cantidad que sale]; si falta una línea sale completa
@@ -37,7 +51,16 @@ final class ValidarDespacho
 
             AjustarLineas::aplicar($pedido, $despachado, faltaSaleCompleta: true);
 
-            $this->recalcular->ejecutar($pedido, preciosVigentes: true, respetarPromocionesDelPedido: true);
+            $precioDelPedido = Configuracion::actual()->precio_al_despachar === PrecioAlDespachar::Pedido;
+
+            $this->recalcular->ejecutar(
+                $pedido,
+                preciosVigentes: ! $precioDelPedido,
+                respetarPromocionesDelPedido: true,
+                sinPerdida: $precioDelPedido,
+            );
+
+            $this->salida->ejecutar($pedido, TipoMovimiento::Despacho, $usuario);
 
             $pedido->forceFill([
                 'estado'       => EstadoPedido::PorImprimir,

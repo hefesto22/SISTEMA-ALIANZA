@@ -107,7 +107,7 @@ class AdminPanelProvider extends PanelProvider
             ->databaseNotifications()
             ->databaseNotificationsPolling('30s')
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
-            ->navigationGroups(['Ventas', 'Precios', 'Administración'])
+            ->navigationGroups(['Ventas', 'Inventario', 'Precios', 'Administración'])
             ->sidebarCollapsibleOnDesktop()
             // Todo se guarda en MAYÚSCULAS (GuardaEnMayusculas): se escribe ya en mayúsculas.
             ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES)

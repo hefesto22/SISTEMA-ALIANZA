@@ -19,6 +19,10 @@ use Illuminate\Database\Eloquent\Collection;
  * (al levantar la preventa y al validar en bodega). Las cantidades que
  * se cobran son las despachadas si bodega ya validó; si no, las pedidas.
  *
+ * Con $sinPerdida (al despachar cobrando el precio del pedido) la línea
+ * cuyo precio ya quedó por debajo del costo de hoy pasa al precio de hoy:
+ * no se vende a pérdida.
+ *
  * Promociones: se aplican las vigentes hoy. Con $respetarPromocionesDelPedido
  * (al despachar) también cuentan las que ya tenía el pedido aunque se hayan
  * desactivado después: al cliente se le respeta lo que le ofrecieron.
@@ -29,7 +33,7 @@ final class RecalcularPedido
 {
     public function __construct(private readonly MotorPromociones $motor) {}
 
-    public function ejecutar(Pedido $pedido, bool $preciosVigentes = true, bool $respetarPromocionesDelPedido = false): Pedido
+    public function ejecutar(Pedido $pedido, bool $preciosVigentes = true, bool $respetarPromocionesDelPedido = false, bool $sinPerdida = false): Pedido
     {
         $tasaIsv = CalculadoraPrecio::tasaIsv();
         $pedido->load('items.producto');
@@ -38,7 +42,9 @@ final class RecalcularPedido
         $items = $pedido->items;
 
         foreach ($items as $item) {
-            if ($preciosVigentes) {
+            $quedaBajoCosto = $sinPerdida && round($item->precio, 4) < $item->producto->costoPara($item->unidad);
+
+            if ($preciosVigentes || $quedaBajoCosto) {
                 $item->precio = $item->producto->precioPara($item->unidad);
                 $item->gravado = $item->producto->gravado;
             }

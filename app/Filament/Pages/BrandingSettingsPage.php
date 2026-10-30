@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Enums\MetodoCosto;
+use App\Enums\PrecioAlDespachar;
 use App\Enums\TemaPanel;
 use App\Models\BrandingSetting;
+use App\Models\Configuracion;
 use App\Support\ImageOptimizer;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Radio;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -23,6 +28,8 @@ use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
  *  - Logo: imagen visible en la barra superior del panel
  *  - Favicon: ícono de la pestaña del navegador
  *  - Tema de colores (shadcn): tono de botones y acentos, en claro y oscuro
+ *  - Inventario y precios: costo promedio o último, qué precio se cobra al
+ *    despachar y si se controla la existencia (App\Models\Configuracion)
  *
  * Singleton — siempre edita la única fila de branding_settings.
  *
@@ -60,11 +67,15 @@ class BrandingSettingsPage extends Page
     public function mount(): void
     {
         $setting = BrandingSetting::current();
+        $configuracion = Configuracion::actual();
 
         $this->form->fill([
-            'logo_path'    => $setting->logo_path,
-            'favicon_path' => $setting->favicon_path,
-            'tema'         => (TemaPanel::tryFrom((string) $setting->tema) ?? TemaPanel::Default)->value,
+            'logo_path'             => $setting->logo_path,
+            'favicon_path'          => $setting->favicon_path,
+            'tema'                  => (TemaPanel::tryFrom((string) $setting->tema) ?? TemaPanel::Default)->value,
+            'metodo_costo'          => $configuracion->metodo_costo->value,
+            'precio_al_despachar'   => $configuracion->precio_al_despachar->value,
+            'controlar_existencias' => $configuracion->controlar_existencias,
         ]);
     }
 
@@ -136,6 +147,22 @@ class BrandingSettingsPage extends Page
                             })
                             ->helperText('Se aplica al tocarlo. "Shadcn" es el clásico: botones negros en modo claro y blancos en modo oscuro.'),
                     ]),
+
+                Section::make('Inventario y precios')
+                    ->description('Para todas las bodegas. El precio de venta sale del costo con el margen de cada producto (o de su categoría).')
+                    ->schema([
+                        Radio::make('metodo_costo')
+                            ->label('Costo al entrar una compra')
+                            ->options(MetodoCosto::class)
+                            ->required(),
+                        Radio::make('precio_al_despachar')
+                            ->label('Si el precio cambió entre el pedido y el despacho, se cobra')
+                            ->options(PrecioAlDespachar::class)
+                            ->required(),
+                        Toggle::make('controlar_existencias')
+                            ->label('No despachar más de lo que hay en la bodega')
+                            ->helperText('Enciéndalo cuando ya esté cargado el inventario de todas las bodegas (Productos → Ajustar existencia). Apagado, la existencia igual se descuenta y puede quedar en negativo.'),
+                    ]),
             ]);
     }
 
@@ -149,6 +176,15 @@ class BrandingSettingsPage extends Page
         ]);
 
         BrandingSetting::cambiarTema(self::tema($datos['tema'] ?? null)->value);
+
+        $metodo = $datos['metodo_costo'] ?? null;
+        $precio = $datos['precio_al_despachar'] ?? null;
+
+        Configuracion::actual()->update([
+            'metodo_costo'          => $metodo instanceof MetodoCosto ? $metodo : (MetodoCosto::tryFrom(is_string($metodo) ? $metodo : '') ?? MetodoCosto::Promedio),
+            'precio_al_despachar'   => $precio instanceof PrecioAlDespachar ? $precio : (PrecioAlDespachar::tryFrom(is_string($precio) ? $precio : '') ?? PrecioAlDespachar::Despacho),
+            'controlar_existencias' => (bool) ($datos['controlar_existencias'] ?? false),
+        ]);
 
         Notification::make()
             ->title('Configuración guardada')

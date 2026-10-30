@@ -9,6 +9,7 @@ use App\Filament\Resources\Productos\Pages\EditProducto;
 use App\Filament\Resources\Productos\Pages\ListProductos;
 use App\Filament\Resources\Productos\Pages\ViewProducto;
 use App\Filament\Resources\Productos\RelationManagers\CambiosPrecioRelationManager;
+use App\Filament\Resources\Productos\RelationManagers\MovimientosRelationManager;
 use App\Filament\Resources\Productos\Schemas\ProductoForm;
 use App\Filament\Resources\Productos\Schemas\ProductoInfolist;
 use App\Filament\Resources\Productos\Tables\ProductosTable;
@@ -68,15 +69,28 @@ class ProductoResource extends Resource
         return ProductosTable::configure($table);
     }
 
+    /**
+     * Con la existencia: la de su bodega (encargado y vendedor) o la de
+     * todas las bodegas juntas (administración).
+     */
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with(['proveedor', 'categoria']);
+        $usuario = Acceso::usuario();
+        $todas = $usuario === null || $usuario->veTodasLasBodegas();
+        $bodegaId = $usuario?->bodega_id;
+
+        return parent::getEloquentQuery()
+            ->with(['proveedor', 'categoria'])
+            ->withSum(['existencias as existencia' => fn (Builder $query): Builder => $todas
+                ? $query
+                : $query->where('bodega_id', $bodegaId)], 'cantidad');
     }
 
     public static function getRelations(): array
     {
         return [
             CambiosPrecioRelationManager::class,
+            MovimientosRelationManager::class,
         ];
     }
 

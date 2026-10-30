@@ -105,6 +105,26 @@ class Producto extends Model
     }
 
     /**
+     * Cuánto hay en cada bodega (en unidades).
+     *
+     * @return HasMany<Existencia, $this>
+     */
+    public function existencias(): HasMany
+    {
+        return $this->hasMany(Existencia::class);
+    }
+
+    /**
+     * Kárdex: cada entrada y salida en cada bodega.
+     *
+     * @return HasMany<MovimientoInventario, $this>
+     */
+    public function movimientos(): HasMany
+    {
+        return $this->hasMany(MovimientoInventario::class);
+    }
+
+    /**
      * @return BelongsTo<User, $this>
      */
     public function actualizadoPor(): BelongsTo
@@ -144,6 +164,22 @@ class Producto extends Model
             UnidadVenta::Unidad => $this->precio_unidad,
             UnidadVenta::Caja   => $this->precioCaja(),
         };
+    }
+
+    /**
+     * Cuántas unidades son una unidad de venta: 1 suelta o la caja completa.
+     */
+    public function unidadesEn(UnidadVenta $unidad): int
+    {
+        return $unidad === UnidadVenta::Caja ? max(1, $this->unidades_por_caja) : 1;
+    }
+
+    /**
+     * Costo sin ISV según se venda suelto o por caja (para no vender a pérdida).
+     */
+    public function costoPara(UnidadVenta $unidad): float
+    {
+        return round($this->costo_unidad * $this->unidadesEn($unidad), 4);
     }
 
     /**

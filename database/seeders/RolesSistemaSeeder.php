@@ -14,8 +14,8 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * Roles de trabajo con sus permisos (formato Shield "Accion:Modelo").
  *
- *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI) y usuarios.
- *  bodega        → actualiza precios, ve historial, promociones y rutas, valida e imprime (factura) lo de su bodega.
+ *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI), compras e inventario de todas las bodegas, y usuarios.
+ *  bodega        → actualiza precios, ve historial, promociones y rutas, valida e imprime (factura), registra compras y ajusta la existencia de su bodega.
  *  vendedor      → consulta precios y promociones vigentes, maneja los clientes de sus rutas y su preventa.
  *
  * Ojo: al correrlo de nuevo, los permisos de estos tres roles vuelven a
@@ -35,8 +35,9 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Ruta', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Proveedor', self::TODO),
                 ...$this->permisos('Categoria', ['viewAny', 'view', 'create', 'update', 'delete']),
-                ...$this->permisos('Producto', self::TODO),
+                ...$this->permisos('Producto', [...self::TODO, 'ajustarExistencia']),
                 ...$this->permisos('CambioPrecio', ['viewAny', 'view']),
+                ...$this->permisos('Compra', ['viewAny', 'view', 'create']),
                 ...$this->permisos('Cliente', self::TODO),
                 ...$this->permisos('Pedido', ['viewAny', 'view', 'create', 'update', 'delete', 'validar']),
                 ...$this->permisos('Promocion', ['viewAny', 'view', 'create', 'update', 'delete']),
@@ -45,7 +46,8 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Factura', ['viewAny', 'view']),
             ],
             Rol::Bodega->value => [
-                ...$this->permisos('Producto', ['viewAny', 'view', 'update']),
+                ...$this->permisos('Producto', ['viewAny', 'view', 'update', 'ajustarExistencia']),
+                ...$this->permisos('Compra', ['viewAny', 'view', 'create']),
                 ...$this->permisos('Proveedor', ['viewAny', 'view']),
                 ...$this->permisos('Categoria', ['viewAny', 'view']),
                 ...$this->permisos('CambioPrecio', ['viewAny', 'view']),
