@@ -21,7 +21,7 @@ use Illuminate\Support\Carbon;
  * ese municipio (Administración → Rutas).
  *
  * El código (CLI-000001) se genera solo. Nombres repetidos: ver
- * conElMismoNombre(). La ubicación es el punto del negocio en el mapa.
+ * conElMismoNombre().
  *
  * @property int $id
  * @property string|null $codigo
@@ -30,7 +30,6 @@ use Illuminate\Support\Carbon;
  * @property string|null $rtn
  * @property string|null $telefono
  * @property string|null $direccion
- * @property array<string, float>|null $ubicacion
  * @property int|null $municipio_id
  * @property int|null $bodega_id
  * @property bool $activo
@@ -55,7 +54,6 @@ class Cliente extends Model
         'rtn',
         'telefono',
         'direccion',
-        'ubicacion',
         'municipio_id',
         'bodega_id',
         'activo',
@@ -67,8 +65,7 @@ class Cliente extends Model
     protected function casts(): array
     {
         return [
-            'activo'    => 'boolean',
-            'ubicacion' => 'array',
+            'activo' => 'boolean',
         ];
     }
 
@@ -130,21 +127,6 @@ class Cliente extends Model
         }
 
         return $query->first();
-    }
-
-    /**
-     * Para abrir el punto del negocio en Google Maps (en el teléfono abre la app).
-     */
-    public function enlaceMapa(): ?string
-    {
-        $lat = $this->ubicacion['lat'] ?? null;
-        $lng = $this->ubicacion['lng'] ?? null;
-
-        if (! is_numeric($lat) || ! is_numeric($lng)) {
-            return null;
-        }
-
-        return 'https://www.google.com/maps/search/?api=1&query='.round((float) $lat, 6).','.round((float) $lng, 6);
     }
 
     /**

@@ -37,13 +37,4 @@ return [
         ],
     ],
 
-    // Dirección de un punto del mapa (ubicación del cliente). El servicio
-    // público pide identificarse: ponga en NOMINATIM_USER_AGENT el nombre del
-    // sistema y un correo de contacto, por ejemplo
-    // "SistemaAlianza/1.0 (sistemas@empresa.hn)".
-    'nominatim' => [
-        'url'        => env('NOMINATIM_URL', 'https://nominatim.openstreetmap.org'),
-        'user_agent' => env('NOMINATIM_USER_AGENT', 'SistemaAlianza/1.0 (+'.env('APP_URL', 'http://localhost').')'),
-    ],
-
 ];
