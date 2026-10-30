@@ -50,7 +50,8 @@ test('un administrador no puede dar el rol de super admin', function (): void {
             'is_active' => true,
         ])
         ->call('create')
-        ->assertHasFormErrors(['roles']);
+        // El select de varios valida cada rol escogido: el error queda en roles.0.
+        ->assertHasFormErrors(['roles.0']);
 
     expect(User::query()->where('email', 'nuevo@alianza.hn')->exists())->toBeFalse();
 });

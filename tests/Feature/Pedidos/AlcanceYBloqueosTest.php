@@ -143,8 +143,9 @@ test('lo que bodega ya validó no se guarda desde una edición abierta antes', f
 
     app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
 
+    // Al guardar, la página revisa de nuevo el permiso (ya no está pendiente):
+    // no se guarda nada.
     $edicion
-        ->fillForm(['notas' => 'Agregar dos más'])
         ->call('save')
         ->assertForbidden();
 
