@@ -4,169 +4,55 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Schemas;
 
-use App\Filament\Resources\Facturas\FacturaResource;
-use App\Models\Factura;
 use App\Models\Pedido;
-use App\Models\PedidoItem;
-use Filament\Infolists\Components\RepeatableEntry;
-use Filament\Infolists\Components\RepeatableEntry\TableColumn;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 
+/**
+ * Ver pedido, pensado para el teléfono:
+ *  - Resumen: cliente, estado, quién lo levantó, validó, imprimió y corrigió,
+ *    avisos (fuera de ruta, factura por retirar, notas) y el total.
+ *  - Productos: la misma fila que en la preventa (cantidad, nombre, total),
+ *    lo que no salió y abajo los totales.
+ *  - Facturas: solo si ya tiene.
+ *
+ * Las vistas están en resources/views/filament/pedidos/ver.
+ */
 class PedidoInfolist
 {
     public static function configure(Schema $schema): Schema
     {
         return $schema
+            ->columns(1)
             ->components([
-                Section::make('Pedido')
-                    ->columns(3)
+                Section::make()
                     ->columnSpanFull()
+                    ->extraAttributes(['class' => 'pv'])
                     ->schema([
-                        TextEntry::make('numero')
-                            ->label('Número')
-                            ->weight('bold')
-                            ->copyable(),
-                        TextEntry::make('estado')
-                            ->badge(),
-                        TextEntry::make('fecha')
-                            ->date('d/m/Y'),
-                        TextEntry::make('cliente.nombre')
-                            ->label('Cliente')
-                            ->helperText(fn (Pedido $record): ?string => collect([
-                                $record->cliente->rtn ? 'RTN '.$record->cliente->rtn : null,
-                                $record->cliente->telefono,
-                                $record->cliente->direccion,
-                                $record->cliente->municipio?->etiqueta(),
-                            ])->filter()->implode(' · ') ?: null),
-                        TextEntry::make('vendedor.name')
-                            ->label('Vendedor'),
-                        TextEntry::make('bodega.nombre')
-                            ->label('Bodega'),
-                        TextEntry::make('validador.name')
-                            ->label('Validó')
-                            ->placeholder('Sin validar')
-                            ->helperText(fn (Pedido $record): ?string => $record->validado_at?->format('d/m/Y H:i')),
-                        TextEntry::make('impresor.name')
-                            ->label('Imprimió')
-                            ->placeholder('Sin imprimir')
-                            ->helperText(fn (Pedido $record): ?string => $record->impreso_at === null ? null : collect([
-                                $record->impreso_at->format('d/m/Y H:i'),
-                                $record->impresiones > 1 ? "{$record->impresiones} veces" : null,
-                            ])->filter()->implode(' · '))
-                            ->visible(fn (Pedido $record): bool => $record->estaValidado()),
-                        TextEntry::make('corrector.name')
-                            ->label('Corrigió')
-                            ->helperText(fn (Pedido $record): ?string => $record->corregido_at?->format('d/m/Y H:i'))
-                            ->hint(fn (Pedido $record): ?string => $record->esReimpresion() ? 'Falta reimprimir' : null)
-                            ->hintColor('warning')
-                            ->visible(fn (Pedido $record): bool => $record->corregido_at !== null),
-                        TextEntry::make('notas')
-                            ->placeholder('—')
-                            ->columnSpan(2),
-                        TextEntry::make('motivo_fuera_ruta')
-                            ->label('Fuera de ruta')
-                            ->badge()
-                            ->color('warning')
-                            ->icon('heroicon-m-exclamation-triangle')
-                            ->helperText('El cliente no es de las rutas del vendedor.')
-                            ->visible(fn (Pedido $record): bool => $record->fuera_de_ruta)
-                            ->columnSpanFull(),
+                        View::make('filament.pedidos.ver.resumen'),
                     ]),
 
                 Section::make('Productos')
+                    ->icon(Heroicon::OutlinedShoppingCart)
                     ->description(fn (Pedido $record): string => $record->estaPendiente()
-                        ? 'Precios de hoy (estimados). Bodega confirma cantidades y precio al validar.'
-                        : 'Cantidades y precios confirmados por bodega.')
+                        ? 'Precios de hoy, sin ISV. Bodega confirma cantidades y precios al validar.'
+                        : 'Lo que confirmó bodega. Precios sin ISV.')
                     ->columnSpanFull()
+                    ->extraAttributes(['class' => 'pv'])
                     ->schema([
-                        RepeatableEntry::make('items')
-                            ->hiddenLabel()
-                            ->table([
-                                TableColumn::make('Producto'),
-                                TableColumn::make('En'),
-                                TableColumn::make('Pidió'),
-                                TableColumn::make('Sale'),
-                                TableColumn::make('Precio (sin ISV)'),
-                                TableColumn::make('Descuento'),
-                                TableColumn::make('Total'),
-                            ])
-                            ->schema([
-                                TextEntry::make('producto.descripcion')
-                                    ->helperText(fn (PedidoItem $record): string => $record->producto->codigo),
-                                TextEntry::make('unidad')
-                                    ->badge()
-                                    ->color('gray'),
-                                TextEntry::make('cantidad'),
-                                TextEntry::make('cantidad_despachada')
-                                    ->placeholder('—')
-                                    ->weight('bold')
-                                    ->color(fn (PedidoItem $record): ?string => $record->faltante() > 0 ? 'danger' : null)
-                                    ->helperText(fn (PedidoItem $record): ?string => $record->faltante() > 0 ? "No salieron {$record->faltante()}" : null),
-                                TextEntry::make('precio')
-                                    ->formatStateUsing(fn (float $state): string => lempiras($state)),
-                                TextEntry::make('descuento')
-                                    ->formatStateUsing(fn (float $state): string => $state > 0 ? '−'.lempiras($state) : '—')
-                                    ->color(fn (float $state): string => $state > 0 ? 'success' : 'gray')
-                                    ->helperText(fn (PedidoItem $record): ?string => $record->promocion?->codigo),
-                                TextEntry::make('total')
-                                    ->formatStateUsing(fn (float $state): string => lempiras($state))
-                                    ->weight('bold'),
-                            ]),
+                        View::make('filament.pedidos.ver.productos'),
                     ]),
 
                 Section::make('Facturas')
-                    ->description('Cada vez que se corrige un pedido ya impreso, su factura queda anulada y al reimprimir sale otra. Las anuladas hay que retirarlas al cliente y marcarlas ANULADA.')
+                    ->icon(Heroicon::OutlinedDocumentText)
+                    ->description('Al corregir un pedido ya impreso, su factura se anula y al reimprimir sale otra. La anulada se retira al cliente.')
                     ->columnSpanFull()
+                    ->extraAttributes(['class' => 'pv'])
                     ->visible(fn (Pedido $record): bool => $record->facturas()->exists())
                     ->schema([
-                        RepeatableEntry::make('facturas')
-                            ->hiddenLabel()
-                            ->table([
-                                TableColumn::make('Número'),
-                                TableColumn::make('Emitida'),
-                                TableColumn::make('Total'),
-                                TableColumn::make('Estado'),
-                                TableColumn::make('Detalle'),
-                            ])
-                            ->schema([
-                                TextEntry::make('numero')
-                                    ->weight('bold')
-                                    ->copyable()
-                                    ->helperText(fn (Factura $record): string => 'CAI '.$record->cai),
-                                TextEntry::make('fecha_emision')
-                                    ->dateTime('d/m/Y H:i')
-                                    ->helperText(fn (Factura $record): ?string => collect([
-                                        $record->emisor?->name,
-                                        $record->impresiones > 1 ? "impresa {$record->impresiones} veces" : null,
-                                    ])->filter()->implode(' · ') ?: null),
-                                TextEntry::make('total')
-                                    ->formatStateUsing(fn (float $state): string => lempiras($state)),
-                                TextEntry::make('estado')
-                                    ->badge(),
-                                TextEntry::make('detalle')
-                                    ->state(fn (Factura $record): string => FacturaResource::historial($record)),
-                            ]),
-                    ]),
-
-                Section::make('Totales')
-                    ->columns(4)
-                    ->columnSpanFull()
-                    ->schema([
-                        TextEntry::make('subtotal')
-                            ->formatStateUsing(fn (float $state): string => lempiras($state)),
-                        TextEntry::make('descuento')
-                            ->label('Descuento promociones')
-                            ->formatStateUsing(fn (float $state): string => $state > 0 ? '−'.lempiras($state) : lempiras(0))
-                            ->color(fn (float $state): ?string => $state > 0 ? 'success' : null),
-                        TextEntry::make('isv')
-                            ->label('ISV')
-                            ->formatStateUsing(fn (float $state): string => lempiras($state)),
-                        TextEntry::make('total')
-                            ->formatStateUsing(fn (float $state): string => lempiras($state))
-                            ->weight('bold')
-                            ->size('lg'),
+                        View::make('filament.pedidos.ver.facturas'),
                     ]),
             ]);
     }

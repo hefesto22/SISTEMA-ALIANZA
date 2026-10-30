@@ -418,3 +418,37 @@ test('al corregir no se puede dejar sin nada: para eso se anula', function (): v
     expect($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($pedido->fresh()?->total)->toBe(730.0);
 });
+
+test('ver pedido: resumen con el cliente y el total, cada producto con lo que sale y lo que no salió, y los totales', function (): void {
+    $pedido = pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    $pedido->cliente->update(['telefono' => '99887766']);
+    $pedido->update(['notas' => 'Cobrar en efectivo']);
+    $lineas = $pedido->items()->orderBy('id')->pluck('id')->all();
+
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
+        ->assertSee('Pedido '.$pedido->numero)
+        ->assertSee($pedido->cliente->nombre)
+        ->assertSee('9988-7766')
+        ->assertSee('Pendiente')
+        ->assertSee('Sin validar')
+        ->assertSee('COBRAR EN EFECTIVO')
+        ->assertSee('2 UN')
+        ->assertSee('1 CJ')
+        ->assertSee('L. 100.00 c/u + ISV')
+        ->assertSee('L. 500.00 la caja de 10 · exento')
+        ->assertSee('L. 730.00')
+        ->assertDontSee('no salieron');
+
+    // Del gravado solo sale 1.
+    $validado = app(ValidarDespacho::class)->ejecutar($pedido, [$lineas[0] => 1], $this->encargado);
+
+    Livewire::test(ViewPedido::class, ['record' => $validado->getRouteKey()])
+        ->assertSee('Por imprimir')
+        ->assertSee($this->encargado->name)
+        ->assertSee('Sin imprimir')
+        ->assertSee('1 UN')
+        ->assertSee('Pidió 2 UN · no salieron 1')
+        ->assertSee('L. 615.00');
+});
