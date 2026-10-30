@@ -118,7 +118,7 @@ class ClienteForm
      * "Ya hay un cliente con este nombre: …" debajo del nombre, apenas se
      * escribe. Solo avisa; la regla se aplica al guardar (noRepetido).
      */
-    private static function avisoDeNombre(mixed $nombre, ?Model $record): ?HtmlString
+    public static function avisoDeNombre(mixed $nombre, ?Model $record): ?HtmlString
     {
         $clave = Texto::clave(self::texto($nombre));
 

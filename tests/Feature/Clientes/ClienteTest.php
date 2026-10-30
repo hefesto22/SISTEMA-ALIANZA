@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\Rol;
 use App\Filament\Resources\Clientes\Pages\ManageClientes;
+use App\Filament\Resources\Clientes\Schemas\ClienteForm;
 use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\Municipio;
@@ -155,17 +156,16 @@ test('los repetidos de antes se pueden editar mientras no se les cambie el nombr
 });
 
 test('al escribir un nombre que ya existe avisa antes de guardar', function (): void {
-    Cliente::factory()->create(['nombre' => 'PULPERÍA ANA', 'municipio_id' => $this->municipio->id, 'bodega_id' => $this->bodega->id]);
+    $existente = Cliente::factory()->create(['nombre' => 'PULPERÍA ANA', 'municipio_id' => $this->municipio->id, 'bodega_id' => $this->bodega->id]);
 
-    $this->actingAs($this->admin);
+    // Lo que sale debajo del nombre (el modal llega aparte del HTML de la página,
+    // por eso se revisa el aviso directo y no con assertSee).
+    $aviso = fn (string $nombre, ?Cliente $editando = null): string => ClienteForm::avisoDeNombre($nombre, $editando)?->toHtml() ?? '';
 
-    Livewire::test(ManageClientes::class)
-        ->mountAction('create')
-        ->assertDontSee('Ya hay un cliente con este nombre')
-        ->fillForm(['nombre' => 'pulperia ana'])
-        ->assertSee('Ya hay un cliente con este nombre')
-        ->fillForm(['nombre' => 'pulpería ana barrio el centro'])
-        ->assertDontSee('Ya hay un cliente con este nombre');
+    expect($aviso('pulperia ana'))->toContain('Ya hay un cliente con este nombre')
+        ->and($aviso('pulperia ana'))->toContain((string) $existente->codigo)
+        ->and($aviso('pulpería ana barrio el centro'))->toBe('')
+        ->and($aviso('pulperia ana', $existente))->toBe('');
 });
 
 test('un cliente nuevo no muestra el interruptor de activo: entra activo', function (): void {
