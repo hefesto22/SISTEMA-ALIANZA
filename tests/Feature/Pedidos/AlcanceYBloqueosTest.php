@@ -145,11 +145,11 @@ test('lo que bodega ya validó no se guarda desde una edición abierta antes', f
 
     app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
 
-    // Al guardar, la página revisa de nuevo el permiso (ya no está pendiente):
-    // no se guarda nada.
+    // Al guardar, la página vuelve a buscar el pedido entre los suyos y ya no
+    // está (validado, el vendedor ya no lo ve): no se guarda nada.
     $edicion
         ->call('save')
-        ->assertForbidden();
+        ->assertNotFound();
 
     $undoRepeaterFake();
 
