@@ -78,8 +78,10 @@
 
         /* Fila corta: cantidad, nombre y subtotal. Al tocarla se abre. */
         .pv-corta { display: flex; align-items: center; gap: 0.625rem; width: 100%; padding: 0.6rem 0.875rem; text-align: start; cursor: pointer; }
-        .pv-cant { flex-shrink: 0; min-width: 2.4rem; padding: 0.15rem 0.4rem; border-radius: 0.375rem; text-align: center; font-size: 0.78rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--primary-700); background: color-mix(in oklab, var(--primary-500) 14%, transparent); }
-        .dark .pv-cant { color: var(--primary-300); }
+        /* Cantidad bien visible: "3 UN" (unidades) o "2 CJ" (cajas, en color lleno para que no se confundan). */
+        .pv-cant { flex-shrink: 0; min-width: 3.6rem; padding: 0.3rem 0.45rem; border-radius: 0.5rem; text-align: center; font-size: 0.85rem; font-weight: 800; letter-spacing: 0.02em; line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--primary-700); background: color-mix(in oklab, var(--primary-500) 14%, transparent); outline: 1px solid color-mix(in oklab, var(--primary-500) 45%, transparent); }
+        .dark .pv-cant { color: var(--primary-200); }
+        .pv-cant.pv-cant-caja, .dark .pv-cant.pv-cant-caja { color: #fff; background: var(--primary-600); outline-color: var(--primary-600); }
         .pv-corta-nombre { flex: 1 1 auto; min-width: 0; font-size: 0.85rem; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .pv-linea-subtotal { flex-shrink: 0; font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
@@ -229,7 +231,25 @@
             },
 
             cantidadCorta(linea) {
-                return linea.cantidad + (linea.unidad === 'caja' ? ' cj' : '')
+                return linea.cantidad + (linea.unidad === 'caja' ? ' CJ' : ' UN')
+            },
+
+            {{-- En el buscador: lo que ya lleva de ese producto, por unidad y por caja. --}}
+            lleva(productoId) {
+                const de = (unidad) => this.lineas
+                    .filter((l) => Number(l.producto_id) === Number(productoId) && (l.unidad === 'caja') === (unidad === 'caja'))
+                    .reduce((t, l) => t + Number(l.cantidad || 0), 0)
+                const partes = []
+
+                if (de('unidad') > 0) {
+                    partes.push(de('unidad') + ' UN')
+                }
+
+                if (de('caja') > 0) {
+                    partes.push(de('caja') + ' CJ')
+                }
+
+                return partes.join(' · ')
             },
 
             {{-- La caja solo se ofrece si trae más de 1 (o si la línea ya venía en caja). --}}
@@ -239,10 +259,6 @@
 
             get orden() {
                 return this.lineas.map((linea, i) => i).reverse()
-            },
-
-            cuantos(productoId) {
-                return this.lineas.filter((l) => Number(l.producto_id) === Number(productoId)).reduce((t, l) => t + Number(l.cantidad || 0), 0)
             },
 
             {{-- El total sale al instante en el teléfono; las promociones las calcula el servidor al dejar de tocar. --}}
@@ -449,7 +465,7 @@
                     <button type="button" class="pv-resultado" x-on:click="agregar(p)">
                         <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
                         <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
-                        <span class="pv-resultado-lleva" x-show="cuantos(p.id) > 0" x-text="'Ya lleva ' + cuantos(p.id) + ' · tocar suma uno'"></span>
+                        <span class="pv-resultado-lleva" x-show="lleva(p.id) !== ''" x-text="'Ya lleva ' + lleva(p.id) + ' · tocar suma 1 UN'"></span>
                     </button>
                 </template>
 
@@ -482,7 +498,7 @@
                 <div class="pv-linea" x-bind:class="{ 'pv-resaltada': resaltada === i, 'pv-abierta': abierta === i }">
                     {{-- Corta --}}
                     <button type="button" class="pv-corta" x-show="abierta !== i" x-on:click="abrir(i)">
-                        <span class="pv-cant" x-text="cantidadCorta(lineas[i])"></span>
+                        <span class="pv-cant" x-bind:class="{ 'pv-cant-caja': lineas[i].unidad === 'caja' }" x-text="cantidadCorta(lineas[i])"></span>
                         <span class="pv-corta-nombre" x-text="nombre(lineas[i])"></span>
                         <span class="pv-linea-subtotal" x-text="dinero(subtotal(lineas[i]))"></span>
                     </button>
