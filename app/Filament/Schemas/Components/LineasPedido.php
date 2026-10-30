@@ -277,7 +277,9 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
     /**
      * Deja solo líneas bien formadas: producto, unidad válida y cantidad de 1
-     * en adelante. Lo demás que mande el navegador se ignora.
+     * en adelante. Lo demás que mande el navegador se ignora. Un producto
+     * lleva a lo más una línea en unidad y otra en caja: si viene repetido, se
+     * suma (y se queda el id de la primera).
      *
      * @return list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}>
      */
@@ -302,7 +304,15 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
                 continue;
             }
 
-            $lineas[] = [
+            $clave = ((int) $linea['producto_id']).'-'.$unidad->value;
+
+            if (isset($lineas[$clave])) {
+                $lineas[$clave]['cantidad'] = min($lineas[$clave]['cantidad'] + $cantidad, self::MAXIMO_CANTIDAD);
+
+                continue;
+            }
+
+            $lineas[$clave] = [
                 'id'          => is_numeric($linea['id'] ?? null) ? (int) $linea['id'] : null,
                 'producto_id' => (int) $linea['producto_id'],
                 'unidad'      => $unidad->value,
@@ -310,7 +320,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             ];
         }
 
-        return $lineas;
+        return array_values($lineas);
     }
 
     /**

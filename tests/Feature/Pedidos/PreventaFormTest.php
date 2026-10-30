@@ -123,6 +123,35 @@ test('el total que pide el teléfono trae las promociones', function (): void {
     ]))->toMatchArray(['total' => 49.05, 'ahorro' => 12.65]);
 });
 
+test('un producto lleva cajas y unidades en el mismo pedido; si viene repetido se junta', function (): void {
+    $this->actingAs($this->encargado);
+
+    Livewire::test(CreatePedido::class)
+        ->fillForm([
+            'cliente_id'  => Cliente::factory()->create(['bodega_id' => $this->bodega->id])->id,
+            'vendedor_id' => $this->vendedor->id,
+            'fecha'       => now()->toDateString(),
+            'items'       => [
+                ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2],
+                ['producto_id' => $this->producto->id, 'unidad' => 'unidad', 'cantidad' => 3],
+                ['producto_id' => $this->producto->id, 'unidad' => 'unidad', 'cantidad' => 2],
+            ],
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $pedido = Pedido::query()->sole();
+    $items = $pedido->items()->orderBy('id')->get();
+
+    // 2 cajas × 12 × L 100 = 2,400 y 5 unidades × L 100 = 500 → 2,900 + 15% = 3,335
+    expect($items)->toHaveCount(2)
+        ->and($items[0]->unidad)->toBe(UnidadVenta::Caja)
+        ->and($items[0]->cantidad)->toBe(2)
+        ->and($items[1]->unidad)->toBe(UnidadVenta::Unidad)
+        ->and($items[1]->cantidad)->toBe(5)
+        ->and($pedido->total)->toBe(3335.0);
+});
+
 test('sin productos no se guarda el pedido', function (): void {
     $this->actingAs($this->encargado);
 

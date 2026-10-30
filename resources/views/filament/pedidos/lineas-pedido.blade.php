@@ -6,8 +6,10 @@
     − y +, quitar. Al servidor solo van la búsqueda, el total con promociones
     (cuando se deja de tocar), el último pedido del cliente y Guardar.
 
-    Cada producto se ve en una fila corta (cantidad, nombre, subtotal); al
-    tocarla se abre para cambiarla. El que se acaba de agregar queda abierto.
+    Cada producto es una sola fila corta (cajas y unidades, nombre, subtotal);
+    al tocarla se abre para poner cajas y unidades. Por dentro son hasta dos
+    líneas (una en caja y otra en unidad), como siempre las ve bodega. El que
+    se acaba de agregar queda abierto.
     El buscador se queda arriba al bajar por la lista. Los estilos van aquí
     mismo, sin compilar.
 --}}
@@ -19,7 +21,7 @@
     $statePath = $getStatePath();
     $lineasIniciales = LineasPedido::normalizar($getState());
     $resumen = PedidoForm::resumenDe($lineasIniciales);
-    $cuantas = count($lineasIniciales);
+    $productosIniciales = count(array_unique(array_column($lineasIniciales, 'producto_id')));
     $edicion = (bool) $getRecord()?->exists;
 
     $config = [
@@ -98,14 +100,12 @@
         .pv-listo { margin-inline-start: auto; font-size: 0.8rem; font-weight: 600; color: var(--primary-600); padding: 0.4rem 0.25rem; }
         .dark .pv-listo { color: var(--primary-400); }
 
-        /* Unidad o caja. */
-        .pv-seg { display: inline-flex; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.12); overflow: hidden; }
-        .dark .pv-seg { outline-color: rgb(255 255 255 / 0.15); }
-        .pv-seg button { padding: 0.45rem 0.7rem; font-size: 0.78rem; font-weight: 600; color: var(--gray-600); }
-        .dark .pv-seg button { color: var(--gray-300); }
-        .pv-seg button + button { border-inline-start: 1px solid rgb(3 7 18 / 0.12); }
-        .dark .pv-seg button + button { border-inline-start-color: rgb(255 255 255 / 0.15); }
-        .pv-seg button.pv-on { background: var(--primary-600); color: #fff; }
+        /* Cajas y unidades del mismo producto, cada una con su − y +. */
+        .pv-cants { flex-shrink: 0; display: grid; gap: 0.25rem; }
+        .pv-cantidades { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; }
+        .pv-cantidad { display: grid; gap: 0.25rem; }
+        .pv-cantidad-etiqueta { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--gray-500); }
+        .dark .pv-cantidad-etiqueta { color: var(--gray-400); }
 
         /* − cantidad + */
         .pv-stepper { display: inline-flex; align-items: center; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.12); }
@@ -155,6 +155,7 @@
         x-data="{
             lineas: $wire.$entangle(@js($statePath)),
             productos: @js($config['productos']),
+            ordenProductos: [],
             buscar: '',
             resultados: [],
             buscando: false,
@@ -175,6 +176,25 @@
                 if (! Array.isArray(this.lineas)) {
                     this.lineas = Object.values(this.lineas ?? {})
                 }
+
+                {{-- Un producto = una fila: si venía dos veces en unidad (o dos en caja), se juntan. --}}
+                const unidas = []
+
+                for (const l of this.lineas) {
+                    const j = unidas.findIndex((u) => Number(u.producto_id) === Number(l.producto_id) && this.esCaja(u) === this.esCaja(l))
+
+                    if (j >= 0) {
+                        unidas[j].cantidad = Number(unidas[j].cantidad) + Number(l.cantidad)
+                    } else {
+                        unidas.push({ ...l })
+                    }
+                }
+
+                if (unidas.length !== this.lineas.length) {
+                    this.lineas = unidas
+                }
+
+                this.ordenProductos = [...new Set(this.lineas.map((l) => Number(l.producto_id)))]
 
                 this.$watch('lineas', () => this.recalcular())
 
@@ -197,68 +217,124 @@
                 return @js($config['simbolo']) + ' ' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
             },
 
-            producto(linea) {
-                return this.productos[linea.producto_id] ?? null
-            },
-
-            nombre(linea) {
-                return this.producto(linea)?.descripcion ?? ('Producto ' + linea.producto_id)
+            esCaja(linea) {
+                return linea.unidad === 'caja'
             },
 
             {{-- Igual que el servidor: precio sin ISV × cantidad (a 2 decimales), más el 15% si es gravado. --}}
             subtotal(linea) {
-                const p = this.producto(linea)
+                const p = this.productos[linea.producto_id] ?? null
 
                 if (! p) {
                     return 0
                 }
 
-                const bruto = this.redondear((linea.unidad === 'caja' ? p.precioCaja : p.precioUnidad) * Number(linea.cantidad || 0))
+                const bruto = this.redondear((this.esCaja(linea) ? p.precioCaja : p.precioUnidad) * Number(linea.cantidad || 0))
 
                 return this.redondear(bruto + (p.gravado ? this.redondear(bruto * @js($config['tasa'])) : 0))
             },
 
-            precio(linea) {
-                const p = this.producto(linea)
+            {{-- Cada producto es una fila con sus cajas y sus unidades (por dentro son hasta dos líneas). --}}
+            get grupos() {
+                const ids = [...new Set(this.lineas.map((l) => Number(l.producto_id)))]
+                const conocidos = this.ordenProductos.filter((id) => ids.includes(id))
+
+                return [...conocidos, ...ids.filter((id) => ! conocidos.includes(id))].reverse()
+            },
+
+            indice(id, unidad) {
+                return this.lineas.findIndex((l) => Number(l.producto_id) === Number(id) && this.esCaja(l) === (unidad === 'caja'))
+            },
+
+            cant(id, unidad) {
+                const i = this.indice(id, unidad)
+
+                return i >= 0 ? Number(this.lineas[i].cantidad || 0) : 0
+            },
+
+            subtotalDe(id) {
+                return this.redondear(this.lineas.filter((l) => Number(l.producto_id) === Number(id)).reduce((t, l) => t + this.subtotal(l), 0))
+            },
+
+            nombreDe(id) {
+                return this.productos[id]?.descripcion ?? ('Producto ' + id)
+            },
+
+            precioDe(id) {
+                const p = this.productos[id]
 
                 if (! p) {
                     return ''
                 }
 
-                return p.codigo + ' · ' + (linea.unidad === 'caja'
-                    ? this.dinero(p.precioCajaIsv) + ' la caja de ' + p.caja
-                    : this.dinero(p.precioUnidadIsv) + ' c/u') + (p.gravado ? '' : ' · exento')
+                return p.codigo + ' · ' + this.dinero(p.precioUnidadIsv) + ' c/u'
+                    + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + this.dinero(p.precioCajaIsv) : '')
+                    + (p.gravado ? '' : ' · exento')
             },
 
-            cantidadCorta(linea) {
-                return linea.cantidad + (linea.unidad === 'caja' ? ' CJ' : ' UN')
+            {{-- Las cajas solo se ofrecen si la caja trae más de 1 (o si ya llevaba cajas). --}}
+            tieneCajas(id) {
+                return (this.productos[id]?.caja ?? 1) > 1 || this.cant(id, 'caja') > 0
             },
 
-            {{-- En el buscador: lo que ya lleva de ese producto, por unidad y por caja. --}}
-            lleva(productoId) {
-                const de = (unidad) => this.lineas
-                    .filter((l) => Number(l.producto_id) === Number(productoId) && (l.unidad === 'caja') === (unidad === 'caja'))
-                    .reduce((t, l) => t + Number(l.cantidad || 0), 0)
+            {{-- Pone la cantidad de cajas o de unidades. En 0 esa parte se quita, pero el producto siempre queda con algo: para quitarlo está la ✕. --}}
+            fijarCant(id, unidad, valor) {
+                let n = Math.max(0, Math.min(@js($config['maximo']), parseInt(valor, 10) || 0))
+                const otra = this.cant(id, unidad === 'caja' ? 'unidad' : 'caja')
+
+                if (n === 0 && otra === 0) {
+                    n = 1
+                }
+
+                const i = this.indice(id, unidad)
+
+                if (n === 0) {
+                    if (i >= 0) {
+                        this.lineas.splice(i, 1)
+                    }
+                } else if (i >= 0) {
+                    this.lineas[i].cantidad = n
+                } else {
+                    this.lineas.push({ producto_id: Number(id), unidad: unidad, cantidad: n })
+                }
+            },
+
+            cambiarCant(id, unidad, paso) {
+                this.fijarCant(id, unidad, this.cant(id, unidad) + paso)
+            },
+
+            alEscribirCant(evento, id, unidad) {
+                this.fijarCant(id, unidad, evento.target.value)
+                evento.target.value = this.cant(id, unidad)
+            },
+
+            quitarProducto(id) {
+                this.lineas = this.lineas.filter((l) => Number(l.producto_id) !== Number(id))
+
+                if (this.abierta === Number(id)) {
+                    this.abierta = null
+                }
+            },
+
+            {{-- En el buscador: lo que ya lleva de ese producto. --}}
+            lleva(id) {
                 const partes = []
 
-                if (de('unidad') > 0) {
-                    partes.push(de('unidad') + ' UN')
+                if (this.cant(id, 'caja') > 0) {
+                    partes.push(this.cant(id, 'caja') + ' CJ')
                 }
 
-                if (de('caja') > 0) {
-                    partes.push(de('caja') + ' CJ')
+                if (this.cant(id, 'unidad') > 0) {
+                    partes.push(this.cant(id, 'unidad') + ' UN')
                 }
 
-                return partes.join(' · ')
+                return partes.join(' + ')
             },
 
-            {{-- La caja solo se ofrece si trae más de 1 (o si la línea ya venía en caja). --}}
-            tieneCaja(linea) {
-                return linea.unidad === 'caja' || (this.producto(linea)?.caja ?? 1) > 1
-            },
-
-            get orden() {
-                return this.lineas.map((linea, i) => i).reverse()
+            recordar(id) {
+                if (! this.ordenProductos.includes(Number(id))) {
+                    this.ordenProductos.push(Number(id))
+                }
             },
 
             {{-- El total sale al instante en el teléfono; las promociones las calcula el servidor al dejar de tocar. --}}
@@ -317,13 +393,8 @@
                 Object.assign(this.productos, this.ultimo.productos)
 
                 for (const l of this.ultimo.lineas) {
-                    const i = this.lineas.findIndex((x) => Number(x.producto_id) === Number(l.producto_id) && x.unidad === l.unidad)
-
-                    if (i >= 0) {
-                        this.lineas[i].cantidad = Math.min(@js($config['maximo']), Number(this.lineas[i].cantidad) + Number(l.cantidad))
-                    } else {
-                        this.lineas.push({ producto_id: l.producto_id, unidad: l.unidad, cantidad: l.cantidad })
-                    }
+                    this.recordar(l.producto_id)
+                    this.fijarCant(l.producto_id, l.unidad, this.cant(l.producto_id, l.unidad) + Number(l.cantidad))
                 }
 
                 this.ultimo = null
@@ -380,55 +451,29 @@
                 this.buscando = false
             },
 
-            {{-- Tocar un producto: entra a la lista y queda abierto; si ya estaba por unidad, le suma uno. --}}
+            {{-- Tocar un producto: suma 1 unidad y su fila queda abierta para poner cajas o unidades. --}}
             agregar(p) {
-                this.productos[p.id] = p
-                let i = this.lineas.findIndex((l) => Number(l.producto_id) === Number(p.id) && l.unidad === 'unidad')
-
-                if (i >= 0) {
-                    this.lineas[i].cantidad = Math.min(@js($config['maximo']), Number(this.lineas[i].cantidad || 0) + 1)
-                } else {
-                    this.lineas.push({ producto_id: p.id, unidad: 'unidad', cantidad: 1 })
-                    i = this.lineas.length - 1
-                }
-
-                this.abierta = i
-                this.resaltar(i)
+                const id = Number(p.id)
+                this.productos[id] = p
+                this.recordar(id)
+                this.cambiarCant(id, 'unidad', 1)
+                this.abierta = id
+                this.resaltar(id)
                 this.cerrarBusqueda()
                 this.$refs.buscador.blur()
             },
 
-            abrir(i) {
-                this.abierta = this.abierta === i ? null : i
+            abrir(id) {
+                this.abierta = this.abierta === id ? null : id
             },
 
-            resaltar(i) {
-                this.resaltada = i
+            resaltar(id) {
+                this.resaltada = id
                 setTimeout(() => {
-                    if (this.resaltada === i) {
+                    if (this.resaltada === id) {
                         this.resaltada = null
                     }
                 }, 900)
-            },
-
-            cambiar(i, paso) {
-                const actual = parseInt(this.lineas[i].cantidad, 10) || 0
-                this.lineas[i].cantidad = Math.max(1, Math.min(@js($config['maximo']), actual + paso))
-            },
-
-            fijar(i, valor) {
-                const n = parseInt(valor, 10)
-                this.lineas[i].cantidad = Number.isFinite(n) && n >= 1 ? Math.min(@js($config['maximo']), n) : 1
-            },
-
-            quitar(i) {
-                this.lineas.splice(i, 1)
-
-                if (this.abierta === i) {
-                    this.abierta = null
-                } else if (this.abierta !== null && this.abierta > i) {
-                    this.abierta--
-                }
             },
         }"
     >
@@ -478,68 +523,93 @@
         <div class="pv-ultimo" x-show="ultimo && lineas.length === 0" x-cloak>
             <div>
                 <div class="pv-ultimo-titulo" x-text="'Último pedido de este cliente: ' + (ultimo?.numero ?? '') + ' del ' + (ultimo?.fecha ?? '')"></div>
-                <div class="pv-ultimo-detalle" x-text="(ultimo?.lineas.length ?? 0) + ((ultimo?.lineas.length ?? 0) === 1 ? ' producto' : ' productos') + ', con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + ' ya no se venden)' : '') + '.'"></div>
+                <div class="pv-ultimo-detalle" x-text="(ultimo ? Object.keys(ultimo.productos).length : 0) + ' productos, con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + ' ya no se venden)' : '') + '.'"></div>
             </div>
             <button type="button" x-on:click="repetirUltimo()">Agregar los mismos productos</button>
         </div>
 
-        {{-- Lista: lo último que se agregó queda arriba --}}
-        <div class="pv-vacio" x-show="lineas.length === 0" @if ($cuantas > 0) style="display: none" @endif>
+        {{-- Lista: un producto por fila; lo último que se agregó queda arriba --}}
+        <div class="pv-vacio" x-show="lineas.length === 0" @if ($productosIniciales > 0) style="display: none" @endif>
             Todavía no hay productos. Búsquelos arriba y tóquelos para agregarlos.
         </div>
 
-        <div class="pv-lista-titulo" x-show="lineas.length > 0" @if ($cuantas === 0) style="display: none" @endif>
-            <span x-text="lineas.length === 1 ? '1 producto en el pedido' : lineas.length + ' productos en el pedido'">{{ $cuantas === 1 ? '1 producto en el pedido' : "{$cuantas} productos en el pedido" }}</span>
+        <div class="pv-lista-titulo" x-show="lineas.length > 0" @if ($productosIniciales === 0) style="display: none" @endif>
+            <span x-text="grupos.length === 1 ? '1 producto en el pedido' : grupos.length + ' productos en el pedido'">{{ $productosIniciales === 1 ? '1 producto en el pedido' : "{$productosIniciales} productos en el pedido" }}</span>
             <span x-show="abierta === null" class="pv-aviso" style="padding: 0">Toque uno para cambiarlo</span>
         </div>
 
-        <div class="pv-lista" x-show="lineas.length > 0" @if ($cuantas === 0) style="display: none" @endif>
-            <template x-for="i in orden" x-bind:key="i">
-                <div class="pv-linea" x-bind:class="{ 'pv-resaltada': resaltada === i, 'pv-abierta': abierta === i }">
-                    {{-- Corta --}}
-                    <button type="button" class="pv-corta" x-show="abierta !== i" x-on:click="abrir(i)">
-                        <span class="pv-cant" x-bind:class="{ 'pv-cant-caja': lineas[i].unidad === 'caja' }" x-text="cantidadCorta(lineas[i])"></span>
-                        <span class="pv-corta-nombre" x-text="nombre(lineas[i])"></span>
-                        <span class="pv-linea-subtotal" x-text="dinero(subtotal(lineas[i]))"></span>
+        <div class="pv-lista" x-show="lineas.length > 0" @if ($productosIniciales === 0) style="display: none" @endif>
+            <template x-for="id in grupos" x-bind:key="id">
+                <div class="pv-linea" x-bind:class="{ 'pv-resaltada': resaltada === id, 'pv-abierta': abierta === id }">
+                    {{-- Corta: cajas y unidades, nombre, subtotal --}}
+                    <button type="button" class="pv-corta" x-show="abierta !== id" x-on:click="abrir(id)">
+                        <span class="pv-cants">
+                            <span class="pv-cant pv-cant-caja" x-show="cant(id, 'caja') > 0" x-text="cant(id, 'caja') + ' CJ'"></span>
+                            <span class="pv-cant" x-show="cant(id, 'unidad') > 0" x-text="cant(id, 'unidad') + ' UN'"></span>
+                        </span>
+                        <span class="pv-corta-nombre" x-text="nombreDe(id)"></span>
+                        <span class="pv-linea-subtotal" x-text="dinero(subtotalDe(id))"></span>
                     </button>
 
-                    {{-- Abierta --}}
-                    <div class="pv-detalle" x-show="abierta === i">
-                        <div class="pv-linea-arriba" x-on:click="abrir(i)">
-                            <div class="pv-linea-nombre" x-text="nombre(lineas[i])"></div>
-                            <div class="pv-linea-subtotal" x-text="dinero(subtotal(lineas[i]))"></div>
-                            <button type="button" class="pv-quitar" x-on:click.stop="quitar(i)" aria-label="Quitar del pedido" title="Quitar">
+                    {{-- Abierta: cajas y unidades del mismo producto --}}
+                    <div class="pv-detalle" x-show="abierta === id">
+                        <div class="pv-linea-arriba" x-on:click="abrir(id)">
+                            <div class="pv-linea-nombre" x-text="nombreDe(id)"></div>
+                            <div class="pv-linea-subtotal" x-text="dinero(subtotalDe(id))"></div>
+                            <button type="button" class="pv-quitar" x-on:click.stop="quitarProducto(id)" aria-label="Quitar del pedido" title="Quitar">
                                 {{ svg('heroicon-m-x-mark') }}
                             </button>
                         </div>
 
-                        <div class="pv-linea-precio" x-text="precio(lineas[i])"></div>
+                        <div class="pv-linea-precio" x-text="precioDe(id)"></div>
+
+                        <div class="pv-cantidades">
+                            <div class="pv-cantidad" x-show="tieneCajas(id)">
+                                <span class="pv-cantidad-etiqueta" x-text="'Cajas de ' + (productos[id]?.caja ?? '')">Cajas</span>
+                                <div class="pv-stepper">
+                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'caja', -1)" aria-label="Una caja menos">
+                                        {{ svg('heroicon-m-minus') }}
+                                    </button>
+                                    <input
+                                        type="number"
+                                        inputmode="numeric"
+                                        min="0"
+                                        aria-label="Cajas"
+                                        x-bind:value="cant(id, 'caja')"
+                                        x-on:change="alEscribirCant($event, id, 'caja')"
+                                        x-on:focus="$event.target.select()"
+                                        x-on:keydown.enter.prevent="$event.target.blur()"
+                                    />
+                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'caja', 1)" aria-label="Una caja más">
+                                        {{ svg('heroicon-m-plus') }}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="pv-cantidad">
+                                <span class="pv-cantidad-etiqueta">Unidades</span>
+                                <div class="pv-stepper">
+                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'unidad', -1)" aria-label="Una unidad menos">
+                                        {{ svg('heroicon-m-minus') }}
+                                    </button>
+                                    <input
+                                        type="number"
+                                        inputmode="numeric"
+                                        min="0"
+                                        aria-label="Unidades"
+                                        x-bind:value="cant(id, 'unidad')"
+                                        x-on:change="alEscribirCant($event, id, 'unidad')"
+                                        x-on:focus="$event.target.select()"
+                                        x-on:keydown.enter.prevent="$event.target.blur()"
+                                    />
+                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'unidad', 1)" aria-label="Una unidad más">
+                                        {{ svg('heroicon-m-plus') }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
 
                         <div class="pv-linea-controles">
-                            <div class="pv-seg" role="group" aria-label="Vende en" x-show="tieneCaja(lineas[i])">
-                                <button type="button" x-bind:class="{ 'pv-on': lineas[i].unidad !== 'caja' }" x-on:click="lineas[i].unidad = 'unidad'">Unidad</button>
-                                <button type="button" x-bind:class="{ 'pv-on': lineas[i].unidad === 'caja' }" x-on:click="lineas[i].unidad = 'caja'" x-text="'Caja de ' + (producto(lineas[i])?.caja ?? '')">Caja</button>
-                            </div>
-
-                            <div class="pv-stepper">
-                                <button type="button" class="pv-paso" x-on:click="cambiar(i, -1)" aria-label="Uno menos">
-                                    {{ svg('heroicon-m-minus') }}
-                                </button>
-                                <input
-                                    type="number"
-                                    inputmode="numeric"
-                                    min="1"
-                                    aria-label="Cantidad"
-                                    x-bind:value="lineas[i].cantidad"
-                                    x-on:change="fijar(i, $event.target.value)"
-                                    x-on:focus="$event.target.select()"
-                                    x-on:keydown.enter.prevent="$event.target.blur()"
-                                />
-                                <button type="button" class="pv-paso" x-on:click="cambiar(i, 1)" aria-label="Uno más">
-                                    {{ svg('heroicon-m-plus') }}
-                                </button>
-                            </div>
-
                             <button type="button" class="pv-listo" x-on:click="abierta = null">Listo</button>
                         </div>
                     </div>
@@ -555,7 +625,7 @@
                 <span class="pv-barra-etiqueta">Total estimado</span>
                 <span class="pv-barra-monto" x-text="dinero(total)">{{ lempiras($resumen['total']) }}</span>
                 <span class="pv-barra-detalle">
-                    <span x-text="lineas.length === 0 ? 'Agregue productos' : (lineas.length === 1 ? '1 producto' : lineas.length + ' productos')">{{ $cuantas === 0 ? 'Agregue productos' : ($cuantas === 1 ? '1 producto' : "{$cuantas} productos") }}</span><span x-show="ahorro > 0" @if ($resumen['ahorro'] <= 0) style="display: none" @endif> · <span class="pv-barra-ahorro" x-text="'ahorra ' + dinero(ahorro)">ahorra {{ lempiras($resumen['ahorro']) }}</span></span>
+                    <span x-text="grupos.length === 0 ? 'Agregue productos' : (grupos.length === 1 ? '1 producto' : grupos.length + ' productos')">{{ $productosIniciales === 0 ? 'Agregue productos' : ($productosIniciales === 1 ? '1 producto' : "{$productosIniciales} productos") }}</span><span x-show="ahorro > 0" @if ($resumen['ahorro'] <= 0) style="display: none" @endif> · <span class="pv-barra-ahorro" x-text="'ahorra ' + dinero(ahorro)">ahorra {{ lempiras($resumen['ahorro']) }}</span></span>
                 </span>
             </div>
 
