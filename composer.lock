@@ -4,8 +4,90 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "58249c277b4c861aa1b9b43c1ab506b5",
+    "content-hash": "043e81884f9cb823e48284c8614b26b0",
     "packages": [
+        {
+            "name": "afsakar/filament-leaflet-map-picker",
+            "version": "v3.0.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/afsakar/filament-leaflet-map-picker.git",
+                "reference": "3367222998a583a438398e98a2dd931b9c91455c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/afsakar/filament-leaflet-map-picker/zipball/3367222998a583a438398e98a2dd931b9c91455c",
+                "reference": "3367222998a583a438398e98a2dd931b9c91455c",
+                "shasum": ""
+            },
+            "require": {
+                "filament/forms": "^4.0|^5.0",
+                "filament/infolists": "^4.0|^5.0",
+                "filament/support": "^4.0|^5.0",
+                "filament/tables": "^4.0|^5.0",
+                "php": "^8.2",
+                "spatie/laravel-package-tools": "^1.15.0"
+            },
+            "require-dev": {
+                "larastan/larastan": "^3.0",
+                "laravel/pint": "^1.0",
+                "nunomaduro/collision": "^8.0",
+                "orchestra/testbench": "^10.0|^11.0",
+                "pestphp/pest": "^3.0",
+                "pestphp/pest-plugin-arch": "^3.0",
+                "pestphp/pest-plugin-laravel": "^3.0",
+                "phpstan/extension-installer": "^1.1",
+                "phpstan/phpstan-deprecation-rules": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.0",
+                "spatie/laravel-ray": "^1.26"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "aliases": {
+                        "LeafletMapPicker": "Afsakar\\LeafletMapPicker\\Facades\\LeafletMapPicker"
+                    },
+                    "providers": [
+                        "Afsakar\\LeafletMapPicker\\LeafletMapPickerServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Afsakar\\LeafletMapPicker\\": "src/",
+                    "Afsakar\\LeafletMapPicker\\Database\\Factories\\": "database/factories/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Azad Furkan ŞAKAR",
+                    "email": "afsakarr@gmail.com",
+                    "role": "Developer"
+                }
+            ],
+            "description": "A Filament Forms component that provides an interactive Leaflet map for selecting and storing geographical coordinates.",
+            "homepage": "https://github.com/afsakar/filament-leaflet-map-picker",
+            "keywords": [
+                "afsakar",
+                "filament-leaflet-map-picker",
+                "laravel"
+            ],
+            "support": {
+                "issues": "https://github.com/afsakar/filament-leaflet-map-picker/issues",
+                "source": "https://github.com/afsakar/filament-leaflet-map-picker"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/afsakar",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-08-24T09:46:19+00:00"
+        },
         {
             "name": "anourvalar/eloquent-serialize",
             "version": "1.3.12",

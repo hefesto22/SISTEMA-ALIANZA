@@ -76,6 +76,7 @@ class PedidoForm
                             ->placeholder('Buscar cliente…')
                             ->required()
                             ->createOptionForm(ClienteForm::components())
+                            ->createOptionModalHeading('Nuevo cliente')
                             ->createOptionUsing(fn (array $data): int => (int) Cliente::query()->create(ClienteForm::completar($data))->getKey())
                             ->columnSpanFull(),
                         Toggle::make('fuera_de_ruta')

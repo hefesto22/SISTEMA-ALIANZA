@@ -15,8 +15,9 @@ use Filament\Facades\Filament;
 use Livewire\Livewire;
 
 /**
- * Cliente: código automático, todo en MAYÚSCULAS y sin duplicados
- * (mismo nombre y RTN solo se permite en municipios distintos).
+ * Cliente: código automático, todo en MAYÚSCULAS y sin duplicados: sin RTN
+ * el nombre no se repite; con RTN solo en otro municipio; el mismo RTN puede
+ * llevar otro nombre.
  */
 beforeEach(function (): void {
     $this->seed(RolesSistemaSeeder::class);
@@ -67,17 +68,26 @@ test('todo se guarda en mayúsculas', function (): void {
         ->and($usuario->fresh()?->name)->toBe('JOSÉ MARTÍNEZ');
 });
 
-test('mismo nombre y RTN se puede en otro municipio, pero no en el mismo', function (): void {
-    $existente = Cliente::factory()->create([
+test('sin RTN el nombre no se puede repetir, aunque cambien tildes, mayúsculas o espacios', function (): void {
+    Cliente::factory()->create([
         'nombre'       => 'PULPERÍA ANA',
-        'rtn'          => '08019985012345',
         'municipio_id' => $this->municipio->id,
         'bodega_id'    => $this->bodega->id,
     ]);
 
     $this->actingAs($this->admin);
 
-    // Sucursal en otro municipio: se permite.
+    // Otro municipio, pero sin RTN: no se sabe si es el mismo negocio.
+    Livewire::test(ManageClientes::class)
+        ->callAction('create', data: [
+            'nombre'          => '  pulperia   ana. ',
+            'departamento_id' => $this->otroMunicipio->departamento_id,
+            'municipio_id'    => $this->otroMunicipio->id,
+            'bodega_id'       => $this->bodega->id,
+        ])
+        ->assertHasActionErrors(['nombre']);
+
+    // Con RTN y en otro lugar sí.
     Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
             'nombre'          => 'pulpería ana',
@@ -88,25 +98,35 @@ test('mismo nombre y RTN se puede en otro municipio, pero no en el mismo', funct
         ])
         ->assertHasNoActionErrors();
 
-    // Mismo municipio: es el mismo cliente.
-    Livewire::test(ManageClientes::class)
-        ->callAction('create', data: [
-            'nombre'          => 'pulpería ana',
-            'rtn'             => '08019985012345',
-            'departamento_id' => $this->municipio->departamento_id,
-            'municipio_id'    => $this->municipio->id,
-            'bodega_id'       => $this->bodega->id,
-        ])
+    expect(Cliente::query()->where('nombre_clave', 'PULPERIA ANA')->count())->toBe(2);
+});
+
+test('con RTN el nombre se repite solo en otro municipio, y el mismo RTN puede llevar otro nombre', function (): void {
+    $existente = Cliente::factory()->create([
+        'nombre'       => 'PULPERÍA ANA',
+        'rtn'          => '08019985012345',
+        'municipio_id' => $this->municipio->id,
+        'bodega_id'    => $this->bodega->id,
+    ]);
+
+    $this->actingAs($this->admin);
+
+    $crear = fn (array $datos) => Livewire::test(ManageClientes::class)->callAction('create', data: [
+        'departamento_id' => $this->municipio->departamento_id,
+        'bodega_id'       => $this->bodega->id,
+        ...$datos,
+    ]);
+
+    // Sucursal en otro municipio: se permite.
+    $crear(['nombre' => 'pulpería ana', 'rtn' => '08019985012345', 'municipio_id' => $this->otroMunicipio->id])
+        ->assertHasNoActionErrors();
+
+    // Mismo municipio, aunque sea otro RTN: hay que distinguirlo.
+    $crear(['nombre' => 'pulpería ana', 'rtn' => '05019990001234', 'municipio_id' => $this->municipio->id])
         ->assertHasActionErrors(['nombre']);
 
-    // Sin RTN no se bloquea: puede ser otro negocio con el mismo nombre.
-    Livewire::test(ManageClientes::class)
-        ->callAction('create', data: [
-            'nombre'          => 'pulpería ana',
-            'departamento_id' => $this->municipio->departamento_id,
-            'municipio_id'    => $this->municipio->id,
-            'bodega_id'       => $this->bodega->id,
-        ])
+    // Mismo RTN con otro nombre, en el mismo municipio: se permite.
+    $crear(['nombre' => 'pulpería ana barrio el centro', 'rtn' => '08019985012345', 'municipio_id' => $this->municipio->id])
         ->assertHasNoActionErrors();
 
     // Editarlo a él mismo no choca consigo.
@@ -114,6 +134,45 @@ test('mismo nombre y RTN se puede en otro municipio, pero no en el mismo', funct
         ->callTableAction('edit', $existente, data: ['telefono' => '99887766'])
         ->assertHasNoTableActionErrors();
 
-    expect(Cliente::query()->where('nombre', 'PULPERÍA ANA')->count())->toBe(3)
+    expect(Cliente::query()->where('nombre', 'PULPERÍA ANA')->count())->toBe(2)
+        ->and(Cliente::query()->where('rtn', '08019985012345')->count())->toBe(3)
         ->and($existente->fresh()?->telefono)->toBe('99887766');
+});
+
+test('los repetidos de antes se pueden editar mientras no se les cambie el nombre, el RTN ni el municipio', function (): void {
+    $primero = Cliente::factory()->create(['nombre' => 'PULPERÍA ANA', 'municipio_id' => $this->municipio->id, 'bodega_id' => $this->bodega->id]);
+    $repetido = Cliente::factory()->create(['nombre' => 'Pulperia Ana', 'municipio_id' => $this->otroMunicipio->id, 'bodega_id' => $this->bodega->id]);
+
+    $this->actingAs($this->admin);
+
+    Livewire::test(ManageClientes::class)
+        ->callTableAction('edit', $repetido, data: ['telefono' => '99887766'])
+        ->assertHasNoTableActionErrors();
+
+    Livewire::test(ManageClientes::class)
+        ->callTableAction('edit', $repetido, data: ['municipio_id' => $this->municipio->id])
+        ->assertHasTableActionErrors(['nombre']);
+
+    expect($repetido->fresh()?->telefono)->toBe('99887766')
+        ->and($repetido->fresh()?->municipio_id)->toBe($this->otroMunicipio->id)
+        ->and($primero->nombre_clave)->toBe('PULPERIA ANA');
+});
+
+test('un cliente nuevo no muestra el interruptor de activo: entra activo', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(ManageClientes::class)
+        ->mountAction('create')
+        ->assertFormFieldHidden('activo');
+
+    Livewire::test(ManageClientes::class)
+        ->callAction('create', data: [
+            'nombre'          => 'mini súper el ahorro',
+            'departamento_id' => $this->municipio->departamento_id,
+            'municipio_id'    => $this->municipio->id,
+            'bodega_id'       => $this->bodega->id,
+        ])
+        ->assertHasNoActionErrors();
+
+    expect(Cliente::query()->where('nombre', 'MINI SÚPER EL AHORRO')->sole()->activo)->toBeTrue();
 });

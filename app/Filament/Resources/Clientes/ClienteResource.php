@@ -92,6 +92,14 @@ class ClienteResource extends Resource
                     ->description(fn (Cliente $record): ?string => $record->municipio?->departamento->nombre)
                     ->placeholder('Sin zona')
                     ->searchable(),
+                TextColumn::make('mapa')
+                    ->label('Mapa')
+                    ->state(fn (Cliente $record): ?string => $record->enlaceMapa() === null ? null : 'Ver')
+                    ->icon(Heroicon::OutlinedMapPin)
+                    ->color('primary')
+                    ->url(fn (Cliente $record): ?string => $record->enlaceMapa(), shouldOpenInNewTab: true)
+                    ->placeholder('Sin ubicación')
+                    ->toggleable(),
                 TextColumn::make('bodega.nombre')
                     ->label('Bodega')
                     ->toggleable(),
