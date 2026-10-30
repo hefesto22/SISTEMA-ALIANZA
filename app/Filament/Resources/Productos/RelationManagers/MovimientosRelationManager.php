@@ -73,7 +73,7 @@ class MovimientosRelationManager extends RelationManager
                     ->visible($verCostos),
                 TextColumn::make('referencia')
                     ->label('De')
-                    ->state(fn (MovimientoInventario $record): ?string => $record->compra?->numero ?? $record->pedido?->numero)
+                    ->state(fn (MovimientoInventario $record): ?string => $record->compra->numero ?? $record->pedido->numero ?? null)
                     ->placeholder('—'),
                 TextColumn::make('usuario.name')
                     ->label('Quién')

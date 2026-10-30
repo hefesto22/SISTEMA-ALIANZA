@@ -12,11 +12,16 @@
     se acaba de agregar queda abierto.
     El buscador se queda arriba al bajar por la lista. Los estilos van aquí
     mismo, sin compilar.
+
+    Existencia ("Hay"): la de la bodega del pedido. Con "controlar existencias"
+    encendido el buscador solo trae lo que hay y no deja pedir más de eso.
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
     use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
     use App\Filament\Schemas\Components\LineasPedido;
+    use App\Filament\Support\Acceso;
+    use App\Models\Configuracion;
 
     $statePath = $getStatePath();
     $lineasIniciales = LineasPedido::normalizar($getState());
@@ -34,6 +39,8 @@
         'simbolo'   => (string) config('honduras.moneda.simbolo', 'L.'),
         'maximo'    => LineasPedido::MAXIMO_CANTIDAD,
         'edicion'   => $edicion,
+        'controlar' => Configuracion::actual()->controlar_existencias,
+        'veTodo'    => Acceso::veTodo(),
     ];
 @endphp
 
@@ -57,6 +64,13 @@
         .pv-resultado-lleva { font-size: 0.72rem; font-weight: 600; color: var(--primary-600); }
         .dark .pv-resultado-meta { color: var(--gray-400); }
         .dark .pv-resultado-lleva { color: var(--primary-400); }
+        .pv-hay { font-size: 0.72rem; font-weight: 600; color: var(--success-600); font-variant-numeric: tabular-nums; }
+        .dark .pv-hay { color: var(--success-400); }
+        .pv-hay.pv-hay-poco { color: var(--warning-600); }
+        .dark .pv-hay.pv-hay-poco { color: var(--warning-400); }
+        .pv-tope { font-size: 0.75rem; font-weight: 600; color: var(--warning-600); }
+        .dark .pv-tope { color: var(--warning-400); }
+        .pv-paso:disabled { opacity: 0.35; cursor: not-allowed; }
         .pv-aviso { padding: 0.75rem 0.875rem; font-size: 0.8rem; color: var(--gray-500); }
 
         /* ── Último pedido del cliente ── */
@@ -167,6 +181,8 @@
             esperaResumen: null,
             resaltada: null,
             abierta: null,
+            topado: null,
+            esperaTope: null,
             ultimo: null,
             total: @js($config['total']),
             ahorro: @js($config['ahorro']),
@@ -279,8 +295,14 @@
 
             {{-- Pone la cantidad de cajas o de unidades. En 0 esa parte se quita, pero el producto siempre queda con algo: para quitarlo está la ✕. --}}
             fijarCant(id, unidad, valor) {
-                let n = Math.max(0, Math.min(@js($config['maximo']), parseInt(valor, 10) || 0))
+                const pedido = Math.max(0, parseInt(valor, 10) || 0)
+                const maximo = this.maximoPara(id, unidad)
+                let n = Math.min(pedido, maximo)
                 const otra = this.cant(id, unidad === 'caja' ? 'unidad' : 'caja')
+
+                if (pedido > maximo && maximo < @js($config['maximo'])) {
+                    this.avisarTope(id)
+                }
 
                 if (n === 0 && otra === 0) {
                     n = 1
@@ -329,6 +351,78 @@
                 }
 
                 return partes.join(' + ')
+            },
+
+            {{-- Unidades como se cuentan en bodega: 29 en cajas de 12 = "2 CJ + 5 UN". --}}
+            enCajas(unidades, caja) {
+                const u = Number(unidades) || 0
+
+                if (u === 0) {
+                    return '0'
+                }
+
+                const resto = Math.abs(u)
+                const porCaja = Math.max(1, Number(caja) || 1)
+                const signo = u < 0 ? '-' : ''
+
+                if (porCaja === 1) {
+                    return signo + resto + ' UN'
+                }
+
+                const partes = []
+                const cajas = Math.floor(resto / porCaja)
+                const sueltas = resto % porCaja
+
+                if (cajas > 0) {
+                    partes.push(cajas + ' CJ')
+                }
+
+                if (sueltas > 0) {
+                    partes.push(sueltas + ' UN')
+                }
+
+                return signo + partes.join(' + ')
+            },
+
+            {{-- Unidades en la bodega del pedido (null si no se sabe: sin bodega escogida). --}}
+            hayDe(id) {
+                const hay = this.productos[id]?.hay
+
+                return hay === null || hay === undefined ? null : Number(hay)
+            },
+
+            textoHay(p) {
+                return p?.hay === null || p?.hay === undefined ? '' : 'Hay ' + this.enCajas(p.hay, p.caja)
+            },
+
+            {{-- Poco: menos de lo que trae una caja. --}}
+            hayPoco(p) {
+                return Number(p?.hay ?? 0) < Math.max(2, Number(p?.caja ?? 1))
+            },
+
+            {{-- Lo más que se puede pedir en cajas o en unidades sin pasar de lo que hay. --}}
+            maximoPara(id, unidad) {
+                const hay = this.hayDe(id)
+
+                if (! @js($config['controlar']) || hay === null) {
+                    return @js($config['maximo'])
+                }
+
+                const caja = Math.max(1, Number(this.productos[id]?.caja ?? 1))
+                const yaVa = unidad === 'caja' ? this.cant(id, 'unidad') : this.cant(id, 'caja') * caja
+
+                return Math.max(0, Math.floor((hay - yaVa) / (unidad === 'caja' ? caja : 1)))
+            },
+
+            avisarTope(id) {
+                this.topado = Number(id)
+                clearTimeout(this.esperaTope)
+                this.esperaTope = setTimeout(() => this.topado = null, 2500)
+            },
+
+            {{-- Administración: sin bodega escogida no se sabe qué hay. --}}
+            sinBodega() {
+                return @js($config['controlar']) && @js($config['veTodo']) && ! this.$wire.get('data.bodega_id')
             },
 
             recordar(id) {
@@ -510,11 +604,14 @@
                     <button type="button" class="pv-resultado" x-on:click="agregar(p)">
                         <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
                         <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
+                        <span class="pv-hay" x-show="textoHay(p) !== ''" x-bind:class="{ 'pv-hay-poco': hayPoco(p) }" x-text="textoHay(p)"></span>
                         <span class="pv-resultado-lleva" x-show="lleva(p.id) !== ''" x-text="'Ya lleva ' + lleva(p.id) + ' · tocar suma 1 UN'"></span>
                     </button>
                 </template>
 
-                <div class="pv-aviso" x-show="buscado && resultados.length === 0">No hay productos activos con ese código o nombre.</div>
+                <div class="pv-aviso" x-show="buscado && resultados.length === 0" x-text="sinBodega()
+                    ? 'Escoja arriba la bodega que despacha para ver lo que hay.'
+                    : (@js($config['controlar']) ? 'No hay en la bodega productos con ese código o nombre.' : 'No hay productos activos con ese código o nombre.')"></div>
                 <div class="pv-aviso" x-show="! buscado && buscar.trim().length === 1">Escriba al menos 2 letras (o el código).</div>
             </div>
         </div>
@@ -523,7 +620,7 @@
         <div class="pv-ultimo" x-show="ultimo && lineas.length === 0" x-cloak>
             <div>
                 <div class="pv-ultimo-titulo" x-text="'Último pedido de este cliente: ' + (ultimo?.numero ?? '') + ' del ' + (ultimo?.fecha ?? '')"></div>
-                <div class="pv-ultimo-detalle" x-text="(ultimo ? Object.keys(ultimo.productos).length : 0) + ' productos, con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + ' ya no se venden)' : '') + '.'"></div>
+                <div class="pv-ultimo-detalle" x-text="(ultimo ? Object.keys(ultimo.productos).length : 0) + ' productos, con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + (@js($config['controlar']) ? ' no se agregan: ya no se venden o no hay en la bodega)' : ' ya no se venden)') : '') + '.'"></div>
             </div>
             <button type="button" x-on:click="repetirUltimo()">Agregar los mismos productos</button>
         </div>
@@ -562,6 +659,8 @@
                         </div>
 
                         <div class="pv-linea-precio" x-text="precioDe(id)"></div>
+                        <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]) }" x-text="'Hay ' + enCajas(hayDe(id), productos[id]?.caja) + ' en la bodega'"></div>
+                        <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: en la bodega hay ' + enCajas(hayDe(id), productos[id]?.caja)"></div>
 
                         <div class="pv-cantidades">
                             <div class="pv-cantidad" x-show="tieneCajas(id)">
@@ -580,7 +679,7 @@
                                         x-on:focus="$event.target.select()"
                                         x-on:keydown.enter.prevent="$event.target.blur()"
                                     />
-                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'caja', 1)" aria-label="Una caja más">
+                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'caja', 1)" x-bind:disabled="maximoPara(id, 'caja') <= cant(id, 'caja')" aria-label="Una caja más">
                                         {{ svg('heroicon-m-plus') }}
                                     </button>
                                 </div>
@@ -602,7 +701,7 @@
                                         x-on:focus="$event.target.select()"
                                         x-on:keydown.enter.prevent="$event.target.blur()"
                                     />
-                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'unidad', 1)" aria-label="Una unidad más">
+                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'unidad', 1)" x-bind:disabled="maximoPara(id, 'unidad') <= cant(id, 'unidad')" aria-label="Una unidad más">
                                         {{ svg('heroicon-m-plus') }}
                                     </button>
                                 </div>

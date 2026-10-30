@@ -92,7 +92,7 @@ class ProductosTable
                     ->weight('semibold')
                     ->alignEnd()
                     // Es la suma que trae la consulta (alias), no una columna de productos.
-                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderBy('existencia', $direction)),
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderBy('existencia', $direction === 'desc' ? 'desc' : 'asc')),
                 TextColumn::make('precio_actualizado_at')
                     ->label('Actualizado')
                     ->since()

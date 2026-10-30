@@ -21,6 +21,7 @@ use App\Filament\Resources\Compras\Pages\CreateCompra;
 use App\Filament\Resources\Compras\Pages\ListCompras;
 use App\Filament\Resources\Compras\Pages\ViewCompra;
 use App\Filament\Resources\Pedidos\Actions\LineasPedido;
+use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Productos\Pages\ListProductos;
 use App\Models\Bodega;
 use App\Models\CambioPrecio;
@@ -84,6 +85,22 @@ function pedidoDeInventario(Bodega $bodega, User $vendedor, array $lineas): Pedi
     }
 
     return app(RecalcularPedido::class)->ejecutar($pedido);
+}
+
+/**
+ * Lo que trae el buscador de la preventa (con la bodega que despacha, si se da).
+ *
+ * @return list<array<string, mixed>>
+ */
+function buscarEnPreventa(string $texto, ?int $bodegaId = null): array
+{
+    /** @var list<array<string, mixed>> $resultados */
+    $resultados = Livewire::test(CreatePedido::class)
+        ->fillForm($bodegaId === null ? [] : ['bodega_id' => $bodegaId])
+        ->instance()
+        ->callSchemaComponentMethod('form.items', 'buscarProductos', ['buscar' => $texto]);
+
+    return $resultados;
 }
 
 test('las unidades se muestran en cajas y sueltas', function (): void {
@@ -367,4 +384,36 @@ test('el super admin escoge en Configuración el costo, el precio al despachar y
     expect($configuracion->metodo_costo)->toBe(MetodoCosto::Ultimo)
         ->and($configuracion->precio_al_despachar)->toBe(PrecioAlDespachar::Pedido)
         ->and($configuracion->controlar_existencias)->toBeTrue();
+});
+
+test('controlando la existencia, el buscador de la preventa solo trae lo que hay en la bodega del pedido y dice cuánto', function (): void {
+    Configuracion::actual()->update(['controlar_existencias' => true]);
+
+    $this->producto->forceFill(['descripcion' => 'JABON A TOCADOR 12X100G'])->save();
+    $sinExistencia = Producto::factory()->create(['descripcion' => 'JABON B SIN EXISTENCIA']);
+    $enLaOtra = Producto::factory()->create(['descripcion' => 'JABON C EN LA OTRA BODEGA']);
+
+    app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 29, $this->admin);
+    app(AjustarExistencia::class)->ejecutar($this->otra->id, $enLaOtra, 10, $this->admin);
+
+    // El vendedor: su bodega.
+    $this->actingAs($this->vendedor);
+    $suyos = buscarEnPreventa('jabon');
+
+    expect(array_column($suyos, 'id'))->toBe([$this->producto->id])
+        ->and($suyos[0]['hay'])->toBe(29);
+
+    // Administración: lo de la bodega que escogió; sin bodega, nada.
+    $this->actingAs($this->admin);
+
+    expect(buscarEnPreventa('jabon'))->toBe([])
+        ->and(array_column(buscarEnPreventa('jabon', $this->otra->id), 'id'))->toBe([$enLaOtra->id]);
+
+    // Sin controlar la existencia salen todos, con lo que hay.
+    Configuracion::actual()->update(['controlar_existencias' => false]);
+    $this->actingAs($this->vendedor);
+    $todos = buscarEnPreventa('jabon');
+
+    expect(array_column($todos, 'id'))->toBe([$this->producto->id, $sinExistencia->id, $enLaOtra->id])
+        ->and(array_column($todos, 'hay'))->toBe([29, 0, 0]);
 });
