@@ -41,6 +41,15 @@ class AdminPanelProvider extends PanelProvider
         .'.fi-fo-text-input input::placeholder,.fi-fo-textarea textarea::placeholder{text-transform:none}'
         .'</style>';
 
+    /**
+     * Modales pensados para el teléfono (clase "modal-telefono" en la
+     * ventana): el botón de guardar ocupa el ancho, Cancelar queda a un lado.
+     */
+    private const ESTILO_MODALES = '<style>'
+        .'.fi-modal-window.modal-telefono .fi-modal-footer-actions{display:grid!important;grid-template-columns:1fr auto!important}'
+        .'.fi-modal-window.modal-telefono .fi-modal-footer-actions>*{width:100%}'
+        .'</style>';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -101,7 +110,7 @@ class AdminPanelProvider extends PanelProvider
             ->navigationGroups(['Ventas', 'Precios', 'Administración'])
             ->sidebarCollapsibleOnDesktop()
             // Todo se guarda en MAYÚSCULAS (GuardaEnMayusculas): se escribe ya en mayúsculas.
-            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS)
+            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES)
             // Imprimir hojas de pedidos ahí mismo, sin abrir otra pestaña.
             ->renderHook(PanelsRenderHook::BODY_END, fn (): string => view('filament.imprimir-hoja')->render());
     }

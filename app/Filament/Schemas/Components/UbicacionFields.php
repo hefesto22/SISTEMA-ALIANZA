@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Model;
  *   ...UbicacionFields::make()
  *   ...UbicacionFields::make(required: false)
  *   ...UbicacionFields::make(soloSusRutas: true)  // el vendedor solo ve los municipios de sus rutas
+ *   UbicacionFields::municipio(soloSusRutas: true) // un solo campo: "SANTA ROSA DE COPÁN · COPÁN"
  */
 final class UbicacionFields
 {
@@ -62,6 +63,31 @@ final class UbicacionFields
                 ->required($required)
                 ->placeholder(fn (Get $get): string => blank($get('departamento_id')) ? 'Escoja primero el departamento' : 'Seleccione el municipio'),
         ];
+    }
+
+    /**
+     * Un solo campo en lugar de dos: se busca el municipio o el departamento
+     * ("dolores", "copan") y se escoge "DOLORES · COPÁN". Más rápido en el
+     * teléfono. Si solo puede escoger uno (el vendedor con una ruta), ya
+     * viene puesto.
+     */
+    public static function municipio(bool $required = true, bool $soloSusRutas = false): Select
+    {
+        return Select::make('municipio_id')
+            ->label('Municipio')
+            ->options(fn (): array => Municipio::opcionesConDepartamento(self::permitidos($soloSusRutas)))
+            ->searchable()
+            ->required($required)
+            ->placeholder('Buscar municipio…')
+            ->searchPrompt('Escriba el municipio o el departamento')
+            ->default(function () use ($soloSusRutas): ?int {
+                $permitidos = self::permitidos($soloSusRutas);
+
+                return $permitidos !== null && count($permitidos) === 1 ? $permitidos[0] : null;
+            })
+            ->helperText(fn (): ?string => self::permitidos($soloSusRutas) === []
+                ? 'No tiene rutas asignadas. Pida a administración que lo agregue a una ruta.'
+                : null);
     }
 
     /**

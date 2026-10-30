@@ -27,6 +27,7 @@ final class RTNField
             ->maxLength(RTN::LONGITUD)
             ->minLength(RTN::LONGITUD)
             ->mask(str_repeat('9', RTN::LONGITUD))
+            ->inputMode('numeric')
             ->rules([
                 $required ? 'required' : 'nullable',
                 'string',

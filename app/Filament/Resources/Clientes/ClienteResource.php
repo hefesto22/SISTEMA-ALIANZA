@@ -147,19 +147,7 @@ class ClienteResource extends Resource
      */
     private static function municipios(): array
     {
-        $zonas = Acceso::usuario()?->municipiosDeRuta();
-        $query = Municipio::query()->with('departamento')->orderBy('nombre');
-
-        if ($zonas !== null) {
-            $query->whereKey($zonas);
-        }
-
-        /** @var array<int, string> $opciones */
-        $opciones = $query->get()
-            ->mapWithKeys(fn (Municipio $municipio): array => [$municipio->id => $municipio->etiqueta()])
-            ->all();
-
-        return $opciones;
+        return Municipio::opcionesConDepartamento(Acceso::usuario()?->municipiosDeRuta());
     }
 
     public static function getPages(): array

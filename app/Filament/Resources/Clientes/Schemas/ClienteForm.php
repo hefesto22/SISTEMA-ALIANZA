@@ -15,8 +15,10 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\HtmlString;
 
 /**
  * Campos del cliente. Se usan en Clientes y al crear un cliente nuevo
@@ -31,38 +33,64 @@ use Illuminate\Database\Eloquent\Model;
 class ClienteForm
 {
     /**
+     * Pensado para el teléfono: RTN y teléfono lado a lado, el municipio en
+     * un solo campo (se busca por municipio o departamento) y sin textos de
+     * ayuda que alarguen el formulario; lo que hace falta lo dice el error.
+     *
      * @return array<int, Component>
      */
     public static function components(): array
     {
         return [
-            TextInput::make('nombre')
-                ->label('Nombre del negocio / cliente')
-                ->required()
-                ->maxLength(255)
-                ->rule(fn (Get $get, ?Model $record): Closure => self::noRepetido($get, $record))
-                ->columnSpanFull(),
-            RTNField::make()
-                ->helperText('14 dígitos, sin guiones. Si el cliente no tiene RTN, su nombre no se puede repetir.'),
-            TelefonoHondurasField::make('telefono', 'Teléfono'),
-            ...UbicacionFields::make(soloSusRutas: true),
-            TextInput::make('direccion')
-                ->label('Dirección / referencia')
-                ->placeholder('Ej. Barrio El Centro, frente al parque')
-                ->helperText('Barrio o aldea, calle y algo cercano que ayude a encontrarlo.')
-                ->maxLength(255)
-                ->columnSpanFull(),
-            Select::make('bodega_id')
-                ->label('Bodega')
-                ->relationship('bodega', 'nombre')
-                ->preload()
-                ->required()
-                ->visible(Acceso::veTodo()),
-            // Un cliente nuevo siempre está activo; se desactiva al editarlo.
-            Toggle::make('activo')
-                ->default(true)
-                ->inline(false)
-                ->visibleOn('edit'),
+            Grid::make(['default' => 2])
+                ->columnSpanFull()
+                ->schema([
+                    TextInput::make('nombre')
+                        ->label('Nombre del negocio')
+                        ->placeholder('Ej. Pulpería La Bendición')
+                        ->required()
+                        ->maxLength(255)
+                        ->autocomplete(false)
+                        // Al salir del campo avisa si ya hay uno que se llama igual,
+                        // antes de llenar lo demás.
+                        ->live(onBlur: true)
+                        ->helperText(fn (mixed $state, ?Model $record): ?HtmlString => self::avisoDeNombre($state, $record))
+                        ->rule(fn (Get $get, ?Model $record): Closure => self::noRepetido($get, $record))
+                        ->columnSpanFull(),
+                    RTNField::make()
+                        ->placeholder('Opcional')
+                        ->helperText(null)
+                        ->validationMessages([
+                            'size'  => 'El RTN lleva 14 dígitos.',
+                            'regex' => 'El RTN lleva 14 dígitos, sin guiones.',
+                        ]),
+                    TelefonoHondurasField::make('telefono', 'Teléfono')
+                        ->helperText(null)
+                        ->validationMessages([
+                            'regex' => '8 dígitos que empiecen con 2, 3 o 9.',
+                            'min'   => '8 dígitos que empiecen con 2, 3 o 9.',
+                        ]),
+                    UbicacionFields::municipio(soloSusRutas: true)
+                        ->columnSpanFull(),
+                    TextInput::make('direccion')
+                        ->label('Referencia')
+                        ->placeholder('Barrio, calle y algo cercano')
+                        ->maxLength(255)
+                        ->columnSpanFull(),
+                    Select::make('bodega_id')
+                        ->label('Bodega')
+                        ->relationship('bodega', 'nombre')
+                        ->preload()
+                        ->required()
+                        ->visible(Acceso::veTodo())
+                        ->columnSpanFull(),
+                    // Un cliente nuevo siempre está activo; se desactiva al editarlo.
+                    Toggle::make('activo')
+                        ->default(true)
+                        ->inline(false)
+                        ->visibleOn('edit')
+                        ->columnSpanFull(),
+                ]),
         ];
     }
 
@@ -84,6 +112,38 @@ class ClienteForm
         $data['bodega_id'] = $usuario->bodega_id;
 
         return $data;
+    }
+
+    /**
+     * "Ya hay un cliente con este nombre: …" debajo del nombre, apenas se
+     * escribe. Solo avisa; la regla se aplica al guardar (noRepetido).
+     */
+    private static function avisoDeNombre(mixed $nombre, ?Model $record): ?HtmlString
+    {
+        $clave = Texto::clave(self::texto($nombre));
+
+        if ($clave === '') {
+            return null;
+        }
+
+        $query = Cliente::query()
+            ->with('municipio.departamento')
+            ->where('nombre_clave', $clave)
+            ->orderBy('id');
+
+        if ($record instanceof Cliente) {
+            $query->whereKeyNot($record->getKey());
+        }
+
+        $otro = $query->first();
+
+        if ($otro === null) {
+            return null;
+        }
+
+        return new HtmlString('<span style="color: var(--warning-600)">'
+            .e("Ya hay un cliente con este nombre: {$otro->etiqueta()}. Si es otro negocio, ponga su RTN o agregue el barrio al nombre.")
+            .'</span>');
     }
 
     /**

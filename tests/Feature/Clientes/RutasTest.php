@@ -120,15 +120,25 @@ test('bodega ve los clientes de su bodega y administración ve todos', function 
         ->assertCanSeeTableRecords([$deSuBodega, $deOtraBodega]);
 });
 
-test('administración crea el cliente con departamento y municipio', function (): void {
+test('administración crea el cliente con su municipio (un solo campo, con el departamento)', function (): void {
     $this->actingAs($this->admin);
 
     Livewire::test(ManageClientes::class)
+        ->mountAction('create')
+        ->assertFormFieldExists('municipio_id')
+        ->assertFormFieldDoesNotExist('departamento_id');
+
+    // Se busca por municipio o por departamento: "SANTA ROSA DE COPÁN · COPÁN".
+    expect(Municipio::opcionesConDepartamento([$this->santaRosa->id, $this->sinuapa->id]))->toBe([
+        $this->santaRosa->id => 'SANTA ROSA DE COPÁN · COPÁN',
+        $this->sinuapa->id   => 'SINUAPA · OCOTEPEQUE',
+    ]);
+
+    Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
-            'nombre'          => 'Pulpería La Bendición',
-            'departamento_id' => $this->santaRosa->departamento_id,
-            'municipio_id'    => $this->santaRosa->id,
-            'bodega_id'       => $this->bodega->id,
+            'nombre'       => 'Pulpería La Bendición',
+            'municipio_id' => $this->santaRosa->id,
+            'bodega_id'    => $this->bodega->id,
         ])
         ->assertHasNoActionErrors();
 
@@ -138,42 +148,39 @@ test('administración crea el cliente con departamento y municipio', function ()
         ->and($cliente->codigo)->toBe(Cliente::codigoPara($cliente->id));
 });
 
-test('el municipio tiene que ser del departamento escogido', function (): void {
+test('en la bodega el municipio tiene que ser del departamento escogido', function (): void {
     $this->actingAs($this->admin);
 
-    Livewire::test(ManageClientes::class)
+    Livewire::test(ManageBodegas::class)
         ->callAction('create', data: [
-            'nombre'          => 'Pulpería Mal Ubicada',
+            'codigo'          => 'MAL',
+            'nombre'          => 'Bodega Mal Ubicada',
             'departamento_id' => $this->santaRosa->departamento_id,
             'municipio_id'    => $this->sinuapa->id,
-            'bodega_id'       => $this->bodega->id,
         ])
         ->assertHasActionErrors(['municipio_id']);
 
-    expect(Cliente::query()->where('nombre', 'PULPERÍA MAL UBICADA')->exists())->toBeFalse();
+    expect(Bodega::query()->where('codigo', 'MAL')->exists())->toBeFalse();
 });
 
 test('el vendedor solo crea clientes en sus rutas y quedan en su bodega', function (): void {
     $this->actingAs($this->vendedor);
 
-    // Su ruta está toda en Copán: el departamento ya viene escogido.
+    // Su ruta tiene un solo municipio: ya viene escogido.
     Livewire::test(ManageClientes::class)
         ->mountAction('create')
-        ->assertSchemaStateSet(['departamento_id' => $this->santaRosa->departamento_id]);
+        ->assertSchemaStateSet(['municipio_id' => $this->santaRosa->id]);
 
     Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
-            'nombre'          => 'Pulpería Fuera de Ruta',
-            'departamento_id' => $this->dolores->departamento_id,
-            'municipio_id'    => $this->dolores->id,
+            'nombre'       => 'Pulpería Fuera de Ruta',
+            'municipio_id' => $this->dolores->id,
         ])
         ->assertHasActionErrors(['municipio_id']);
 
     Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
-            'nombre'          => 'Pulpería En Ruta',
-            'departamento_id' => $this->santaRosa->departamento_id,
-            'municipio_id'    => $this->santaRosa->id,
+            'nombre' => 'Pulpería En Ruta',
         ])
         ->assertHasNoActionErrors();
 

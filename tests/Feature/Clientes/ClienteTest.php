@@ -45,11 +45,10 @@ test('todo se guarda en mayúsculas', function (): void {
 
     Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
-            'nombre'          => '  mauricio cruz ',
-            'direccion'       => 'barrio el centro, frente a la iglesia',
-            'departamento_id' => $this->municipio->departamento_id,
-            'municipio_id'    => $this->municipio->id,
-            'bodega_id'       => $this->bodega->id,
+            'nombre'       => '  mauricio cruz ',
+            'direccion'    => 'barrio el centro, frente a la iglesia',
+            'municipio_id' => $this->municipio->id,
+            'bodega_id'    => $this->bodega->id,
         ])
         ->assertHasNoActionErrors();
 
@@ -80,21 +79,19 @@ test('sin RTN el nombre no se puede repetir, aunque cambien tildes, mayúsculas 
     // Otro municipio, pero sin RTN: no se sabe si es el mismo negocio.
     Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
-            'nombre'          => '  pulperia   ana. ',
-            'departamento_id' => $this->otroMunicipio->departamento_id,
-            'municipio_id'    => $this->otroMunicipio->id,
-            'bodega_id'       => $this->bodega->id,
+            'nombre'       => '  pulperia   ana. ',
+            'municipio_id' => $this->otroMunicipio->id,
+            'bodega_id'    => $this->bodega->id,
         ])
         ->assertHasActionErrors(['nombre']);
 
     // Con RTN y en otro lugar sí.
     Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
-            'nombre'          => 'pulpería ana',
-            'rtn'             => '08019985012345',
-            'departamento_id' => $this->otroMunicipio->departamento_id,
-            'municipio_id'    => $this->otroMunicipio->id,
-            'bodega_id'       => $this->bodega->id,
+            'nombre'       => 'pulpería ana',
+            'rtn'          => '08019985012345',
+            'municipio_id' => $this->otroMunicipio->id,
+            'bodega_id'    => $this->bodega->id,
         ])
         ->assertHasNoActionErrors();
 
@@ -112,8 +109,7 @@ test('con RTN el nombre se repite solo en otro municipio, y el mismo RTN puede l
     $this->actingAs($this->admin);
 
     $crear = fn (array $datos) => Livewire::test(ManageClientes::class)->callAction('create', data: [
-        'departamento_id' => $this->municipio->departamento_id,
-        'bodega_id'       => $this->bodega->id,
+        'bodega_id' => $this->bodega->id,
         ...$datos,
     ]);
 
@@ -158,6 +154,20 @@ test('los repetidos de antes se pueden editar mientras no se les cambie el nombr
         ->and($primero->nombre_clave)->toBe('PULPERIA ANA');
 });
 
+test('al escribir un nombre que ya existe avisa antes de guardar', function (): void {
+    Cliente::factory()->create(['nombre' => 'PULPERÍA ANA', 'municipio_id' => $this->municipio->id, 'bodega_id' => $this->bodega->id]);
+
+    $this->actingAs($this->admin);
+
+    Livewire::test(ManageClientes::class)
+        ->mountAction('create')
+        ->assertDontSee('Ya hay un cliente con este nombre')
+        ->fillForm(['nombre' => 'pulperia ana'])
+        ->assertSee('Ya hay un cliente con este nombre')
+        ->fillForm(['nombre' => 'pulpería ana barrio el centro'])
+        ->assertDontSee('Ya hay un cliente con este nombre');
+});
+
 test('un cliente nuevo no muestra el interruptor de activo: entra activo', function (): void {
     $this->actingAs($this->admin);
 
@@ -167,10 +177,9 @@ test('un cliente nuevo no muestra el interruptor de activo: entra activo', funct
 
     Livewire::test(ManageClientes::class)
         ->callAction('create', data: [
-            'nombre'          => 'mini súper el ahorro',
-            'departamento_id' => $this->municipio->departamento_id,
-            'municipio_id'    => $this->municipio->id,
-            'bodega_id'       => $this->bodega->id,
+            'nombre'       => 'mini súper el ahorro',
+            'municipio_id' => $this->municipio->id,
+            'bodega_id'    => $this->bodega->id,
         ])
         ->assertHasNoActionErrors();
 

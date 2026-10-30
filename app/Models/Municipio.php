@@ -73,6 +73,31 @@ class Municipio extends Model
     }
 
     /**
+     * Todos (o solo esos) en una sola lista: [id => "SANTA ROSA DE COPÁN · COPÁN"],
+     * en orden alfabético. Se busca por municipio o por departamento.
+     *
+     * @param list<int>|null $soloIds Limita a estos municipios (null = todos).
+     *
+     * @return array<int, string>
+     */
+    public static function opcionesConDepartamento(?array $soloIds = null): array
+    {
+        $query = self::query()->with('departamento')->orderBy('nombre');
+
+        if ($soloIds !== null) {
+            $query->whereKey($soloIds);
+        }
+
+        /** @var array<int, string> $opciones */
+        $opciones = $query->get()
+            ->mapWithKeys(fn (Municipio $municipio): array => [$municipio->id => $municipio->etiqueta()])
+            ->sort()
+            ->all();
+
+        return $opciones;
+    }
+
+    /**
      * Municipios de un departamento para el select: [id => nombre].
      *
      * @param list<int>|null $soloIds Limita a estos municipios (null = todos).

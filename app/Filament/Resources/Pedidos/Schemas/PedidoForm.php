@@ -18,6 +18,7 @@ use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\User;
+use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -77,6 +78,10 @@ class PedidoForm
                             ->required()
                             ->createOptionForm(ClienteForm::components())
                             ->createOptionModalHeading('Nuevo cliente')
+                            ->createOptionAction(fn (Action $action): Action => $action
+                                ->modalSubmitActionLabel('Guardar cliente')
+                                ->extraModalWindowAttributes(['class' => 'modal-telefono'])
+                                ->fillForm(fn (Select $component): ?array => self::clienteNuevoDesde($component)))
                             ->createOptionUsing(fn (array $data): int => (int) Cliente::query()->create(ClienteForm::completar($data))->getKey())
                             ->columnSpanFull(),
                         Toggle::make('fuera_de_ruta')
@@ -211,6 +216,24 @@ class PedidoForm
             'ahorro'      => round($ahorro, 2),
             'promociones' => Promocion::query()->vigentes()->exists() ? self::promocionesAplicadas($promociones) : '',
         ];
+    }
+
+    /**
+     * Cliente nuevo desde el pedido: administración ya trae puesta la bodega
+     * que escogió en el pedido. A los demás no se les llena nada (la bodega es
+     * la suya y quedan los valores por defecto, como su municipio si tiene uno).
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function clienteNuevoDesde(Select $cliente): ?array
+    {
+        if (! Acceso::veTodo()) {
+            return null;
+        }
+
+        $bodega = $cliente->makeGetUtility()('bodega_id');
+
+        return ['bodega_id' => is_numeric($bodega) ? (int) $bodega : null];
     }
 
     /**
