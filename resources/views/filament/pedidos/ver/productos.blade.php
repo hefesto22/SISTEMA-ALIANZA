@@ -33,10 +33,8 @@
                         <div class="vp-linea-nombre">{{ $item->producto->descripcion }}</div>
                         <div class="vp-tenue">{{ $item->producto->codigo }} · {{ $precio }}</div>
 
-                        @if ($noSalio)
-                            <div class="vp-falta">No salió · pidió {{ $item->cantidad }} {{ $sigla }}</div>
-                        @elseif ($item->faltante() > 0)
-                            <div class="vp-falta">Pidió {{ $item->cantidad }} {{ $sigla }} · no salieron {{ $item->faltante() }}</div>
+                        @if ($falta = $item->faltaEnPalabras())
+                            <div class="vp-falta">{{ $falta }}</div>
                         @endif
 
                         @if ($item->descuento > 0)

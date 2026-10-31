@@ -10,7 +10,6 @@ use App\Enums\PrecioAlDespachar;
 use App\Filament\Support\Acceso;
 use App\Models\Configuracion;
 use App\Models\Pedido;
-use App\Models\PedidoItem;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Support\Enums\Width;
@@ -55,11 +54,9 @@ final class ValidarDespachoAction
                     return;
                 }
 
-                $faltantes = $pedido->items->filter(fn (PedidoItem $item): bool => $item->faltante() > 0)->count();
-
                 Notification::make()
                     ->title("Pedido {$pedido->numero} validado: queda por imprimir")
-                    ->body('Total para el cliente: '.lempiras($pedido->total).($faltantes > 0 ? " · {$faltantes} línea(s) con menos de lo pedido." : ' · Sale completo.'))
+                    ->body('Total para el cliente: '.lempiras($pedido->total).'. '.LineasPedido::incompletas($pedido))
                     ->success()
                     ->actions([ImprimirPedidoAction::enNotificacion($pedido)])
                     ->send();

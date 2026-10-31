@@ -436,7 +436,7 @@ test('ver pedido: resumen con el cliente y el total, cada producto con lo que sa
         ->assertSee('L. 100.00 c/u + ISV')
         ->assertSee('L. 500.00 la caja de 10 · exento')
         ->assertSee('L. 730.00')
-        ->assertDontSee('no salieron');
+        ->assertDontSee('No va completo');
 
     // Del gravado solo sale 1.
     $validado = app(ValidarDespacho::class)->ejecutar($pedido, [$lineas[0] => 1], $this->encargado);
@@ -446,6 +446,6 @@ test('ver pedido: resumen con el cliente y el total, cada producto con lo que sa
         ->assertSee($this->encargado->name)
         ->assertSee('Sin imprimir')
         ->assertSee('1 UN')
-        ->assertSee('Pidió 2 UN · no salieron 1')
+        ->assertSee('No va completo: falta 1 unidad de 2')
         ->assertSee('L. 615.00');
 });

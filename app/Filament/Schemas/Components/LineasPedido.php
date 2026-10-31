@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Schemas\Components;
 
+use App\Domain\Inventario\Disponible;
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Enums\EstadoPedido;
 use App\Enums\UnidadVenta;
@@ -14,6 +15,7 @@ use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Producto;
+use Closure;
 use Filament\Forms\Components\Contracts\HasNestedRecursiveValidationRules;
 use Filament\Forms\Components\Field;
 use Filament\Support\Components\Attributes\ExposedLivewireMethod;
@@ -35,9 +37,11 @@ use Livewire\Attributes\Renderless;
  * Se guarda en pedido_items (crea, cambia y quita líneas) y después
  * RecalcularPedido pone los precios.
  *
- * Existencia: cada producto trae cuánto hay en la bodega del pedido. Con
- * "controlar existencias" encendido (Configuración) el buscador solo
- * muestra lo que tiene existencia y en el teléfono no se pide más de lo que hay.
+ * Existencia: cada producto trae cuánto hay DISPONIBLE en la bodega del
+ * pedido: lo que hay menos lo apartado en otros pedidos pendientes
+ * (App\Domain\Inventario\Disponible), así no se vende dos veces lo mismo.
+ * Con "controlar existencias" encendido (Configuración) el buscador solo
+ * muestra lo disponible y no se pide (ni se guarda) más de eso.
  *
  * Vista: resources/views/filament/pedidos/lineas-pedido.blade.php (también
  * trae la barra de abajo con el total y Guardar).
@@ -64,6 +68,15 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             'required' => 'Agregue al menos un producto.',
             'max'      => 'Un pedido puede tener hasta '.self::MAXIMO_LINEAS.' productos.',
         ]);
+
+        // Controlando la existencia, no se pide más de lo disponible.
+        $this->rule(fn (LineasPedido $component): Closure => function (string $attribute, mixed $value, Closure $fail) use ($component): void {
+            $aviso = $component->pasaDeLoDisponible(self::normalizar($value));
+
+            if ($aviso !== null) {
+                $fail($aviso);
+            }
+        });
 
         // No es una columna del pedido: se guarda aparte, en sus líneas.
         $this->dehydrated(false);
@@ -112,10 +125,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
     /**
      * Buscador de arriba: productos activos por código o nombre, con sus
-     * precios y lo que hay en la bodega del pedido (administración sin bodega
-     * escogida: lo de todas). Primero los que tienen existencia, después el
-     * código exacto y luego por nombre. Si se controla la existencia, solo los
-     * que tienen, y sin bodega escogida ninguno.
+     * precios y lo disponible en la bodega del pedido (administración sin
+     * bodega escogida: lo de todas). Primero los que tienen disponible,
+     * después el código exacto y luego por nombre. Si se controla la
+     * existencia, solo los que tienen, y sin bodega escogida ninguno.
      *
      * @return list<array<string, mixed>>
      */
@@ -132,28 +145,25 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             return [];
         }
 
-        // 1 si tiene existencia en la bodega (o en alguna, sin bodega escogida).
-        $tieneExistencia = Existencia::query()
-            ->selectRaw('CASE WHEN COALESCE(SUM(existencias.cantidad), 0) > 0 THEN 1 ELSE 0 END')
-            ->whereColumn('existencias.producto_id', 'productos.id')
-            ->when($bodega !== null, fn (Builder $query): Builder => $query->where('existencias.bodega_id', $bodega));
+        // Con lo que hay en la bodega y lo apartado en pedidos pendientes, para
+        // ordenar (y filtrar) por lo disponible.
+        $conDisponible = Disponible::conColumnas(Producto::query()->activos()->buscar($buscar), $bodega, $this->pedidoQueSeEdita());
 
         $productos = Producto::query()
-            ->activos()
-            ->buscar($buscar)
-            ->when($controlar, fn (Builder $query): Builder => $query->whereHas('existencias', fn (Builder $existencias): Builder => $existencias
-                ->where('bodega_id', $bodega)
-                ->where('cantidad', '>', 0)))
-            ->orderByDesc($tieneExistencia)
+            ->fromSub($conDisponible, 'productos')
+            ->when($controlar, fn (Builder $query): Builder => $query->whereRaw('existencia_bodega - apartado > 0'))
+            ->orderByRaw('CASE WHEN existencia_bodega - apartado > 0 THEN 0 ELSE 1 END')
             ->orderByRaw('CASE WHEN UPPER(codigo) = ? THEN 0 ELSE 1 END', [mb_strtoupper($buscar)])
             ->orderBy('descripcion')
             ->limit(25)
             ->get();
 
-        $hay = self::existenciasEn($bodega, $productos->modelKeys());
-
         return array_values($productos
-            ->map(fn (Producto $producto): array => self::datosDe($producto, $hay[$producto->id] ?? 0))
+            ->map(fn (Producto $producto): array => self::datosDe(
+                $producto,
+                self::entero($producto->getAttribute('existencia_bodega')),
+                self::entero($producto->getAttribute('apartado')),
+            ))
             ->all());
     }
 
@@ -212,20 +222,23 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $fuera = 0;
         $bodega = $this->bodegaDelPedido();
         $controlar = Configuracion::actual()->controlar_existencias;
-        $hay = self::existenciasEn($bodega, $pedido->items->pluck('producto_id')->all());
+        $ids = $pedido->items->pluck('producto_id')->all();
+        $hay = Disponible::existencia($bodega, $ids);
+        $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
 
         foreach ($pedido->items as $item) {
-            $existencia = $hay[$item->producto_id] ?? 0;
+            $enBodega = $hay[$item->producto_id] ?? 0;
+            $disponible = $enBodega - ($apartado[$item->producto_id] ?? 0);
 
-            // No se vende o (si se controla la existencia) ya no hay en la bodega.
-            if (! $item->producto->activo || ($controlar && $existencia < 1)) {
+            // No se vende o (si se controla la existencia) ya no hay disponible.
+            if (! $item->producto->activo || ($controlar && $disponible < 1)) {
                 $fuera++;
 
                 continue;
             }
 
             $lineas[] = ['producto_id' => $item->producto_id, 'unidad' => $item->unidad->value, 'cantidad' => $item->cantidad];
-            $productos[$item->producto_id] = self::datosDe($item->producto, $existencia);
+            $productos[$item->producto_id] = self::datosDe($item->producto, $enBodega, $apartado[$item->producto_id] ?? 0);
         }
 
         return [
@@ -266,10 +279,11 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
         $productos = [];
         $bodega = $this->bodegaDelPedido();
-        $hay = self::existenciasEn($bodega, $ids);
+        $hay = Disponible::existencia($bodega, $ids);
+        $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
 
         foreach (Producto::query()->whereKey($ids)->get() as $producto) {
-            $productos[$producto->id] = self::datosDe($producto, $hay[$producto->id] ?? 0);
+            $productos[$producto->id] = self::datosDe($producto, $hay[$producto->id] ?? 0, $apartado[$producto->id] ?? 0);
         }
 
         return $productos;
@@ -278,10 +292,12 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     /**
      * Lo que el teléfono necesita de un producto para mostrarlo y sacar su
      * subtotal igual que el servidor (precio sin ISV × cantidad, más ISV).
+     * "hay" es lo disponible: lo de la bodega menos lo apartado en otros
+     * pedidos pendientes.
      *
      * @return array<string, mixed>
      */
-    public static function datosDe(Producto $producto, ?int $hay = null): array
+    public static function datosDe(Producto $producto, ?int $enBodega = null, int $apartado = 0): array
     {
         $unidad = $producto->precioPara(UnidadVenta::Unidad);
         $caja = $producto->precioPara(UnidadVenta::Caja);
@@ -297,8 +313,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             'precioCaja'      => $caja,
             'precioUnidadIsv' => self::comoEnElPedido($unidad, $producto->gravado),
             'precioCajaIsv'   => self::comoEnElPedido($caja, $producto->gravado),
-            // En unidades: en la bodega del pedido (o en todas, sin bodega escogida).
-            'hay' => $hay,
+            // En unidades, en la bodega del pedido (o en todas, sin bodega escogida).
+            'hay'       => $enBodega === null ? null : $enBodega - $apartado,
+            'en_bodega' => $enBodega,
+            'apartado'  => $apartado,
         ];
     }
 
@@ -320,29 +338,60 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     }
 
     /**
-     * [producto_id => unidades] en la bodega (sin bodega: lo de todas juntas).
-     *
-     * @param array<mixed> $productoIds
-     *
-     * @return array<int, int>
+     * El pedido que se está editando (sus líneas no cuentan como apartadas
+     * contra él mismo); null al crear.
      */
-    private static function existenciasEn(?int $bodega, array $productoIds): array
+    public function pedidoQueSeEdita(): ?int
     {
-        if ($productoIds === []) {
-            return [];
+        $pedido = $this->getRecord();
+
+        return $pedido instanceof Pedido && $pedido->exists ? $pedido->id : null;
+    }
+
+    /**
+     * Con "controlar existencias": el aviso del primer producto que pasa de
+     * lo disponible en la bodega ("No alcanza ACEITE…: disponible 1 CJ + 3
+     * UN."); null si alcanza todo o no se controla.
+     *
+     * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
+     */
+    public function pasaDeLoDisponible(array $lineas): ?string
+    {
+        $bodega = $this->bodegaDelPedido();
+
+        if ($lineas === [] || $bodega === null || ! Configuracion::actual()->controlar_existencias) {
+            return null;
         }
 
-        /** @var array<int, int> $hay */
-        $hay = Existencia::query()
-            ->whereIn('producto_id', $productoIds)
-            ->when($bodega !== null, fn (Builder $query): Builder => $query->where('bodega_id', $bodega))
-            ->groupBy('producto_id')
-            ->selectRaw('producto_id, SUM(cantidad) as total')
-            ->pluck('total', 'producto_id')
-            ->map(fn (mixed $cantidad): int => (int) $cantidad)
-            ->all();
+        $productos = Producto::query()->whereKey(array_column($lineas, 'producto_id'))->get()->keyBy('id');
+        $pide = [];
 
-        return $hay;
+        foreach ($lineas as $linea) {
+            $producto = $productos->get($linea['producto_id']);
+            $unidad = UnidadVenta::tryFrom($linea['unidad']);
+
+            if ($producto instanceof Producto && $unidad !== null) {
+                $pide[$producto->id] = ($pide[$producto->id] ?? 0) + $linea['cantidad'] * $producto->unidadesEn($unidad);
+            }
+        }
+
+        $disponible = Disponible::en($bodega, array_keys($pide), $this->pedidoQueSeEdita());
+
+        foreach ($pide as $id => $unidades) {
+            $producto = $productos->get($id);
+            $hay = $disponible[$id] ?? 0;
+
+            if ($producto instanceof Producto && $unidades > $hay) {
+                return "No alcanza {$producto->descripcion}: disponible ".Existencia::enCajas(max(0, $hay), $producto->unidades_por_caja).'.';
+            }
+        }
+
+        return null;
+    }
+
+    private static function entero(mixed $valor): int
+    {
+        return is_numeric($valor) ? (int) $valor : 0;
     }
 
     /**

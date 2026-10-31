@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Inventario\AjustarExistencia;
+use App\Domain\Inventario\Disponible;
 use App\Domain\Inventario\RegistrarCompra;
 use App\Domain\Pedidos\CorregirPedido;
 use App\Domain\Pedidos\RecalcularPedido;
@@ -423,4 +424,58 @@ test('el buscador de la preventa dice cuánto hay y pone primero lo que tiene; c
 
     expect(array_column($deTodas, 'id'))->toBe([$this->producto->id, $enLaOtra->id, $sinExistencia->id])
         ->and(array_column($deTodas, 'hay'))->toBe([29, 10, 0]);
+});
+
+test('el vendedor ve lo disponible (lo de la bodega menos lo apartado en pedidos pendientes); al validar se ve lo que queda y qué no va completo', function (): void {
+    $this->producto->forceFill(['descripcion' => 'JABON A TOCADOR 12X100G'])->save();
+    app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 29, $this->admin);
+
+    // Un pedido pendiente ya aparta 2 cajas (24 unidades): quedan 5 disponibles.
+    $apartado = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Caja, 2]]);
+
+    expect(Disponible::en($this->bodega->id, [$this->producto->id]))->toBe([$this->producto->id => 5])
+        ->and(Disponible::en($this->bodega->id, [$this->producto->id], sinPedido: $apartado->id))->toBe([$this->producto->id => 29])
+        ->and(Disponible::en($this->otra->id, [$this->producto->id]))->toBe([$this->producto->id => 0]);
+
+    $this->actingAs($this->vendedor);
+    $resultados = buscarEnPreventa('jabon');
+
+    expect($resultados[0]['hay'])->toBe(5)
+        ->and($resultados[0]['en_bodega'])->toBe(29)
+        ->and($resultados[0]['apartado'])->toBe(24);
+
+    // Controlando la existencia no se guarda más de lo disponible (1 caja = 12 > 5).
+    Configuracion::actual()->update(['controlar_existencias' => true]);
+    $this->actingAs($this->encargado);
+
+    Livewire::test(CreatePedido::class)
+        ->fillForm([
+            'cliente_id'  => Cliente::factory()->create(['bodega_id' => $this->bodega->id])->id,
+            'vendedor_id' => $this->vendedor->id,
+            'fecha'       => now()->toDateString(),
+            'items'       => [['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 1]],
+        ])
+        ->call('create')
+        ->assertHasFormErrors(['items']);
+
+    expect(Pedido::query()->count())->toBe(1);
+
+    // Al validar el que apartó: hay 29 en la bodega y este pedido saca 2 cajas.
+    $fila = LineasPedido::datos($apartado)['items'][0];
+
+    expect($fila['hay_unidades'])->toBe(29)
+        ->and($fila['es_caja'])->toBeTrue()
+        ->and($fila['por_unidad'])->toBe(12)
+        ->and($fila['mueve'])->toBeTrue()
+        ->and($fila['salio_unidades'])->toBe(0);
+
+    // Bodega manda 1 de las 2 cajas: queda dicho que fue la caja la que no va completa.
+    $validado = app(ValidarDespacho::class)->ejecutar($apartado, [$apartado->items()->sole()->id => 1], $this->encargado);
+
+    expect($validado->items()->sole()->faltaEnPalabras())->toBe('No va completo: falta 1 caja de 2')
+        ->and(LineasPedido::incompletas($validado))->toBe('No va completo: JABON A TOCADOR 12X100G (falta 1 caja de 2).')
+        ->and(Disponible::en($this->bodega->id, [$this->producto->id]))->toBe([$this->producto->id => 17]);
+
+    // Al corregirlo, lo que ya salió (1 caja) es lo que regresaría.
+    expect(LineasPedido::datos($validado)['items'][0]['salio_unidades'])->toBe(12);
 });

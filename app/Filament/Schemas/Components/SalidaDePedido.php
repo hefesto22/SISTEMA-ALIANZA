@@ -9,9 +9,11 @@ use Filament\Forms\Components\Field;
 
 /**
  * Validar y Corregir: cuánto sale de cada línea del pedido, una fila por
- * línea como en la preventa (nombre, lo que pidió, lo que hay) con − y +
- * para "Sale" y un botón "No hay" que la deja en 0 (y "Sí hay" la regresa).
- * Todo pasa en el teléfono; al servidor solo va al confirmar.
+ * línea: si es caja o unidad, lo que pidió y, del producto, cuánto hay en la
+ * bodega, cuánto saca este pedido y cuánto quedaría. Con − y + para "Sale" y
+ * un botón "No hay" que la deja en 0 (y "Sí hay" la regresa). Lo que no va
+ * completo se dice en palabras ("falta 1 caja de 3"). Todo pasa en el
+ * teléfono; al servidor solo va al confirmar.
  *
  * Estado: list<array{id: int, sale: int, ...}> como lo arma
  * App\Filament\Resources\Pedidos\Actions\LineasPedido::datos() (trae también
@@ -46,9 +48,8 @@ class SalidaDePedido extends Field
     }
 
     /**
-     * Al validar se pinta lo que hay contra lo que pidieron (verde alcanza,
-     * ámbar no alcanza, rojo no hay). Al corregir lo que hay ya es después de
-     * despachar, así que solo se muestra.
+     * Al validar todo lo que sale se resta de la bodega; al corregir solo la
+     * diferencia con lo que ya había salido (si sale menos, regresa).
      */
     public function paraValidar(bool|Closure $condicion = true): static
     {

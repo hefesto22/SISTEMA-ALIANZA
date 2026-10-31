@@ -13,10 +13,11 @@
     El buscador se queda arriba al bajar por la lista. Los estilos van aquí
     mismo, sin compilar.
 
-    Existencia ("Hay"): la de la bodega del pedido (administración sin bodega
-    escogida: la de todas). En el buscador salen primero los que tienen. Con
-    "controlar existencias" encendido solo salen los que hay y no se deja
-    pedir más de eso.
+    Existencia: lo DISPONIBLE en la bodega del pedido, o sea lo que hay menos
+    lo apartado en otros pedidos pendientes (administración sin bodega
+    escogida: lo de todas). En el buscador salen primero los que tienen
+    disponible. Con "controlar existencias" encendido solo salen esos y no se
+    deja pedir más de lo disponible.
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
@@ -81,6 +82,8 @@
         .dark .pv-hay { color: var(--success-400); }
         .pv-hay.pv-hay-poco { color: var(--warning-600); }
         .dark .pv-hay.pv-hay-poco { color: var(--warning-400); }
+        .pv-hay.pv-hay-nada { color: var(--danger-600); }
+        .dark .pv-hay.pv-hay-nada { color: var(--danger-400); }
         .pv-tope { font-size: 0.75rem; font-weight: 600; color: var(--warning-600); }
         .dark .pv-tope { color: var(--warning-400); }
         .pv-paso:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -397,24 +400,32 @@
                 return signo + partes.join(' + ')
             },
 
-            {{-- Unidades en la bodega del pedido (null si no se sabe: sin bodega escogida). --}}
+            {{-- Unidades disponibles en la bodega del pedido: lo que hay menos lo apartado en otros pedidos pendientes (null si no se sabe). --}}
             hayDe(id) {
                 const hay = this.productos[id]?.hay
 
                 return hay === null || hay === undefined ? null : Number(hay)
             },
 
-            textoHay(p) {
-                return p?.hay === null || p?.hay === undefined ? '' : 'Hay ' + this.enCajas(p.hay, p.caja)
+            {{-- Debajo del producto abierto: "Disponible 5 UN en la bodega · hay 2 CJ + 5 UN, 2 CJ ya en otros pedidos". --}}
+            textoHay(id) {
+                const p = this.productos[id]
+                const donde = this.sinBodegaEscogida() ? ' entre todas las bodegas' : ' en la bodega'
+                const apartado = Number(p?.apartado ?? 0)
+                const disponible = 'Disponible ' + this.enCajas(Math.max(0, this.hayDe(id) ?? 0), p?.caja) + donde
+
+                return apartado > 0
+                    ? disponible + ' · hay ' + this.enCajas(Number(p?.en_bodega ?? 0), p?.caja) + ', ' + this.enCajas(apartado, p?.caja) + ' ya en otros pedidos'
+                    : disponible
             },
 
-            {{-- En el buscador, a la derecha: "hay 2 CJ", "en todas 2 CJ" o "sin existencia". --}}
+            {{-- En el buscador, a la derecha: arriba la etiqueta y abajo lo disponible ("disponible / 2 CJ"), "todo / apartado" o "sin / existencia". --}}
             etiquetaHay(p) {
-                if (Number(p?.hay ?? 0) <= 0) {
-                    return 'existencia'
+                if (Number(p?.hay ?? 0) > 0) {
+                    return [this.sinBodegaEscogida() ? 'en todas' : 'disponible', this.enCajas(p.hay, p.caja)]
                 }
 
-                return this.sinBodegaEscogida() ? 'en todas' : 'hay'
+                return Number(p?.en_bodega ?? 0) > 0 ? ['todo', 'apartado'] : ['sin', 'existencia']
             },
 
             {{-- Poco: menos de lo que trae una caja. --}}
@@ -639,15 +650,15 @@
                             x-show="p.hay !== null && p.hay !== undefined"
                             x-bind:class="{ 'pv-hay-nada': Number(p.hay ?? 0) <= 0, 'pv-hay-poco': Number(p.hay ?? 0) > 0 && hayPoco(p) }"
                         >
-                            <span x-text="etiquetaHay(p) === 'existencia' ? 'sin' : etiquetaHay(p)"></span>
-                            <strong x-text="Number(p.hay ?? 0) > 0 ? enCajas(p.hay, p.caja) : 'existencia'"></strong>
+                            <span x-text="etiquetaHay(p)[0]"></span>
+                            <strong x-text="etiquetaHay(p)[1]"></strong>
                         </span>
                     </button>
                 </template>
 
                 <div class="pv-aviso" x-show="buscado && resultados.length === 0" x-text="sinBodega()
                     ? 'Escoja arriba la bodega que despacha para ver lo que hay.'
-                    : (@js($config['controlar']) ? 'No hay en la bodega productos con ese código o nombre.' : 'No hay productos activos con ese código o nombre.')"></div>
+                    : (@js($config['controlar']) ? 'No hay disponible en la bodega ningún producto con ese código o nombre.' : 'No hay productos activos con ese código o nombre.')"></div>
                 <div class="pv-aviso" x-show="! buscado && buscar.trim().length === 1">Escriba al menos 2 letras (o el código).</div>
             </div>
         </div>
@@ -656,7 +667,7 @@
         <div class="pv-ultimo" x-show="ultimo && lineas.length === 0" x-cloak>
             <div>
                 <div class="pv-ultimo-titulo" x-text="'Último pedido de este cliente: ' + (ultimo?.numero ?? '') + ' del ' + (ultimo?.fecha ?? '')"></div>
-                <div class="pv-ultimo-detalle" x-text="(ultimo ? Object.keys(ultimo.productos).length : 0) + ' productos, con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + (@js($config['controlar']) ? ' no se agregan: ya no se venden o no hay en la bodega)' : ' ya no se venden)') : '') + '.'"></div>
+                <div class="pv-ultimo-detalle" x-text="(ultimo ? Object.keys(ultimo.productos).length : 0) + ' productos, con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + (@js($config['controlar']) ? ' no se agregan: ya no se venden o no hay disponible en la bodega)' : ' ya no se venden)') : '') + '.'"></div>
             </div>
             <button type="button" x-on:click="repetirUltimo()">Agregar los mismos productos</button>
         </div>
@@ -695,8 +706,8 @@
                         </div>
 
                         <div class="pv-linea-precio" x-text="precioDe(id)"></div>
-                        <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]) }" x-text="'Hay ' + enCajas(hayDe(id), productos[id]?.caja) + (sinBodegaEscogida() ? ' entre todas las bodegas' : ' en la bodega')"></div>
-                        <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: en la bodega hay ' + enCajas(hayDe(id), productos[id]?.caja)"></div>
+                        <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]), 'pv-hay-nada': (hayDe(id) ?? 0) <= 0 }" x-text="textoHay(id)"></div>
+                        <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: disponible ' + enCajas(Math.max(0, hayDe(id) ?? 0), productos[id]?.caja)"></div>
 
                         <div class="pv-cantidades">
                             <div class="pv-cantidad" x-show="tieneCajas(id)">

@@ -53,6 +53,7 @@
         td { border-bottom: 1px solid #e5e7eb; padding: 5px 4px; vertical-align: top; }
         .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .falta { color: #b91c1c; font-weight: 600; }
+        .nota-falta { font-size: 11px; }
         .tachado { color: #9ca3af; text-decoration: line-through; }
         .promo { color: #15803d; }
 
@@ -194,7 +195,12 @@
             @foreach ($pedido->items as $item)
                 <tr @class(['tachado' => $validado && $item->cantidad_despachada === 0])>
                     <td>{{ $item->producto->codigo }}</td>
-                    <td>{{ $item->producto->descripcion }}@if (! $item->gravado) <span class="muted">(E)</span>@endif</td>
+                    <td>
+                        {{ $item->producto->descripcion }}@if (! $item->gravado) <span class="muted">(E)</span>@endif
+                        @if ($validado && ($falta = $item->faltaEnPalabras()))
+                            <br><span class="falta nota-falta">{{ $falta }}</span>
+                        @endif
+                    </td>
                     <td>{{ $item->unidad->getLabel() }}</td>
                     <td class="num">{{ $item->cantidad }}</td>
                     <td class="num @if ($item->faltante() > 0) falta @endif">{{ $item->cantidadFacturable() }}</td>

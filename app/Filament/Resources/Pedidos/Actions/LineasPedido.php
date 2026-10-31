@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Actions;
 
+use App\Domain\Inventario\Disponible;
+use App\Domain\Inventario\SalidaDePedido as SalidaDeBodega;
 use App\Enums\UnidadVenta;
 use App\Filament\Schemas\Components\SalidaDePedido;
 use App\Models\Configuracion;
@@ -31,25 +33,25 @@ final class LineasPedido
 
     /**
      * Para llenar el modal: lo que se pidió, lo que hay en la bodega y lo que
-     * sale ahora.
+     * sale ahora. Con eso el modal va diciendo cuánto quedaría en la bodega.
      *
      * Al validar con "controlar existencias" encendido, "Sale" ya viene con
      * lo que alcanza (repartiendo la existencia entre la caja y las unidades
      * del mismo producto, en orden).
+     *
+     * Al corregir, "salio_unidades" es lo que este pedido ya sacó de la
+     * bodega (regresa si sale menos). Los validados antes de que hubiera
+     * inventario no sacaron nada y corregirlos no mueve la existencia
+     * ("mueve" = false).
      *
      * @return array{items: list<array<string, mixed>>}
      */
     public static function datos(Pedido $pedido, bool $segunExistencia = false): array
     {
         $items = $pedido->items()->with('producto')->orderBy('id')->get();
-
-        /** @var array<int, int> $hay */
-        $hay = Existencia::query()
-            ->where('bodega_id', $pedido->bodega_id)
-            ->whereIn('producto_id', $items->pluck('producto_id'))
-            ->pluck('cantidad', 'producto_id')
-            ->map(fn (mixed $cantidad): int => (int) $cantidad)
-            ->all();
+        $hay = Disponible::existencia($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all());
+        $mueve = ! $pedido->estaValidado() || SalidaDeBodega::yaSalio($pedido);
+        $salio = $pedido->estaValidado() && $mueve ? SalidaDeBodega::yaSalido($pedido) : [];
 
         $ajustar = $segunExistencia && Configuracion::actual()->controlar_existencias;
         $quedan = $hay;
@@ -66,21 +68,53 @@ final class LineasPedido
             }
 
             $filas[] = [
-                'id'           => $item->id,
-                'producto'     => $item->producto->etiqueta(),
-                'codigo'       => $item->producto->codigo,
-                'descripcion'  => $item->producto->descripcion,
-                'unidad'       => $item->unidad->getLabel(),
-                'sigla'        => $item->unidad === UnidadVenta::Caja ? 'CJ' : 'UN',
-                'por_unidad'   => $item->producto->unidadesEn($item->unidad),
-                'cantidad'     => $item->cantidad,
-                'hay'          => Existencia::enCajas($hay[$item->producto_id] ?? 0, $item->producto->unidades_por_caja),
-                'hay_unidades' => $hay[$item->producto_id] ?? 0,
-                'sale'         => $sale,
+                'id'             => $item->id,
+                'producto_id'    => $item->producto_id,
+                'producto'       => $item->producto->etiqueta(),
+                'codigo'         => $item->producto->codigo,
+                'descripcion'    => $item->producto->descripcion,
+                'unidad'         => $item->unidad->getLabel(),
+                'es_caja'        => $item->unidad === UnidadVenta::Caja,
+                'sigla'          => $item->unidad === UnidadVenta::Caja ? 'CJ' : 'UN',
+                'por_unidad'     => $item->producto->unidadesEn($item->unidad),
+                'por_caja'       => $item->producto->unidades_por_caja,
+                'cantidad'       => $item->cantidad,
+                'hay'            => Existencia::enCajas($hay[$item->producto_id] ?? 0, $item->producto->unidades_por_caja),
+                'hay_unidades'   => $hay[$item->producto_id] ?? 0,
+                'salio_unidades' => $salio[$item->producto_id] ?? 0,
+                'mueve'          => $mueve,
+                'sale'           => $sale,
             ];
         }
 
         return ['items' => $filas];
+    }
+
+    /**
+     * Para el aviso al validar: "Sale completo." o "No va completo: ACEITE…
+     * (falta 1 caja de 3); JABON… (no sale: pidió 2 unidades)."
+     */
+    public static function incompletas(Pedido $pedido): string
+    {
+        $partes = [];
+
+        foreach ($pedido->items()->with('producto')->orderBy('id')->get() as $item) {
+            $falta = $item->faltaEnPalabras(corto: true);
+
+            if ($falta !== null) {
+                $partes[] = "{$item->producto->descripcion} ({$falta})";
+            }
+        }
+
+        $partes = collect($partes);
+
+        if ($partes->isEmpty()) {
+            return 'Sale completo.';
+        }
+
+        $mas = $partes->count() > 4 ? ' y '.($partes->count() - 4).' más' : '';
+
+        return 'No va completo: '.$partes->take(4)->implode('; ').$mas.'.';
     }
 
     /**

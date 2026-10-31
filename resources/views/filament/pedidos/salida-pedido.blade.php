@@ -1,8 +1,12 @@
 {{--
     Validar y Corregir: cuánto sale de cada línea (App\Filament\Schemas\Components\SalidaDePedido).
 
-    Una fila por línea: nombre, código, lo que pidió y lo que hay; a un lado
-    − Sale + y "No hay" (la deja en 0) o "Sí hay" (la regresa a lo pedido).
+    Una fila por línea: si es CAJA o UNIDAD, el nombre, lo que pidió y, del
+    producto, cuánto hay en la bodega, cuánto saca este pedido y cuánto
+    quedaría (se recalcula al tocar). A un lado − Sale + y "No hay" (la deja
+    en 0) o "Sí hay" (la regresa a lo pedido). Lo que no va completo se dice
+    en palabras ("falta 1 caja de 3") en la fila y en un resumen abajo.
+
     Todo pasa en el teléfono (Alpine); al servidor solo va al confirmar. Los
     estilos van aquí mismo, sin compilar.
 --}}
@@ -15,8 +19,8 @@
 <x-dynamic-component :component="$getFieldWrapperView()" :field="$field">
     @once
         <style>
-            .sp { --sp-tenue: var(--gray-500); --sp-linea: var(--gray-100); --sp-borde: rgb(3 7 18 / 0.08); display: grid; gap: 0.5rem; font-size: 0.875rem; }
-            .dark .sp { --sp-tenue: var(--gray-400); --sp-linea: rgb(255 255 255 / 0.06); --sp-borde: rgb(255 255 255 / 0.1); }
+            .sp { --sp-tenue: var(--gray-500); --sp-linea: var(--gray-100); --sp-borde: rgb(3 7 18 / 0.08); --sp-suave: var(--gray-50); display: grid; gap: 0.5rem; font-size: 0.875rem; }
+            .dark .sp { --sp-tenue: var(--gray-400); --sp-linea: rgb(255 255 255 / 0.06); --sp-borde: rgb(255 255 255 / 0.1); --sp-suave: rgb(255 255 255 / 0.03); }
 
             .sp-resumen { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--sp-tenue); }
             .sp-resumen-ok { color: var(--success-600); }
@@ -28,27 +32,46 @@
             .sp-fila { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.6rem; padding: 0.75rem 0.875rem; border-bottom: 1px solid var(--sp-linea); transition: background-color 0.2s ease; }
             .sp-fila:last-child { border-bottom: 0; }
             .sp-fila.sp-fila-nada { background: color-mix(in oklab, var(--danger-500) 6%, transparent); }
+            .sp-fila.sp-fila-parcial { background: color-mix(in oklab, var(--warning-500) 5%, transparent); }
             /* Pantalla grande: el texto a la izquierda y Sale a la derecha, en un renglón. */
             @media (min-width: 640px) {
                 .sp-fila { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 1rem; }
             }
 
-            .sp-texto { min-width: 0; display: grid; gap: 0.15rem; }
-            .sp-nombre { font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+            .sp-texto { min-width: 0; display: grid; gap: 0.3rem; }
+            .sp-cabeza { display: flex; align-items: flex-start; gap: 0.5rem; }
+            /* CAJA ×48 (lleno) o UNIDAD (borde): que no se confundan. */
+            .sp-unidad { flex-shrink: 0; margin-top: 0.05rem; padding: 0.1rem 0.4rem; border-radius: 0.375rem; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.03em; line-height: 1.4; white-space: nowrap; color: var(--primary-700); outline: 1px solid color-mix(in oklab, var(--primary-500) 50%, transparent); background: color-mix(in oklab, var(--primary-500) 10%, transparent); }
+            .dark .sp-unidad { color: var(--primary-200); }
+            .sp-unidad.sp-unidad-caja, .dark .sp-unidad.sp-unidad-caja { color: #fff; background: var(--primary-600); outline-color: var(--primary-600); }
+            .sp-nombre { min-width: 0; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
             .sp-fila-nada .sp-nombre { text-decoration: line-through; color: var(--sp-tenue); }
             .sp-meta { display: flex; flex-wrap: wrap; gap: 0.1rem 0.65rem; font-size: 0.78rem; color: var(--sp-tenue); font-variant-numeric: tabular-nums; }
             .sp-meta strong { font-weight: 700; color: var(--gray-700); }
             .dark .sp-meta strong { color: var(--gray-200); }
-            .sp-alcanza { font-weight: 600; color: var(--success-600); }
-            .sp-poco { font-weight: 600; color: var(--warning-600); }
-            .sp-sin { font-weight: 600; color: var(--danger-600); }
-            .dark .sp-alcanza { color: var(--success-400); }
-            .dark .sp-poco { color: var(--warning-400); }
-            .dark .sp-sin { color: var(--danger-400); }
-            .sp-estado { font-size: 0.75rem; font-weight: 700; color: var(--warning-600); }
+
+            /* En bodega → este pedido → quedan */
+            .sp-bodega { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: 0.5rem; background: var(--sp-suave); outline: 1px solid var(--sp-borde); }
+            .sp-bodega.sp-bodega-sola { grid-template-columns: minmax(0, 1fr); }
+            .sp-dato { min-width: 0; display: grid; gap: 0.05rem; padding: 0.35rem 0.55rem; }
+            .sp-dato + .sp-dato { border-inline-start: 1px solid var(--sp-borde); }
+            .sp-dato span { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--sp-tenue); }
+            .sp-dato strong { font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .sp-dato.sp-sale strong { color: var(--primary-600); }
+            .dark .sp-dato.sp-sale strong { color: var(--primary-400); }
+            .sp-dato.sp-regresa strong { color: var(--success-600); }
+            .dark .sp-dato.sp-regresa strong { color: var(--success-400); }
+            .sp-dato.sp-negativo strong { color: var(--danger-600); }
+            .dark .sp-dato.sp-negativo strong { color: var(--danger-400); }
+            .sp-dato.sp-justo strong { color: var(--warning-600); }
+            .dark .sp-dato.sp-justo strong { color: var(--warning-400); }
+
+            .sp-estado { font-size: 0.78rem; font-weight: 700; color: var(--warning-600); }
             .dark .sp-estado { color: var(--warning-400); }
             .sp-fila-nada .sp-estado { color: var(--danger-600); }
             .dark .sp-fila-nada .sp-estado { color: var(--danger-400); }
+            .sp-no-alcanza { font-size: 0.75rem; font-weight: 600; color: var(--danger-600); }
+            .dark .sp-no-alcanza { color: var(--danger-400); }
 
             /* − Sale + */
             .sp-control { display: flex; align-items: center; gap: 0.5rem; }
@@ -62,7 +85,7 @@
             .sp-stepper input { width: 3.25rem; padding: 0; border: 0; background: transparent; text-align: center; font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
             .sp-stepper input:focus { outline: none; box-shadow: none; }
             .sp-stepper input::-webkit-outer-spin-button, .sp-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-            .sp-sigla { min-width: 1.5rem; font-size: 0.75rem; font-weight: 700; color: var(--sp-tenue); }
+            .sp-sigla { min-width: 3.5rem; font-size: 0.75rem; font-weight: 700; color: var(--sp-tenue); }
 
             .sp-boton { margin-inline-start: auto; min-width: 5.25rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
             .sp-no { color: var(--danger-600); outline: 1px solid color-mix(in oklab, var(--danger-500) 40%, transparent); }
@@ -73,6 +96,14 @@
             @media (min-width: 640px) {
                 .sp-boton { margin-inline-start: 0.25rem; }
             }
+
+            /* Resumen de lo que no va completo, antes de confirmar. */
+            .sp-incompletas { display: grid; gap: 0.3rem; padding: 0.7rem 0.875rem; border-radius: 0.75rem; font-size: 0.8rem; line-height: 1.4; color: var(--warning-800); background: color-mix(in oklab, var(--warning-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--warning-500) 40%, transparent); }
+            .dark .sp-incompletas { color: var(--warning-300); }
+            .sp-incompletas > strong { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+            .sp-incompletas li { list-style: none; overflow-wrap: anywhere; }
+            .sp-incompletas ul { display: grid; gap: 0.2rem; margin: 0; padding: 0; }
+            .sp-incompletas b { font-weight: 700; }
         </style>
     @endonce
 
@@ -104,53 +135,118 @@
                 this.poner(fila, this.n(fila.sale) + paso)
             },
 
-            salen() {
-                return this.filas.filter((fila) => this.n(fila.sale) > 0).length
+            {{-- "2 CJ + 5 UN", igual que Existencia::enCajas. --}}
+            enCajas(unidades, porCaja) {
+                unidades = this.n(unidades)
+                porCaja = Math.max(1, this.n(porCaja))
+
+                if (unidades === 0) {
+                    return '0'
+                }
+
+                const signo = unidades < 0 ? '-' : ''
+                const resto = Math.abs(unidades)
+
+                if (porCaja <= 1) {
+                    return signo + resto + ' UN'
+                }
+
+                const partes = []
+                const cajas = Math.floor(resto / porCaja)
+                const sueltas = resto % porCaja
+
+                if (cajas > 0) partes.push(cajas + ' CJ')
+                if (sueltas > 0) partes.push(sueltas + ' UN')
+
+                return signo + partes.join(' + ')
             },
 
-            completo() {
-                return this.filas.every((fila) => this.n(fila.sale) >= this.n(fila.cantidad))
+            {{-- "1 caja", "3 cajas", "1 unidad", "5 unidades". --}}
+            palabras(cantidad, fila) {
+                cantidad = this.n(cantidad)
+
+                return cantidad + ' ' + (fila.es_caja ? (cantidad === 1 ? 'caja' : 'cajas') : (cantidad === 1 ? 'unidad' : 'unidades'))
             },
 
-            {{-- Al validar: verde si alcanza para lo pedido, ámbar si no, rojo si no hay. --}}
-            claseHay(fila) {
-                if (! this.paraValidar) {
+            {{-- Unidades que saca este pedido de ese producto (si viene en caja y en unidad, las dos). --}}
+            saleDelProducto(fila) {
+                return this.filas
+                    .filter((otra) => this.n(otra.producto_id) === this.n(fila.producto_id))
+                    .reduce((total, otra) => total + this.n(otra.sale) * Math.max(1, this.n(otra.por_unidad)), 0)
+            },
+
+            {{-- Lo que cambia en la bodega: al validar sale todo; al corregir, la diferencia con lo que ya salió. --}}
+            cambio(fila) {
+                return this.saleDelProducto(fila) - (this.paraValidar ? 0 : this.n(fila.salio_unidades))
+            },
+
+            quedan(fila) {
+                return this.n(fila.hay_unidades) - (fila.mueve ? this.cambio(fila) : 0)
+            },
+
+            {{-- "No sale: pidió 2 cajas" / "No va completo: falta 1 caja de 3"; vacío si va completa. --}}
+            estado(fila) {
+                const sale = this.n(fila.sale)
+                const pidio = this.n(fila.cantidad)
+
+                if (sale === 0) {
+                    return 'No sale: pidió ' + this.palabras(pidio, fila)
+                }
+
+                if (sale >= pidio) {
                     return ''
                 }
 
-                const hay = this.n(fila.hay_unidades)
+                const falta = pidio - sale
 
-                if (hay <= 0) {
-                    return 'sp-sin'
-                }
+                return 'No va completo: ' + (falta === 1 ? 'falta ' : 'faltan ') + this.palabras(falta, fila) + ' de ' + pidio
+            },
 
-                return hay < this.n(fila.cantidad) * Math.max(1, this.n(fila.por_unidad)) ? 'sp-poco' : 'sp-alcanza'
+            incompletas() {
+                return this.filas.filter((fila) => this.n(fila.sale) < this.n(fila.cantidad))
             },
         }"
     >
         <div class="sp-resumen">
             <span x-text="filas.length === 1 ? '1 producto' : filas.length + ' productos'">{{ count($filas) === 1 ? '1 producto' : count($filas).' productos' }}</span>
             <span
-                x-bind:class="completo() ? 'sp-resumen-ok' : 'sp-resumen-falta'"
-                x-text="completo() ? 'Sale completo' : (salen() === 0 ? 'No sale nada' : 'Salen ' + salen() + ' de ' + filas.length)"
+                x-bind:class="incompletas().length === 0 ? 'sp-resumen-ok' : 'sp-resumen-falta'"
+                x-text="incompletas().length === 0 ? 'Sale completo' : (incompletas().length === 1 ? '1 no va completo' : incompletas().length + ' no van completos')"
             ></span>
         </div>
 
         <ul class="sp-lista">
             <template x-for="fila in filas" x-bind:key="fila.id">
-                <li class="sp-fila" x-bind:class="{ 'sp-fila-nada': n(fila.sale) === 0 }">
+                <li class="sp-fila" x-bind:class="{ 'sp-fila-nada': n(fila.sale) === 0, 'sp-fila-parcial': n(fila.sale) > 0 && n(fila.sale) < n(fila.cantidad) }">
                     <div class="sp-texto">
-                        <div class="sp-nombre" x-text="fila.descripcion ?? fila.producto"></div>
+                        <div class="sp-cabeza">
+                            <span class="sp-unidad" x-bind:class="{ 'sp-unidad-caja': fila.es_caja }" x-text="fila.es_caja ? 'CAJA ×' + fila.por_caja : 'UNIDAD'"></span>
+                            <span class="sp-nombre" x-text="fila.descripcion ?? fila.producto"></span>
+                        </div>
+
                         <div class="sp-meta">
                             <span x-show="fila.codigo" x-text="fila.codigo"></span>
-                            <span>Pidió <strong x-text="fila.cantidad + ' ' + (fila.sigla ?? '')"></strong></span>
-                            <span x-bind:class="claseHay(fila)" x-text="'Hay ' + fila.hay"></span>
+                            <span>Pidió <strong x-text="palabras(fila.cantidad, fila)"></strong></span>
                         </div>
-                        <div
-                            class="sp-estado"
-                            x-show="n(fila.sale) < n(fila.cantidad)"
-                            x-text="n(fila.sale) === 0 ? 'No sale' : 'Faltan ' + (n(fila.cantidad) - n(fila.sale)) + ' ' + (fila.sigla ?? '')"
-                        ></div>
+
+                        {{-- Del producto en la bodega del pedido. --}}
+                        <div class="sp-bodega" x-bind:class="{ 'sp-bodega-sola': ! fila.mueve }">
+                            <div class="sp-dato">
+                                <span>En bodega</span>
+                                <strong x-text="enCajas(fila.hay_unidades, fila.por_caja)"></strong>
+                            </div>
+                            <div class="sp-dato" x-show="fila.mueve" x-bind:class="cambio(fila) < 0 ? 'sp-regresa' : 'sp-sale'">
+                                <span x-text="paraValidar ? 'Este pedido' : (cambio(fila) < 0 ? 'Regresan' : (cambio(fila) > 0 ? 'Salen más' : 'Sin cambio'))"></span>
+                                <strong x-text="(cambio(fila) > 0 ? '−' : (cambio(fila) < 0 ? '+' : '')) + enCajas(Math.abs(cambio(fila)), fila.por_caja)"></strong>
+                            </div>
+                            <div class="sp-dato" x-show="fila.mueve" x-bind:class="{ 'sp-negativo': quedan(fila) < 0, 'sp-justo': quedan(fila) === 0 }">
+                                <span>Quedan</span>
+                                <strong x-text="enCajas(quedan(fila), fila.por_caja)"></strong>
+                            </div>
+                        </div>
+
+                        <div class="sp-no-alcanza" x-show="fila.mueve && quedan(fila) < 0" x-text="'No alcanza: faltan ' + enCajas(-quedan(fila), fila.por_caja) + ' en la bodega'"></div>
+                        <div class="sp-estado" x-show="estado(fila) !== ''" x-text="estado(fila)"></div>
                     </div>
 
                     <div class="sp-control">
@@ -168,12 +264,21 @@
                             >
                             <button type="button" class="sp-paso" aria-label="Uno más" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= n(fila.cantidad)">{{ svg('heroicon-m-plus') }}</button>
                         </div>
-                        <span class="sp-sigla" x-text="fila.sigla ?? ''"></span>
+                        <span class="sp-sigla" x-text="fila.es_caja ? (n(fila.sale) === 1 ? 'caja' : 'cajas') : (n(fila.sale) === 1 ? 'unidad' : 'unidades')"></span>
                         <button type="button" class="sp-boton sp-no" x-show="n(fila.sale) > 0" x-on:click="fila.sale = 0">No hay</button>
                         <button type="button" class="sp-boton sp-si" x-show="n(fila.sale) === 0" x-on:click="fila.sale = n(fila.cantidad)">Sí hay</button>
                     </div>
                 </li>
             </template>
         </ul>
+
+        <div class="sp-incompletas" x-show="incompletas().length > 0" x-cloak>
+            <strong>No va completo</strong>
+            <ul>
+                <template x-for="fila in incompletas()" x-bind:key="'falta-' + fila.id">
+                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estado(fila).replace(/^No va completo: /, '').replace(/^No sale/, 'no sale')"></span></li>
+                </template>
+            </ul>
+        </div>
     </div>
 </x-dynamic-component>

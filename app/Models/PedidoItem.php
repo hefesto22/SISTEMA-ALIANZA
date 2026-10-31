@@ -106,4 +106,40 @@ class PedidoItem extends Model
     {
         return $this->cantidad_despachada === null ? 0 : max(0, $this->cantidad - $this->cantidad_despachada);
     }
+
+    /**
+     * Lo que no va completo, en palabras para que se sepa si fue la caja o la
+     * unidad: "No sale: pidió 2 cajas" o "No va completo: falta 1 caja de 3"
+     * (corto: "no sale: pidió 2 cajas", "falta 1 caja de 3"). Null si va
+     * completa o todavía no se valida.
+     */
+    public function faltaEnPalabras(bool $corto = false): ?string
+    {
+        if ($this->cantidad_despachada === 0) {
+            return ($corto ? 'no sale' : 'No sale').': pidió '.self::enPalabras($this->cantidad, $this->unidad);
+        }
+
+        $falta = $this->faltante();
+
+        if ($falta === 0) {
+            return null;
+        }
+
+        $texto = ($falta === 1 ? 'falta ' : 'faltan ').self::enPalabras($falta, $this->unidad).' de '.$this->cantidad;
+
+        return $corto ? $texto : 'No va completo: '.$texto;
+    }
+
+    /**
+     * "1 caja", "3 cajas", "1 unidad", "5 unidades".
+     */
+    public static function enPalabras(int $cantidad, UnidadVenta $unidad): string
+    {
+        $palabra = match ($unidad) {
+            UnidadVenta::Caja   => $cantidad === 1 ? 'caja' : 'cajas',
+            UnidadVenta::Unidad => $cantidad === 1 ? 'unidad' : 'unidades',
+        };
+
+        return "{$cantidad} {$palabra}";
+    }
 }
