@@ -15,7 +15,7 @@ use Spatie\Permission\PermissionRegistrar;
  * Roles de trabajo con sus permisos (formato Shield "Accion:Modelo").
  *
  *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI), compras e inventario de todas las bodegas, y usuarios.
- *  bodega        → actualiza precios, ve historial, promociones y rutas, valida e imprime (factura), registra compras y ajusta la existencia de su bodega.
+ *  bodega        → actualiza precios, ve historial y promociones, arma las rutas de su bodega, valida e imprime (factura), registra compras y ajusta la existencia de su bodega.
  *  vendedor      → consulta precios y promociones vigentes, maneja los clientes de sus rutas y su preventa.
  *
  * Ojo: al correrlo de nuevo, los permisos de estos tres roles vuelven a
@@ -54,7 +54,7 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Cliente', ['viewAny', 'view', 'create', 'update']),
                 ...$this->permisos('Pedido', ['viewAny', 'view', 'create', 'update', 'delete', 'validar']),
                 ...$this->permisos('Promocion', ['viewAny', 'view']),
-                ...$this->permisos('Ruta', ['viewAny', 'view']),
+                ...$this->permisos('Ruta', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Cai', ['viewAny', 'view']),
                 ...$this->permisos('Factura', ['viewAny', 'view']),
             ],

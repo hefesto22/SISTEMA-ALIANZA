@@ -296,7 +296,7 @@ test('administración arma una ruta con un departamento completo y sus vendedore
         ->and($otro->municipiosDeRuta())->toContain($this->sinuapa->id);
 });
 
-test('bodega solo ve las rutas de su bodega', function (): void {
+test('bodega solo ve las rutas de su bodega y solo esas puede cambiar', function (): void {
     $otraRuta = Ruta::factory()->cubre($this->sinuapa)->create();
 
     $encargado = User::factory()->create(['bodega_id' => $this->bodega->id]);
@@ -307,7 +307,71 @@ test('bodega solo ve las rutas de su bodega', function (): void {
     Livewire::test(ManageRutas::class)
         ->assertCanSeeTableRecords([$this->ruta])
         ->assertCanNotSeeTableRecords([$otraRuta])
-        ->assertActionHidden('create');
+        ->assertActionVisible('create');
+
+    expect($encargado->can('update', $this->ruta))->toBeTrue()
+        ->and($encargado->can('delete', $this->ruta))->toBeTrue()
+        ->and($encargado->can('update', $otraRuta))->toBeFalse()
+        ->and($encargado->can('delete', $otraRuta))->toBeFalse();
+
+    // Sin bodega asignada no puede armar rutas.
+    $sinBodega = User::factory()->create(['bodega_id' => null]);
+    $sinBodega->assignRole(Rol::Bodega->value);
+
+    expect($sinBodega->can('create', Ruta::class))->toBeFalse();
+});
+
+test('el encargado arma rutas de su bodega solo con sus vendedores', function (): void {
+    $otraBodega = Bodega::factory()->create();
+
+    $encargado = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $encargado->assignRole(Rol::Bodega->value);
+
+    $suyo = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $suyo->assignRole(Rol::Vendedor->value);
+
+    $deOtra = User::factory()->create(['bodega_id' => $otraBodega->id]);
+    $deOtra->assignRole(Rol::Vendedor->value);
+
+    $this->actingAs($encargado);
+
+    // La bodega no se escoge: queda la suya.
+    Livewire::test(ManageRutas::class)
+        ->mountAction('create')
+        ->assertFormFieldHidden('bodega_id');
+
+    Livewire::test(ManageRutas::class)
+        ->callAction('create', data: [
+            'nombre'     => 'Ruta Dolores',
+            'municipios' => [$this->dolores->id],
+            'vendedores' => [$suyo->id],
+        ])
+        ->assertHasNoActionErrors();
+
+    $ruta = Ruta::query()->where('nombre', 'RUTA DOLORES')->firstOrFail();
+
+    expect($ruta->bodega_id)->toBe($this->bodega->id)
+        ->and($ruta->vendedores()->pluck('users.id')->all())->toBe([$suyo->id])
+        ->and($suyo->municipiosDeRuta())->toBe([$this->dolores->id]);
+
+    // Un vendedor de otra bodega no se puede agregar.
+    Livewire::test(ManageRutas::class)
+        ->callAction('create', data: [
+            'nombre'     => 'Ruta Sinuapa',
+            'municipios' => [$this->sinuapa->id],
+            'vendedores' => [$deOtra->id],
+        ])
+        ->assertHasActionErrors(['vendedores']);
+
+    expect(Ruta::query()->where('nombre', 'RUTA SINUAPA')->exists())->toBeFalse();
+
+    // El nombre no se repite dentro de su bodega.
+    Livewire::test(ManageRutas::class)
+        ->callAction('create', data: [
+            'nombre'     => 'ruta dolores',
+            'municipios' => [$this->dolores->id],
+        ])
+        ->assertHasActionErrors(['nombre' => 'unique']);
 });
 
 test('al vendedor se le asignan rutas desde Usuarios y solo a los vendedores les aparece', function (): void {

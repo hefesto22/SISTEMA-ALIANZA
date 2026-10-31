@@ -13,6 +13,7 @@ use App\Models\Ruta;
 use App\Models\User;
 use App\Support\Texto;
 use BackedEnum;
+use Closure;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
@@ -36,6 +37,9 @@ use Illuminate\Validation\Rules\Unique;
 /**
  * Rutas de cada bodega: municipios que cubre y vendedores que la trabajan.
  * Cada vendedor solo ve y crea clientes de los municipios de sus rutas.
+ *
+ * Administración arma las de todas las bodegas; el encargado de bodega, las
+ * de la suya y solo con sus vendedores (la bodega no se escoge: es la suya).
  *
  * @extends \Filament\Resources\Resource<Ruta>
  */
@@ -68,7 +72,8 @@ class RutaResource extends Resource
                     ->relationship('bodega', 'nombre', fn (Builder $query): Builder => $query->where('activa', true))
                     ->preload()
                     ->required()
-                    ->live(),
+                    ->live()
+                    ->visible(fn (): bool => Acceso::veTodo()),
                 TextInput::make('nombre')
                     ->label('Nombre de la ruta')
                     ->placeholder('Ej. Ruta 1 - Santa Rosa centro')
@@ -76,7 +81,8 @@ class RutaResource extends Resource
                     ->maxLength(120)
                     // Se guarda en mayúsculas: se compara igual para no chocar con "RUTA 1" vs "ruta 1".
                     ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : $state)
-                    ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('bodega_id', $get('bodega_id'))),
+                    ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('bodega_id', self::bodegaDe($get('bodega_id'))))
+                    ->columnSpan(fn (): int => Acceso::veTodo() ? 1 : 2),
                 Select::make('agregar_departamento')
                     ->label('Agregar un departamento completo')
                     ->options(fn (): array => Departamento::opciones())
@@ -113,10 +119,12 @@ class RutaResource extends Resource
                     ->relationship(
                         'vendedores',
                         'name',
-                        // Vendedores, más los que ya tenga la ruta aunque después les cambiaran el rol.
+                        // Vendedores (el encargado, solo los de su bodega), más los que ya tenga
+                        // la ruta aunque después les cambiaran el rol o la bodega.
                         fn (Builder $query, ?Ruta $record): Builder => $query
                             ->where(function (Builder $q) use ($record): void {
-                                $q->whereHas('roles', fn (Builder $r): Builder => $r->where('name', Rol::Vendedor->value));
+                                $q->whereHas('roles', fn (Builder $r): Builder => $r->where('name', Rol::Vendedor->value))
+                                    ->when(! Acceso::veTodo(), fn (Builder $b): Builder => $b->where('users.bodega_id', Acceso::usuario()?->bodega_id));
 
                                 if ($record !== null) {
                                     $q->orWhereIn('users.id', DB::table('ruta_vendedor')->where('ruta_id', $record->id)->select('user_id'));
@@ -129,6 +137,11 @@ class RutaResource extends Resource
                     ->searchable(['name', 'codigo'])
                     ->preload()
                     ->helperText('Para que un vendedor cubra a otro (vacaciones, suplencia), agréguelo aquí mientras tanto.')
+                    ->rule(fn (?Ruta $record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+                        if (! self::sonSusVendedores($value, $record)) {
+                            $fail('Solo puede agregar vendedores de su bodega.');
+                        }
+                    })
                     ->columnSpanFull(),
                 Toggle::make('activa')
                     ->default(true)
@@ -189,12 +202,16 @@ class RutaResource extends Resource
                     ->visible(fn (): bool => Acceso::veTodo()),
                 SelectFilter::make('vendedor')
                     ->label('Vendedor')
-                    ->relationship('vendedores', 'name')
+                    ->relationship('vendedores', 'name', fn (Builder $query): Builder => $query
+                        ->whereHas('roles', fn (Builder $r): Builder => $r->where('name', Rol::Vendedor->value))
+                        ->when(! Acceso::veTodo(), fn (Builder $b): Builder => $b->where('users.bodega_id', Acceso::usuario()?->bodega_id)))
                     ->searchable(),
                 TernaryFilter::make('activa')
                     ->default(true),
             ])
-            ->emptyStateDescription('Cree una ruta por cada zona que se trabaja: escoja la bodega, los municipios y los vendedores.')
+            ->emptyStateDescription(fn (): string => Acceso::veTodo()
+                ? 'Cree una ruta por cada zona que se trabaja: escoja la bodega, los municipios y los vendedores.'
+                : 'Cree una ruta por cada zona que trabajan sus vendedores: escoja los municipios y los vendedores.')
             ->recordActions([
                 EditAction::make()
                     ->modalWidth(Width::FourExtraLarge),
@@ -207,6 +224,68 @@ class RutaResource extends Resource
         return [
             'index' => ManageRutas::route('/'),
         ];
+    }
+
+    /**
+     * Al crear: la ruta del encargado queda en su bodega (no la escoge).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public static function completar(array $data): array
+    {
+        $usuario = Acceso::usuario();
+
+        if ($usuario === null || $usuario->veTodasLasBodegas()) {
+            return $data;
+        }
+
+        $data['bodega_id'] = $usuario->bodega_id;
+
+        return $data;
+    }
+
+    /**
+     * La bodega de la ruta que se arma: la escogida (administración) o la
+     * del encargado.
+     */
+    private static function bodegaDe(mixed $escogida): ?int
+    {
+        $usuario = Acceso::usuario();
+
+        if ($usuario !== null && ! $usuario->veTodasLasBodegas()) {
+            return $usuario->bodega_id;
+        }
+
+        return is_numeric($escogida) ? (int) $escogida : null;
+    }
+
+    /**
+     * El encargado solo agrega vendedores de su bodega; los que la ruta ya
+     * tenía se pueden quedar.
+     */
+    private static function sonSusVendedores(mixed $vendedores, ?Ruta $ruta): bool
+    {
+        $usuario = Acceso::usuario();
+        $ids = array_values(array_filter(is_array($vendedores) ? $vendedores : [], is_numeric(...)));
+
+        if ($usuario === null || $usuario->veTodasLasBodegas() || $ids === []) {
+            return true;
+        }
+
+        $yaEstaban = $ruta !== null ? $ruta->vendedores()->pluck('users.id')->all() : [];
+        $nuevos = array_diff(array_map(intval(...), $ids), array_map(intval(...), $yaEstaban));
+
+        if ($nuevos === []) {
+            return true;
+        }
+
+        return User::query()
+            ->whereKey($nuevos)
+            ->where('bodega_id', $usuario->bodega_id)
+            ->whereHas('roles', fn (Builder $r): Builder => $r->where('name', Rol::Vendedor->value))
+            ->count() === count($nuevos);
     }
 
     /**

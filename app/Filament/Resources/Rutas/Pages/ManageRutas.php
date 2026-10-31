@@ -17,7 +17,8 @@ class ManageRutas extends ManageRecords
     {
         return [
             CreateAction::make()
-                ->modalWidth(Width::FourExtraLarge),
+                ->modalWidth(Width::FourExtraLarge)
+                ->mutateDataUsing(fn (array $data): array => RutaResource::completar($data)),
         ];
     }
 }

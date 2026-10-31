@@ -4,69 +4,83 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Ruta;
+use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
-use Illuminate\Foundation\Auth\User as AuthUser;
 
 /**
- * Permisos en formato Shield ("Accion:Modelo"); se asignan por rol
- * desde el panel (Roles) o con RolesSistemaSeeder.
+ * Permisos Shield ("Accion:Ruta") + de quién es cada ruta:
+ *  - administración arma las rutas de todas las bodegas;
+ *  - el encargado de bodega arma las de SU bodega para sus vendedores.
  */
 class RutaPolicy
 {
     use HandlesAuthorization;
 
-    public function viewAny(AuthUser $authUser): bool
+    public function viewAny(User $user): bool
     {
-        return $authUser->can('ViewAny:Ruta');
+        return $user->can('ViewAny:Ruta');
     }
 
-    public function view(AuthUser $authUser): bool
+    public function view(User $user, Ruta $ruta): bool
     {
-        return $authUser->can('View:Ruta');
+        return $user->can('View:Ruta') && $this->esDeSuBodega($user, $ruta);
     }
 
-    public function create(AuthUser $authUser): bool
+    /**
+     * El encargado necesita tener bodega: la ruta queda en la suya.
+     */
+    public function create(User $user): bool
     {
-        return $authUser->can('Create:Ruta');
+        return $user->can('Create:Ruta') && ($user->veTodasLasBodegas() || $user->bodega_id !== null);
     }
 
-    public function update(AuthUser $authUser): bool
+    public function update(User $user, Ruta $ruta): bool
     {
-        return $authUser->can('Update:Ruta');
+        return $user->can('Update:Ruta') && $this->esDeSuBodega($user, $ruta);
     }
 
-    public function delete(AuthUser $authUser): bool
+    public function delete(User $user, Ruta $ruta): bool
     {
-        return $authUser->can('Delete:Ruta');
+        return $user->can('Delete:Ruta') && $this->esDeSuBodega($user, $ruta);
     }
 
-    public function restore(AuthUser $authUser): bool
+    public function restore(User $user, Ruta $ruta): bool
     {
-        return $authUser->can('Restore:Ruta');
+        return $user->can('Restore:Ruta') && $this->esDeSuBodega($user, $ruta);
     }
 
-    public function forceDelete(AuthUser $authUser): bool
+    public function forceDelete(User $user, Ruta $ruta): bool
     {
-        return $authUser->can('ForceDelete:Ruta');
+        return $user->can('ForceDelete:Ruta') && $this->esDeSuBodega($user, $ruta);
     }
 
-    public function forceDeleteAny(AuthUser $authUser): bool
+    public function forceDeleteAny(User $user): bool
     {
-        return $authUser->can('ForceDeleteAny:Ruta');
+        return $user->can('ForceDeleteAny:Ruta');
     }
 
-    public function restoreAny(AuthUser $authUser): bool
+    public function restoreAny(User $user): bool
     {
-        return $authUser->can('RestoreAny:Ruta');
+        return $user->can('RestoreAny:Ruta');
     }
 
-    public function replicate(AuthUser $authUser): bool
+    public function replicate(User $user, Ruta $ruta): bool
     {
-        return $authUser->can('Replicate:Ruta');
+        return $user->can('Replicate:Ruta') && $this->esDeSuBodega($user, $ruta);
     }
 
-    public function reorder(AuthUser $authUser): bool
+    public function reorder(User $user): bool
     {
-        return $authUser->can('Reorder:Ruta');
+        return $user->can('Reorder:Ruta');
+    }
+
+    /**
+     * Administración, o el encargado de la bodega de la ruta.
+     */
+    private function esDeSuBodega(User $user, Ruta $ruta): bool
+    {
+        return $user->veTodasLasBodegas()
+            || ($user->bodega_id !== null && $ruta->bodega_id === $user->bodega_id);
     }
 }
