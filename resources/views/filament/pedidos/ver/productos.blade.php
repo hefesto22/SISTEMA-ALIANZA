@@ -35,6 +35,8 @@
 
                         @if ($falta = $item->faltaEnPalabras())
                             <div class="vp-falta">{{ $falta }}</div>
+                        @elseif ($mas = $item->deMasEnPalabras())
+                            <div class="vp-mas">{{ $mas }}</div>
                         @endif
 
                         @if ($item->descuento > 0)

@@ -199,6 +199,8 @@
                         {{ $item->producto->descripcion }}@if (! $item->gravado) <span class="muted">(E)</span>@endif
                         @if ($validado && ($falta = $item->faltaEnPalabras()))
                             <br><span class="falta nota-falta">{{ $falta }}</span>
+                        @elseif ($validado && ($mas = $item->deMasEnPalabras()))
+                            <br><span class="nota-falta">{{ $mas }}</span>
                         @endif
                     </td>
                     <td>{{ $item->unidad->getLabel() }}</td>

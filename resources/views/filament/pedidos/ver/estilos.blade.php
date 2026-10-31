@@ -75,6 +75,8 @@
         .vp-linea-total { flex-shrink: 0; font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .vp-falta { font-size: 0.75rem; font-weight: 600; color: var(--danger-600); }
         .dark .vp-falta { color: var(--danger-400); }
+        .vp-mas { font-size: 0.75rem; font-weight: 600; color: var(--info-600); }
+        .dark .vp-mas { color: var(--info-400); }
         .vp-ahorro { font-size: 0.75rem; font-weight: 600; color: var(--success-600); }
         .dark .vp-ahorro { color: var(--success-400); }
         .vp-linea.vp-no-salio .vp-cant { opacity: 0.45; }

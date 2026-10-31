@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Schemas\Components;
 
+use App\Domain\Pedidos\AjustarLineas;
 use Closure;
 use Filament\Forms\Components\Field;
 
@@ -17,8 +18,8 @@ use Filament\Forms\Components\Field;
  *
  * Estado: list<array{id: int, sale: int, ...}> como lo arma
  * App\Filament\Resources\Pedidos\Actions\LineasPedido::datos() (trae también
- * lo que se muestra). Lo que vale es id y sale; el dominio no deja que salga
- * más de lo pedido.
+ * lo que se muestra). Lo que vale es id y sale. Puede salir menos de lo
+ * pedido o más (el cliente pidió más); la fila lo dice.
  *
  * Vista: resources/views/filament/pedidos/salida-pedido.blade.php
  */
@@ -73,7 +74,7 @@ class SalidaDePedido extends Field
         $statePath = $this->getStatePath();
 
         $rules["{$statePath}.*.id"] = ['required', 'integer'];
-        $rules["{$statePath}.*.sale"] = ['required', 'integer', 'min:0'];
+        $rules["{$statePath}.*.sale"] = ['required', 'integer', 'min:0', 'max:'.AjustarLineas::MAXIMO];
     }
 
     public static function saleAlgo(mixed $filas): bool

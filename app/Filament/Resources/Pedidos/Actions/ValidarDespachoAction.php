@@ -16,8 +16,8 @@ use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 
 /**
- * Bodega revisa el pedido línea por línea: lo que no hay se marca "No hay"
- * y lo que no alcanzó se baja a lo que había. Al confirmar, el
+ * Bodega revisa el pedido línea por línea: lo que no hay se marca "No hay",
+ * lo que no alcanzó se baja y, si el cliente pidió más, se sube. Al confirmar, el
  * pedido se recalcula (precio según Configuración), sale de la existencia
  * de la bodega y queda Por imprimir.
  *
@@ -77,6 +77,6 @@ final class ValidarDespachoAction
             ? ' "Sale" ya viene con lo que alcanza en la bodega.'
             : '';
 
-        return "Marque \"No hay\" en lo que no hay y baje lo que no alcanzó.{$existencia} {$precio}; lo que sale se descuenta de la bodega y el pedido pasa a Por imprimir.";
+        return "Cambie lo que sale con − y +: \"No hay\" si no hay, menos si no alcanzó, más si el cliente pidió más.{$existencia} {$precio}; lo que sale se descuenta de la bodega y el pedido pasa a Por imprimir.";
     }
 }

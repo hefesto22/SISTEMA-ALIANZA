@@ -108,6 +108,31 @@ class PedidoItem extends Model
     }
 
     /**
+     * Lo que bodega mandó de más sobre lo pedido (0 si no).
+     */
+    public function deMas(): int
+    {
+        return $this->cantidad_despachada === null ? 0 : max(0, $this->cantidad_despachada - $this->cantidad);
+    }
+
+    /**
+     * "Va de más: 1 unidad más de lo pedido (pidió 2)" (corto: "+1 unidad,
+     * pidió 2"). Null si no salió de más.
+     */
+    public function deMasEnPalabras(bool $corto = false): ?string
+    {
+        $mas = $this->deMas();
+
+        if ($mas === 0) {
+            return null;
+        }
+
+        return $corto
+            ? '+'.self::enPalabras($mas, $this->unidad).', pidió '.$this->cantidad
+            : 'Va de más: '.self::enPalabras($mas, $this->unidad).' más de lo pedido (pidió '.$this->cantidad.')';
+    }
+
+    /**
      * Lo que no va completo, en palabras para que se sepa si fue la caja o la
      * unidad: "No sale: pidió 2 cajas" o "No va completo: falta 1 caja de 3"
      * (corto: "no sale: pidió 2 cajas", "falta 1 caja de 3"). Null si va

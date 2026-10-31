@@ -23,6 +23,9 @@ use Illuminate\Database\Eloquent\Builder;
  */
 final class Disponible
 {
+    /** Suma en unidades: la caja cuenta sus unidades (el ? es 'caja'). */
+    private const UNIDADES = 'SUM(CASE WHEN pedido_items.unidad = ? THEN pedido_items.cantidad * productos.unidades_por_caja ELSE pedido_items.cantidad END)';
+
     /**
      * [producto_id => unidades en la bodega].
      *
@@ -67,7 +70,7 @@ final class Disponible
             ->join('productos', 'productos.id', '=', 'pedido_items.producto_id')
             ->whereIn('pedido_items.producto_id', $productoIds)
             ->groupBy('pedido_items.producto_id')
-            ->selectRaw('pedido_items.producto_id, '.self::unidadesSql().' as total', [UnidadVenta::Caja->value])
+            ->selectRaw('pedido_items.producto_id, '.self::UNIDADES.' as total', [UnidadVenta::Caja->value])
             ->pluck('total', 'producto_id')
             ->map(fn (mixed $cantidad): int => (int) $cantidad)
             ->all();
@@ -113,7 +116,7 @@ final class Disponible
             ->when($bodegaId !== null, fn (Builder $query): Builder => $query->where('existencias.bodega_id', $bodegaId));
 
         $apartado = self::pendientes($bodegaId, $sinPedido)
-            ->selectRaw('COALESCE('.self::unidadesSql().', 0)', [UnidadVenta::Caja->value])
+            ->selectRaw('COALESCE('.self::UNIDADES.', 0)', [UnidadVenta::Caja->value])
             ->whereColumn('pedido_items.producto_id', 'productos.id');
 
         return $productos
@@ -134,13 +137,5 @@ final class Disponible
             ->where('pedidos.estado', EstadoPedido::Pendiente)
             ->when($bodegaId !== null, fn (Builder $query): Builder => $query->where('pedidos.bodega_id', $bodegaId))
             ->when($sinPedido !== null, fn (Builder $query): Builder => $query->where('pedidos.id', '!=', $sinPedido));
-    }
-
-    /**
-     * Suma en unidades: la caja cuenta sus unidades (lleva un ? para 'caja').
-     */
-    private static function unidadesSql(): string
-    {
-        return 'SUM(CASE WHEN pedido_items.unidad = ? THEN pedido_items.cantidad * productos.unidades_por_caja ELSE pedido_items.cantidad END)';
     }
 }

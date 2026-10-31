@@ -92,29 +92,45 @@ final class LineasPedido
 
     /**
      * Para el aviso al validar: "Sale completo." o "No va completo: ACEITE…
-     * (falta 1 caja de 3); JABON… (no sale: pidió 2 unidades)."
+     * (falta 1 caja de 3); JABON… (no sale: pidió 2 unidades). Va de más:
+     * AZUCAR… (+1 unidad, pidió 2)."
      */
     public static function incompletas(Pedido $pedido): string
     {
-        $partes = [];
+        $faltan = [];
+        $deMas = [];
 
         foreach ($pedido->items()->with('producto')->orderBy('id')->get() as $item) {
-            $falta = $item->faltaEnPalabras(corto: true);
+            if (($falta = $item->faltaEnPalabras(corto: true)) !== null) {
+                $faltan[] = "{$item->producto->descripcion} ({$falta})";
+            }
 
-            if ($falta !== null) {
-                $partes[] = "{$item->producto->descripcion} ({$falta})";
+            if (($mas = $item->deMasEnPalabras(corto: true)) !== null) {
+                $deMas[] = "{$item->producto->descripcion} ({$mas})";
             }
         }
 
-        $partes = collect($partes);
-
-        if ($partes->isEmpty()) {
+        if ($faltan === [] && $deMas === []) {
             return 'Sale completo.';
         }
 
-        $mas = $partes->count() > 4 ? ' y '.($partes->count() - 4).' más' : '';
+        return trim(self::lista('No va completo', $faltan).' '.self::lista('Va de más', $deMas));
+    }
 
-        return 'No va completo: '.$partes->take(4)->implode('; ').$mas.'.';
+    /**
+     * "No va completo: A; B; C; D y 2 más." (vacío si no hay nada).
+     *
+     * @param list<string> $partes
+     */
+    private static function lista(string $titulo, array $partes): string
+    {
+        if ($partes === []) {
+            return '';
+        }
+
+        $resto = count($partes) > 4 ? ' y '.(count($partes) - 4).' más' : '';
+
+        return $titulo.': '.implode('; ', array_slice($partes, 0, 4)).$resto.'.';
     }
 
     /**

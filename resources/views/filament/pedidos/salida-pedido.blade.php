@@ -3,9 +3,10 @@
 
     Una fila por línea: si es CAJA o UNIDAD, el nombre, lo que pidió y, del
     producto, cuánto hay en la bodega, cuánto saca este pedido y cuánto
-    quedaría (se recalcula al tocar). A un lado − Sale + y "No hay" (la deja
-    en 0) o "Sí hay" (la regresa a lo pedido). Lo que no va completo se dice
-    en palabras ("falta 1 caja de 3") en la fila y en un resumen abajo.
+    quedaría (se recalcula al tocar). A un lado − Sale + (puede ser menos o
+    más de lo pedido) y "No hay" (la deja en 0) o "Sí hay" (la regresa a lo
+    pedido). Lo que no va completo ("falta 1 caja de 3") o va de más ("1
+    unidad más de lo pedido") se dice en la fila y en un resumen abajo.
 
     Todo pasa en el teléfono (Alpine); al servidor solo va al confirmar. Los
     estilos van aquí mismo, sin compilar.
@@ -33,6 +34,7 @@
             .sp-fila:last-child { border-bottom: 0; }
             .sp-fila.sp-fila-nada { background: color-mix(in oklab, var(--danger-500) 6%, transparent); }
             .sp-fila.sp-fila-parcial { background: color-mix(in oklab, var(--warning-500) 5%, transparent); }
+            .sp-fila.sp-fila-mas { background: color-mix(in oklab, var(--info-500) 6%, transparent); }
             /* Pantalla grande: el texto a la izquierda y Sale a la derecha, en un renglón. */
             @media (min-width: 640px) {
                 .sp-fila { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 1rem; }
@@ -70,6 +72,10 @@
             .dark .sp-estado { color: var(--warning-400); }
             .sp-fila-nada .sp-estado { color: var(--danger-600); }
             .dark .sp-fila-nada .sp-estado { color: var(--danger-400); }
+            .sp-fila-mas .sp-estado { color: var(--info-600); }
+            .dark .sp-fila-mas .sp-estado { color: var(--info-400); }
+            .sp-volver { margin-inline-start: 0.4rem; font-size: 0.75rem; font-weight: 600; color: var(--primary-600); text-decoration: underline; text-underline-offset: 2px; }
+            .dark .sp-volver { color: var(--primary-400); }
             .sp-no-alcanza { font-size: 0.75rem; font-weight: 600; color: var(--danger-600); }
             .dark .sp-no-alcanza { color: var(--danger-400); }
 
@@ -104,6 +110,8 @@
             .sp-incompletas li { list-style: none; overflow-wrap: anywhere; }
             .sp-incompletas ul { display: grid; gap: 0.2rem; margin: 0; padding: 0; }
             .sp-incompletas b { font-weight: 700; }
+            .sp-incompletas.sp-de-mas { color: var(--info-800); background: color-mix(in oklab, var(--info-500) 10%, transparent); outline-color: color-mix(in oklab, var(--info-500) 40%, transparent); }
+            .dark .sp-incompletas.sp-de-mas { color: var(--info-300); }
         </style>
     @endonce
 
@@ -114,6 +122,7 @@
         x-data="{
             filas: $wire.$entangle(@js($statePath)),
             paraValidar: @js($esParaValidar()),
+            maximo: @js(\App\Domain\Pedidos\AjustarLineas::MAXIMO),
 
             init() {
                 if (! Array.isArray(this.filas)) {
@@ -127,8 +136,9 @@
                 return Number.isFinite(numero) ? numero : 0
             },
 
+            {{-- De 0 en adelante: menos de lo pedido si no alcanzó, más si el cliente pidió más. --}}
             poner(fila, valor) {
-                fila.sale = Math.min(Math.max(this.n(valor), 0), this.n(fila.cantidad))
+                fila.sale = Math.min(Math.max(this.n(valor), 0), this.maximo)
             },
 
             mover(fila, paso) {
@@ -184,7 +194,7 @@
                 return this.n(fila.hay_unidades) - (fila.mueve ? this.cambio(fila) : 0)
             },
 
-            {{-- "No sale: pidió 2 cajas" / "No va completo: falta 1 caja de 3"; vacío si va completa. --}}
+            {{-- Como PedidoItem: "No sale: pidió 2 cajas", "No va completo: falta 1 caja de 3", "Va de más: 1 unidad más de lo pedido (pidió 2)"; vacío si va justo. --}}
             estado(fila) {
                 const sale = this.n(fila.sale)
                 const pidio = this.n(fila.cantidad)
@@ -193,7 +203,11 @@
                     return 'No sale: pidió ' + this.palabras(pidio, fila)
                 }
 
-                if (sale >= pidio) {
+                if (sale > pidio) {
+                    return 'Va de más: ' + this.palabras(sale - pidio, fila) + ' más de lo pedido (pidió ' + pidio + ')'
+                }
+
+                if (sale === pidio) {
                     return ''
                 }
 
@@ -202,22 +216,43 @@
                 return 'No va completo: ' + (falta === 1 ? 'falta ' : 'faltan ') + this.palabras(falta, fila) + ' de ' + pidio
             },
 
+            {{-- Para el resumen de abajo: sin "No va completo:" / "Va de más:" adelante. --}}
+            estadoCorto(fila) {
+                return this.estado(fila).replace(/^(No va completo|Va de más): /, '').replace(/^No sale/, 'no sale')
+            },
+
             incompletas() {
                 return this.filas.filter((fila) => this.n(fila.sale) < this.n(fila.cantidad))
+            },
+
+            deMas() {
+                return this.filas.filter((fila) => this.n(fila.sale) > this.n(fila.cantidad))
+            },
+
+            {{-- Arriba a la derecha. --}}
+            textoResumen() {
+                const faltan = this.incompletas().length
+                const mas = this.deMas().length
+                const partes = []
+
+                if (faltan > 0) partes.push(faltan === 1 ? '1 no va completo' : faltan + ' no van completos')
+                if (mas > 0) partes.push(mas === 1 ? '1 va de más' : mas + ' van de más')
+
+                return partes.length === 0 ? 'Sale como se pidió' : partes.join(' · ')
             },
         }"
     >
         <div class="sp-resumen">
             <span x-text="filas.length === 1 ? '1 producto' : filas.length + ' productos'">{{ count($filas) === 1 ? '1 producto' : count($filas).' productos' }}</span>
             <span
-                x-bind:class="incompletas().length === 0 ? 'sp-resumen-ok' : 'sp-resumen-falta'"
-                x-text="incompletas().length === 0 ? 'Sale completo' : (incompletas().length === 1 ? '1 no va completo' : incompletas().length + ' no van completos')"
+                x-bind:class="incompletas().length === 0 && deMas().length === 0 ? 'sp-resumen-ok' : 'sp-resumen-falta'"
+                x-text="textoResumen()"
             ></span>
         </div>
 
         <ul class="sp-lista">
             <template x-for="fila in filas" x-bind:key="fila.id">
-                <li class="sp-fila" x-bind:class="{ 'sp-fila-nada': n(fila.sale) === 0, 'sp-fila-parcial': n(fila.sale) > 0 && n(fila.sale) < n(fila.cantidad) }">
+                <li class="sp-fila" x-bind:class="{ 'sp-fila-nada': n(fila.sale) === 0, 'sp-fila-parcial': n(fila.sale) > 0 && n(fila.sale) < n(fila.cantidad), 'sp-fila-mas': n(fila.sale) > n(fila.cantidad) }">
                     <div class="sp-texto">
                         <div class="sp-cabeza">
                             <span class="sp-unidad" x-bind:class="{ 'sp-unidad-caja': fila.es_caja }" x-text="fila.es_caja ? 'CAJA ×' + fila.por_caja : 'UNIDAD'"></span>
@@ -246,7 +281,10 @@
                         </div>
 
                         <div class="sp-no-alcanza" x-show="fila.mueve && quedan(fila) < 0" x-text="'No alcanza: faltan ' + enCajas(-quedan(fila), fila.por_caja) + ' en la bodega'"></div>
-                        <div class="sp-estado" x-show="estado(fila) !== ''" x-text="estado(fila)"></div>
+                        <div class="sp-estado" x-show="estado(fila) !== ''">
+                            <span x-text="estado(fila)"></span>
+                            <button type="button" class="sp-volver" x-show="n(fila.sale) > 0" x-on:click="fila.sale = n(fila.cantidad)" x-text="'Volver a ' + n(fila.cantidad)"></button>
+                        </div>
                     </div>
 
                     <div class="sp-control">
@@ -257,12 +295,12 @@
                                 inputmode="numeric"
                                 min="0"
                                 aria-label="Sale"
-                                x-bind:max="fila.cantidad"
+                                x-bind:max="maximo"
                                 x-bind:value="fila.sale"
                                 x-on:focus="$event.target.select()"
                                 x-on:change="poner(fila, $event.target.value); $event.target.value = fila.sale"
                             >
-                            <button type="button" class="sp-paso" aria-label="Uno más" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= n(fila.cantidad)">{{ svg('heroicon-m-plus') }}</button>
+                            <button type="button" class="sp-paso" aria-label="Uno más" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= maximo">{{ svg('heroicon-m-plus') }}</button>
                         </div>
                         <span class="sp-sigla" x-text="fila.es_caja ? (n(fila.sale) === 1 ? 'caja' : 'cajas') : (n(fila.sale) === 1 ? 'unidad' : 'unidades')"></span>
                         <button type="button" class="sp-boton sp-no" x-show="n(fila.sale) > 0" x-on:click="fila.sale = 0">No hay</button>
@@ -276,7 +314,16 @@
             <strong>No va completo</strong>
             <ul>
                 <template x-for="fila in incompletas()" x-bind:key="'falta-' + fila.id">
-                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estado(fila).replace(/^No va completo: /, '').replace(/^No sale/, 'no sale')"></span></li>
+                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
+                </template>
+            </ul>
+        </div>
+
+        <div class="sp-incompletas sp-de-mas" x-show="deMas().length > 0" x-cloak>
+            <strong>Va de más</strong>
+            <ul>
+                <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.id">
+                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
                 </template>
             </ul>
         </div>

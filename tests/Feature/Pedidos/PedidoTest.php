@@ -11,6 +11,7 @@ use App\Enums\EstadoPedido;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
+use App\Filament\Resources\Pedidos\Actions\LineasPedido;
 use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\Pedido;
@@ -82,6 +83,23 @@ test('bodega despacha lo que hay y se cobra con el precio vigente al despachar',
         ->and($lineaGravada->fresh()?->cantidad_despachada)->toBe(1)
         ->and($lineaGravada->fresh()?->faltante())->toBe(1)
         ->and($lineaExenta->fresh()?->cantidad_despachada)->toBe(0);
+});
+
+test('bodega puede mandar más de lo pedido: se cobra lo que sale y queda dicho', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    [$lineaGravada] = $pedido->items->all();
+
+    // Pidió 2 del gravado y salen 3; el exento sale completo.
+    $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [$lineaGravada->id => 3], $this->vendedor);
+    $linea = $lineaGravada->fresh();
+
+    // 3 × 100 = 300 (+45 ISV) y 1 caja × 500 = 500 → 845
+    expect($linea?->cantidad_despachada)->toBe(3)
+        ->and($linea?->faltante())->toBe(0)
+        ->and($linea?->faltaEnPalabras())->toBeNull()
+        ->and($linea?->deMasEnPalabras())->toBe('Va de más: 1 unidad más de lo pedido (pidió 2)')
+        ->and($despachado->total)->toBe(845.0)
+        ->and(LineasPedido::incompletas($despachado))->toBe("Va de más: {$this->gravado->descripcion} (+1 unidad, pidió 2).");
 });
 
 test('un pedido despachado no se puede validar otra vez', function (): void {
