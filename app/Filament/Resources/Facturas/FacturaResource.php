@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Facturas;
 
-use App\Enums\EstadoFactura;
 use App\Enums\ModoImpresion;
 use App\Filament\Resources\Facturas\Pages\ListFacturas;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
@@ -15,20 +14,22 @@ use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Resources\Resource;
-use Filament\Support\Enums\FontFamily;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\Layout\Stack;
+use Filament\Tables\Columns\ViewColumn;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Component;
 
 /**
- * Historial de facturas: las vigentes y las anuladas (con quién, cuándo,
- * por qué y cuál la sustituyó). Las anuladas hay que retirarlas al cliente
- * y guardarlas marcadas ANULADA.
+ * Historial de facturas en tarjetas (como Pedidos): las vigentes y las
+ * anuladas (con quién, cuándo, por qué y cuál la sustituyó). Las anuladas
+ * hay que retirarlas al cliente y guardarlas marcadas ANULADA.
  *
  * Solo consulta: las facturas se emiten al imprimir un pedido y se anulan
  * al corregirlo.
@@ -70,44 +71,22 @@ class FacturaResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('numero')
-                    ->label('Número')
-                    ->fontFamily(FontFamily::Mono)
-                    ->weight('bold')
-                    ->copyable()
-                    ->searchable()
-                    ->sortable()
-                    ->description(fn (Factura $record): string => 'Pedido '.$record->pedido->numero),
-                TextColumn::make('fecha_emision')
-                    ->label('Emitida')
-                    ->dateTime('d/m/Y H:i')
-                    ->sortable()
-                    ->description(fn (Factura $record): ?string => $record->emisor?->name),
-                TextColumn::make('cliente_nombre')
-                    ->label('Cliente')
-                    ->searchable()
-                    ->wrap()
-                    ->description(fn (Factura $record): ?string => $record->cliente_rtn ? 'RTN '.$record->cliente_rtn : null),
-                TextColumn::make('bodega.nombre')
-                    ->label('Bodega')
-                    ->visible(fn (): bool => Acceso::veTodo()),
-                TextColumn::make('total')
-                    ->formatStateUsing(fn (float $state): string => lempiras($state))
-                    ->alignEnd()
-                    ->sortable(),
-                TextColumn::make('estado')
-                    ->badge(),
-                TextColumn::make('detalle')
-                    ->label('Historial')
-                    ->state(fn (Factura $record): string => self::historial($record))
-                    ->color(fn (Factura $record): ?string => $record->estaAnulada() && $record->reemplazo === null ? 'danger' : null)
-                    ->wrap(),
+                Stack::make([
+                    ViewColumn::make('tarjeta')
+                        ->view('filament.facturas.tarjeta')
+                        ->state(fn (Factura $record): string => $record->numero)
+                        ->searchable(query: fn (Builder $query, string $search): Builder => self::buscar($query, $search)),
+                ]),
             ])
+            ->contentGrid(['md' => 2, 'xl' => 3])
+            ->extraAttributes(['class' => 'facturas-tarjetas'])
             ->defaultSort('fecha_emision', 'desc')
-            ->searchPlaceholder('Buscar por número de factura o cliente…')
+            ->paginated([12, 24, 48])
+            ->defaultPaginationPageOption(12)
+            ->searchPlaceholder('Buscar por número de factura o de pedido, cliente o RTN…')
+            ->filtersLayout(FiltersLayout::AboveContentCollapsible)
+            ->filtersFormColumns(['md' => 2, 'xl' => 4])
             ->filters([
-                SelectFilter::make('estado')
-                    ->options(EstadoFactura::class),
                 SelectFilter::make('bodega_id')
                     ->label('Bodega')
                     ->relationship('bodega', 'nombre')
@@ -119,6 +98,7 @@ class FacturaResource extends Resource
                         DatePicker::make('hasta'),
                     ])
                     ->columns(2)
+                    ->columnSpan(2)
                     ->query(function (Builder $query, array $data): Builder {
                         if (filled($data['desde'] ?? null)) {
                             $query->whereDate('fecha_emision', '>=', $data['desde']);
@@ -133,10 +113,18 @@ class FacturaResource extends Resource
             ])
             ->recordUrl(fn (Factura $record): string => PedidoResource::getUrl('view', ['record' => $record->pedido_id]))
             ->recordActions([
+                Action::make('pedido')
+                    ->label('Ver pedido')
+                    ->icon(Heroicon::OutlinedEye)
+                    ->button()
+                    ->outlined()
+                    ->color('gray')
+                    ->url(fn (Factura $record): string => PedidoResource::getUrl('view', ['record' => $record->pedido_id])),
                 Action::make('copia')
                     ->label('Imprimir copia')
                     ->icon(Heroicon::OutlinedPrinter)
-                    ->color('gray')
+                    ->button()
+                    ->outlined()
                     ->visible(fn (Factura $record): bool => ! $record->estaAnulada() && Gate::allows('imprimir', $record->pedido))
                     ->action(function (Factura $record, Component $livewire): void {
                         ImprimirPedidoAction::ejecutar($livewire, [$record->pedido_id], ModoImpresion::Copia);
@@ -149,6 +137,24 @@ class FacturaResource extends Resource
         return [
             'index' => ListFacturas::route('/'),
         ];
+    }
+
+    /**
+     * Número de factura o de pedido, cliente o RTN.
+     *
+     * @param Builder<Model> $query
+     *
+     * @return Builder<Model>
+     */
+    private static function buscar(Builder $query, string $search): Builder
+    {
+        $like = '%'.$search.'%';
+
+        return $query->where(fn (Builder $q): Builder => $q
+            ->where('numero', 'ilike', $like)
+            ->orWhere('cliente_nombre', 'ilike', $like)
+            ->orWhere('cliente_rtn', 'ilike', $like)
+            ->orWhereHas('pedido', fn (Builder $p): Builder => $p->where('numero', 'ilike', $like)));
     }
 
     /**

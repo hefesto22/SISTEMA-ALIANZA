@@ -27,13 +27,29 @@ class ListFacturas extends ListRecords
         ImprimirPedidoAction::desdeAviso($this, $ids, $modo);
     }
 
+    /**
+     * "Hoy: 3 facturas por L. 1,250.00 · 1 anulada: retire esa hoja…"
+     */
     public function getSubheading(): string
     {
+        $hoy = FacturaResource::getEloquentQuery()
+            ->where('estado', EstadoFactura::Vigente)
+            ->whereDate('fecha_emision', today());
+        $cuantas = (clone $hoy)->count();
+        $monto = (float) (clone $hoy)->sum('total');
         $anuladas = FacturaResource::getEloquentQuery()->where('estado', EstadoFactura::Anulada)->count();
 
-        return $anuladas === 0
-            ? 'Sin facturas anuladas.'
-            : "{$anuladas} anulada(s): retire esas hojas al cliente y guárdelas marcadas ANULADA.";
+        $partes = [$cuantas === 0
+            ? 'Hoy no se ha emitido ninguna factura'
+            : 'Hoy: '.($cuantas === 1 ? '1 factura' : "{$cuantas} facturas").' por '.lempiras($monto)];
+
+        if ($anuladas > 0) {
+            $partes[] = $anuladas === 1
+                ? '1 anulada: retire esa hoja al cliente y guárdela marcada ANULADA'
+                : "{$anuladas} anuladas: retire esas hojas al cliente y guárdelas marcadas ANULADA";
+        }
+
+        return implode(' · ', $partes).'.';
     }
 
     /**
