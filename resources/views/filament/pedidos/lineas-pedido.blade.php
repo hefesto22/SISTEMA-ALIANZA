@@ -16,9 +16,10 @@
     Existencia: lo DISPONIBLE en la bodega del pedido, o sea lo que hay menos
     lo apartado en otros pedidos pendientes (administración sin bodega
     escogida: lo de todas). En el buscador salen primero los que tienen
-    disponible; los que no, al final con "SIN EXISTENCIA" en rojo (o "TODO
-    APARTADO" en ámbar). Con "controlar existencias" encendido esos se ven
-    pero no se pueden agregar, y no se deja pedir más de lo disponible.
+    disponible; los que no, al final con "SIN EXISTENCIA" en rojo. Solo se
+    muestra lo disponible (lo de otros pedidos ya va restado). Con
+    "controlar existencias" encendido los que no tienen se ven pero no se
+    pueden agregar, y no se deja pedir más de lo disponible.
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
@@ -66,10 +67,9 @@
         .dark .pv-resultado-hay { background: rgb(34 197 94 / 0.12); color: var(--success-400); }
         .pv-resultado-hay.pv-hay-poco { background: var(--warning-50); color: var(--warning-700); }
         .dark .pv-resultado-hay.pv-hay-poco { background: rgb(245 158 11 / 0.12); color: var(--warning-400); }
-        /* Sin existencia: rojo lleno, que se vea; todo apartado en otros pedidos: ámbar lleno. */
+        /* Sin existencia: rojo lleno, que se vea. */
         .pv-resultado-hay.pv-hay-nada, .dark .pv-resultado-hay.pv-hay-nada { background: var(--danger-600); color: #fff; }
-        .pv-resultado-hay.pv-hay-apartado, .dark .pv-resultado-hay.pv-hay-apartado { background: var(--warning-500); color: #111827; }
-        .pv-resultado-hay.pv-hay-nada :is(span, strong), .pv-resultado-hay.pv-hay-apartado :is(span, strong) { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; opacity: 1; }
+        .pv-resultado-hay.pv-hay-nada :is(span, strong) { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; opacity: 1; }
         .pv-resultado.pv-agotado .pv-resultado-nombre { color: var(--gray-500); }
         .dark .pv-resultado.pv-agotado .pv-resultado-nombre { color: var(--gray-400); }
         /* Controlando la existencia: se ve, pero no se puede agregar. */
@@ -419,36 +419,20 @@
                 return hay === null || hay === undefined ? null : Number(hay)
             },
 
-            {{-- Debajo del producto abierto: "Disponible 5 UN en la bodega · hay 2 CJ + 5 UN, 2 CJ ya en otros pedidos" o "Sin existencia en la bodega". --}}
+            {{-- Debajo del producto abierto, solo lo disponible: "Disponible 2 CJ + 2 UN" o "Sin existencia". --}}
             textoHay(id) {
-                const p = this.productos[id]
-                const donde = this.sinBodegaEscogida() ? ' entre todas las bodegas' : ' en la bodega'
-                const apartado = Number(p?.apartado ?? 0)
+                const hay = this.hayDe(id) ?? 0
 
-                if ((this.hayDe(id) ?? 0) <= 0) {
-                    return Number(p?.en_bodega ?? 0) > 0
-                        ? 'Sin existencia: lo que hay' + donde + ' ya está en otros pedidos'
-                        : 'Sin existencia' + donde
-                }
-
-                const disponible = 'Disponible ' + this.enCajas(this.hayDe(id), p?.caja) + donde
-
-                return apartado > 0
-                    ? disponible + ' · hay ' + this.enCajas(Number(p?.en_bodega ?? 0), p?.caja) + ', ' + this.enCajas(apartado, p?.caja) + ' ya en otros pedidos'
-                    : disponible
+                return hay > 0 ? 'Disponible ' + this.enCajas(hay, this.productos[id]?.caja) : 'Sin existencia'
             },
 
-            {{-- En el buscador, a la derecha: arriba la etiqueta y abajo lo disponible ("disponible / 2 CJ"), "todo / apartado" o "sin / existencia". --}}
+            {{-- En el buscador, a la derecha: "disponible / 2 CJ" ("en todas" sin bodega escogida) o "sin / existencia". --}}
             etiquetaHay(p) {
                 if (Number(p?.hay ?? 0) > 0) {
                     return [this.sinBodegaEscogida() ? 'en todas' : 'disponible', this.enCajas(p.hay, p.caja)]
                 }
 
-                return this.todoApartado(p) ? ['todo', 'apartado'] : ['sin', 'existencia']
-            },
-
-            todoApartado(p) {
-                return Number(p?.hay ?? 0) <= 0 && Number(p?.en_bodega ?? 0) > 0
+                return ['sin', 'existencia']
             },
 
             {{-- Controlando la existencia, lo que no tiene disponible se ve pero no se agrega. --}}
@@ -690,7 +674,7 @@
                         <span
                             class="pv-resultado-hay"
                             x-show="p.hay !== null && p.hay !== undefined"
-                            x-bind:class="{ 'pv-hay-nada': Number(p.hay ?? 0) <= 0 && ! todoApartado(p), 'pv-hay-apartado': todoApartado(p), 'pv-hay-poco': Number(p.hay ?? 0) > 0 && hayPoco(p) }"
+                            x-bind:class="{ 'pv-hay-nada': Number(p.hay ?? 0) <= 0, 'pv-hay-poco': Number(p.hay ?? 0) > 0 && hayPoco(p) }"
                         >
                             <span x-text="etiquetaHay(p)[0]"></span>
                             <strong x-text="etiquetaHay(p)[1]"></strong>
