@@ -16,8 +16,9 @@
     Existencia: lo DISPONIBLE en la bodega del pedido, o sea lo que hay menos
     lo apartado en otros pedidos pendientes (administración sin bodega
     escogida: lo de todas). En el buscador salen primero los que tienen
-    disponible. Con "controlar existencias" encendido solo salen esos y no se
-    deja pedir más de lo disponible.
+    disponible; los que no, al final con "SIN EXISTENCIA" en rojo (o "TODO
+    APARTADO" en ámbar). Con "controlar existencias" encendido esos se ven
+    pero no se pueden agregar, y no se deja pedir más de lo disponible.
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
@@ -65,10 +66,19 @@
         .dark .pv-resultado-hay { background: rgb(34 197 94 / 0.12); color: var(--success-400); }
         .pv-resultado-hay.pv-hay-poco { background: var(--warning-50); color: var(--warning-700); }
         .dark .pv-resultado-hay.pv-hay-poco { background: rgb(245 158 11 / 0.12); color: var(--warning-400); }
-        .pv-resultado-hay.pv-hay-nada { background: var(--gray-100); color: var(--gray-500); }
-        .dark .pv-resultado-hay.pv-hay-nada { background: rgb(255 255 255 / 0.06); color: var(--gray-400); }
+        /* Sin existencia: rojo lleno, que se vea; todo apartado en otros pedidos: ámbar lleno. */
+        .pv-resultado-hay.pv-hay-nada, .dark .pv-resultado-hay.pv-hay-nada { background: var(--danger-600); color: #fff; }
+        .pv-resultado-hay.pv-hay-apartado, .dark .pv-resultado-hay.pv-hay-apartado { background: var(--warning-500); color: #111827; }
+        .pv-resultado-hay.pv-hay-nada :is(span, strong), .pv-resultado-hay.pv-hay-apartado :is(span, strong) { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; opacity: 1; }
         .pv-resultado.pv-agotado .pv-resultado-nombre { color: var(--gray-500); }
         .dark .pv-resultado.pv-agotado .pv-resultado-nombre { color: var(--gray-400); }
+        /* Controlando la existencia: se ve, pero no se puede agregar. */
+        .pv-resultado.pv-bloqueado { cursor: not-allowed; }
+        .pv-resultado.pv-bloqueado .pv-resultado-texto { opacity: 0.55; }
+        .pv-resultado.pv-bloqueado:hover { background: transparent; }
+        .pv-aviso-sin { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 600; color: var(--danger-700); background: color-mix(in oklab, var(--danger-500) 12%, transparent); }
+        .dark .pv-aviso-sin { color: var(--danger-300); }
+        .pv-aviso-sin svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; }
         .dark .pv-resultado { border-bottom-color: rgb(255 255 255 / 0.06); }
         .pv-resultado:last-child { border-bottom: 0; }
         .pv-resultado:hover, .pv-resultado:focus-visible { background: var(--gray-50); outline: none; }
@@ -199,6 +209,8 @@
             abierta: null,
             topado: null,
             esperaTope: null,
+            sinExistencia: '',
+            esperaSinExistencia: null,
             ultimo: null,
             total: @js($config['total']),
             ahorro: @js($config['ahorro']),
@@ -407,12 +419,19 @@
                 return hay === null || hay === undefined ? null : Number(hay)
             },
 
-            {{-- Debajo del producto abierto: "Disponible 5 UN en la bodega · hay 2 CJ + 5 UN, 2 CJ ya en otros pedidos". --}}
+            {{-- Debajo del producto abierto: "Disponible 5 UN en la bodega · hay 2 CJ + 5 UN, 2 CJ ya en otros pedidos" o "Sin existencia en la bodega". --}}
             textoHay(id) {
                 const p = this.productos[id]
                 const donde = this.sinBodegaEscogida() ? ' entre todas las bodegas' : ' en la bodega'
                 const apartado = Number(p?.apartado ?? 0)
-                const disponible = 'Disponible ' + this.enCajas(Math.max(0, this.hayDe(id) ?? 0), p?.caja) + donde
+
+                if ((this.hayDe(id) ?? 0) <= 0) {
+                    return Number(p?.en_bodega ?? 0) > 0
+                        ? 'Sin existencia: lo que hay' + donde + ' ya está en otros pedidos'
+                        : 'Sin existencia' + donde
+                }
+
+                const disponible = 'Disponible ' + this.enCajas(this.hayDe(id), p?.caja) + donde
 
                 return apartado > 0
                     ? disponible + ' · hay ' + this.enCajas(Number(p?.en_bodega ?? 0), p?.caja) + ', ' + this.enCajas(apartado, p?.caja) + ' ya en otros pedidos'
@@ -425,7 +444,16 @@
                     return [this.sinBodegaEscogida() ? 'en todas' : 'disponible', this.enCajas(p.hay, p.caja)]
                 }
 
-                return Number(p?.en_bodega ?? 0) > 0 ? ['todo', 'apartado'] : ['sin', 'existencia']
+                return this.todoApartado(p) ? ['todo', 'apartado'] : ['sin', 'existencia']
+            },
+
+            todoApartado(p) {
+                return Number(p?.hay ?? 0) <= 0 && Number(p?.en_bodega ?? 0) > 0
+            },
+
+            {{-- Controlando la existencia, lo que no tiene disponible se ve pero no se agrega. --}}
+            bloqueado(p) {
+                return @js($config['controlar']) && ! this.sinBodegaEscogida() && Number(p?.hay ?? 0) <= 0
             },
 
             {{-- Poco: menos de lo que trae una caja. --}}
@@ -583,8 +611,17 @@
                 this.buscando = false
             },
 
-            {{-- Tocar un producto: suma 1 unidad y su fila queda abierta para poner cajas o unidades. --}}
+            {{-- Tocar un producto: suma 1 unidad y su fila queda abierta para poner cajas o unidades. Sin disponible (controlando la existencia) no entra: avisa. --}}
             agregar(p) {
+                if (this.bloqueado(p)) {
+                    this.sinExistencia = p.descripcion
+                    clearTimeout(this.esperaSinExistencia)
+                    this.esperaSinExistencia = setTimeout(() => this.sinExistencia = '', 3500)
+
+                    return
+                }
+
+                this.sinExistencia = ''
                 const id = Number(p.id)
                 this.productos[id] = p
                 this.recordar(id)
@@ -638,8 +675,13 @@
             </div>
 
             <div class="pv-resultados" x-show="buscado || (buscar.trim().length === 1 && ! /^\d+$/.test(buscar.trim()))" x-cloak>
+                <div class="pv-aviso-sin" x-show="sinExistencia !== ''" x-cloak>
+                    {{ svg('heroicon-m-no-symbol') }}
+                    <span x-text="'No hay existencia de ' + sinExistencia + ' en la bodega: no se puede agregar.'"></span>
+                </div>
+
                 <template x-for="p in resultados" x-bind:key="p.id">
-                    <button type="button" class="pv-resultado" x-bind:class="{ 'pv-agotado': Number(p.hay ?? 0) <= 0 }" x-on:click="agregar(p)">
+                    <button type="button" class="pv-resultado" x-bind:class="{ 'pv-agotado': Number(p.hay ?? 0) <= 0, 'pv-bloqueado': bloqueado(p) }" x-bind:aria-disabled="bloqueado(p)" x-on:click="agregar(p)">
                         <span class="pv-resultado-texto">
                             <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
                             <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
@@ -648,7 +690,7 @@
                         <span
                             class="pv-resultado-hay"
                             x-show="p.hay !== null && p.hay !== undefined"
-                            x-bind:class="{ 'pv-hay-nada': Number(p.hay ?? 0) <= 0, 'pv-hay-poco': Number(p.hay ?? 0) > 0 && hayPoco(p) }"
+                            x-bind:class="{ 'pv-hay-nada': Number(p.hay ?? 0) <= 0 && ! todoApartado(p), 'pv-hay-apartado': todoApartado(p), 'pv-hay-poco': Number(p.hay ?? 0) > 0 && hayPoco(p) }"
                         >
                             <span x-text="etiquetaHay(p)[0]"></span>
                             <strong x-text="etiquetaHay(p)[1]"></strong>
@@ -658,7 +700,7 @@
 
                 <div class="pv-aviso" x-show="buscado && resultados.length === 0" x-text="sinBodega()
                     ? 'Escoja arriba la bodega que despacha para ver lo que hay.'
-                    : (@js($config['controlar']) ? 'No hay disponible en la bodega ningún producto con ese código o nombre.' : 'No hay productos activos con ese código o nombre.')"></div>
+                    : 'No hay productos activos con ese código o nombre.'"></div>
                 <div class="pv-aviso" x-show="! buscado && buscar.trim().length === 1">Escriba al menos 2 letras (o el código).</div>
             </div>
         </div>

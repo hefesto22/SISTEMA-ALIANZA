@@ -19,7 +19,6 @@ use Closure;
 use Filament\Forms\Components\Contracts\HasNestedRecursiveValidationRules;
 use Filament\Forms\Components\Field;
 use Filament\Support\Components\Attributes\ExposedLivewireMethod;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Renderless;
 
@@ -40,8 +39,9 @@ use Livewire\Attributes\Renderless;
  * Existencia: cada producto trae cuánto hay DISPONIBLE en la bodega del
  * pedido: lo que hay menos lo apartado en otros pedidos pendientes
  * (App\Domain\Inventario\Disponible), así no se vende dos veces lo mismo.
- * Con "controlar existencias" encendido (Configuración) el buscador solo
- * muestra lo disponible y no se pide (ni se guarda) más de eso.
+ * Con "controlar existencias" encendido (Configuración) lo que no tiene
+ * disponible se ve en el buscador pero no se agrega, y no se pide (ni se
+ * guarda) más de lo disponible.
  *
  * Vista: resources/views/filament/pedidos/lineas-pedido.blade.php (también
  * trae la barra de abajo con el total y Guardar).
@@ -127,8 +127,9 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      * Buscador de arriba: productos activos por código o nombre, con sus
      * precios y lo disponible en la bodega del pedido (administración sin
      * bodega escogida: lo de todas). Primero los que tienen disponible,
-     * después el código exacto y luego por nombre. Si se controla la
-     * existencia, solo los que tienen, y sin bodega escogida ninguno.
+     * después el código exacto y luego por nombre. Los que no tienen salen
+     * igual, marcados: si se controla la existencia no se pueden agregar (y
+     * sin bodega escogida no sale ninguno).
      *
      * @return list<array<string, mixed>>
      */
@@ -151,7 +152,6 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
         $productos = Producto::query()
             ->fromSub($conDisponible, 'productos')
-            ->when($controlar, fn (Builder $query): Builder => $query->whereRaw('existencia_bodega - apartado > 0'))
             ->orderByRaw('CASE WHEN existencia_bodega - apartado > 0 THEN 0 ELSE 1 END')
             ->orderByRaw('CASE WHEN UPPER(codigo) = ? THEN 0 ELSE 1 END', [mb_strtoupper($buscar)])
             ->orderBy('descripcion')
