@@ -24,6 +24,7 @@ use App\Filament\Resources\Compras\Pages\ViewCompra;
 use App\Filament\Resources\Pedidos\Actions\LineasPedido;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Productos\Pages\ListProductos;
+use App\Filament\Schemas\Components\LineasCompra;
 use App\Models\Bodega;
 use App\Models\CambioPrecio;
 use App\Models\Cliente;
@@ -37,7 +38,6 @@ use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\Repeater;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
@@ -292,7 +292,6 @@ test('precio del pedido: se respeta lo que se le dijo al cliente, salvo que qued
 
 test('el encargado registra una compra para su bodega desde el panel', function (): void {
     $this->actingAs($this->encargado);
-    $undoRepeaterFake = Repeater::fake();
 
     Livewire::test(CreateCompra::class)
         ->assertFormFieldHidden('bodega_id')
@@ -307,8 +306,6 @@ test('el encargado registra una compra para su bodega desde el panel', function 
         ->call('create')
         ->assertHasNoFormErrors();
 
-    $undoRepeaterFake();
-
     $compra = Compra::query()->sole();
 
     expect($compra->bodega_id)->toBe($this->bodega->id)
@@ -319,6 +316,30 @@ test('el encargado registra una compra para su bodega desde el panel', function 
 
     Livewire::test(ListCompras::class)->assertCanSeeTableRecords([$compra]);
     Livewire::test(ViewCompra::class, ['record' => $compra->getRouteKey()])->assertOk();
+});
+
+test('la compra pide al menos un producto y el costo de cada uno', function (): void {
+    $this->actingAs($this->encargado);
+
+    Livewire::test(CreateCompra::class)
+        ->fillForm(['proveedor_id' => $this->proveedor->id, 'fecha' => now()->toDateString()])
+        ->call('create')
+        ->assertHasFormErrors(['lineas' => 'required']);
+
+    Livewire::test(CreateCompra::class)
+        ->fillForm([
+            'proveedor_id' => $this->proveedor->id,
+            'fecha'        => now()->toDateString(),
+            'lineas'       => [
+                ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2, 'costo' => ''],
+            ],
+        ])
+        ->call('create')
+        ->assertHasFormErrors(['lineas']);
+
+    expect(Compra::query()->count())->toBe(0)
+        ->and(LineasCompra::sinCosto([['producto_id' => $this->producto->id, 'costo' => 0]]))->toBe([$this->producto->descripcion])
+        ->and(LineasCompra::sinCosto([['producto_id' => $this->producto->id, 'costo' => 1380]]))->toBe([]);
 });
 
 test('cada bodega ve sus compras; el vendedor no entra a compras', function (): void {

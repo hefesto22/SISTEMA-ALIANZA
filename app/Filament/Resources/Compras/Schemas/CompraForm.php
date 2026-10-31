@@ -4,30 +4,26 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Compras\Schemas;
 
-use App\Domain\Precios\CalculadoraPrecio;
 use App\Enums\UnidadVenta;
+use App\Filament\Schemas\Components\LineasCompra;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
-use App\Models\Producto;
 use App\Models\Proveedor;
 use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
-use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 
 /**
- * Registrar una compra como viene en la factura del proveedor: por cada
- * producto, si vino en caja o suelto, cuántas y el costo de cada una CON ISV
- * (si el producto es gravado). Solo salen los productos de ese proveedor.
- *
- * Debajo del costo se ve el costo de hoy, para darse cuenta de un error de
- * dedo antes de guardar.
+ * Registrar una compra como viene en la factura del proveedor. Arriba el
+ * proveedor y la factura; abajo los productos como lista tipo carrito
+ * (LineasCompra): solo salen los de ese proveedor, se toca uno y entra con
+ * el costo de hoy, en caja o suelto, cuántas y el costo de cada una CON ISV
+ * (si el producto es gravado). Si el costo se aleja mucho del de hoy, avisa
+ * antes de guardar. "Registrar compra" va en la barra del total.
  */
 final class CompraForm
 {
@@ -39,16 +35,18 @@ final class CompraForm
             ->columns(1)
             ->components([
                 Section::make('Compra')
-                    ->columns(['default' => 1, 'md' => 4])
+                    ->icon(Heroicon::OutlinedTruck)
+                    ->columns(['default' => 1, 'md' => $veTodo ? 4 : 3])
+                    ->extraAttributes(['class' => 'pv'])
                     ->schema([
                         Select::make('proveedor_id')
                             ->label('Proveedor')
                             ->options(fn (): array => self::proveedores())
                             ->searchable()
                             ->required()
-                            // Al cambiarlo se cargan los productos de ese proveedor.
+                            // Los productos que se buscan abajo son de este proveedor.
                             ->live()
-                            ->columnSpan(['md' => 2]),
+                            ->columnSpan(['md' => $veTodo ? 2 : 1]),
                         Select::make('bodega_id')
                             ->label('Entra a la bodega')
                             ->options(fn (): array => Bodega::query()->activas()->orderBy('nombre')->pluck('nombre', 'id')->all())
@@ -60,72 +58,32 @@ final class CompraForm
                             ->placeholder('Ej. 000-001-01-00012345')
                             ->maxLength(60),
                         DatePicker::make('fecha')
+                            ->label('Fecha de la factura')
                             ->default(now())
                             ->maxDate(now())
                             ->required(),
                     ]),
                 Section::make('Productos')
-                    ->description('Costo como viene en la factura, por caja o por unidad, con ISV si el producto es gravado. Al guardar sube la existencia de la bodega y se recalculan costo y precio de venta.')
+                    ->description('Toque el producto para agregarlo. Costo como viene en la factura, con ISV si es gravado. Al registrar sube la existencia y se recalculan costo y precio de venta.')
+                    ->icon(Heroicon::OutlinedArchiveBox)
+                    ->extraAttributes(['class' => 'pv'])
                     ->schema([
-                        Repeater::make('lineas')
-                            ->hiddenLabel()
-                            ->table([
-                                TableColumn::make('Producto'),
-                                TableColumn::make('En')->width('130px'),
-                                TableColumn::make('Cantidad')->markAsRequired()->width('120px'),
-                                TableColumn::make('Costo c/u con ISV')->markAsRequired()->width('190px'),
-                                TableColumn::make('Total')->width('150px'),
-                            ])
-                            ->schema([
-                                Select::make('producto_id')
-                                    ->hiddenLabel()
-                                    ->options(fn (Get $get): array => self::productosDe($get('../../proveedor_id')))
-                                    ->searchable()
-                                    ->required()
-                                    ->live()
-                                    ->placeholder(fn (Get $get): string => blank($get('../../proveedor_id')) ? 'Escoja primero el proveedor' : 'Buscar producto…'),
-                                Select::make('unidad')
-                                    ->hiddenLabel()
-                                    ->options(UnidadVenta::class)
-                                    ->default(UnidadVenta::Caja->value)
-                                    ->selectablePlaceholder(false)
-                                    ->required()
-                                    ->live(),
-                                TextInput::make('cantidad')
-                                    ->hiddenLabel()
-                                    ->numeric()
-                                    ->integer()
-                                    ->minValue(1)
-                                    ->required()
-                                    ->live(onBlur: true),
-                                TextInput::make('costo')
-                                    ->hiddenLabel()
-                                    ->numeric()
-                                    ->minValue(0.01)
-                                    ->prefix('L.')
-                                    ->required()
-                                    ->live(onBlur: true)
-                                    ->helperText(fn (Get $get): ?string => self::costoDeHoy($get('producto_id'), $get('unidad'))),
-                                TextInput::make('total')
-                                    ->hiddenLabel()
-                                    ->disabled()
-                                    ->dehydrated(false)
-                                    ->placeholder(fn (Get $get): string => lempiras(self::numero($get('cantidad')) * self::numero($get('costo')))),
-                            ])
-                            ->defaultItems(1)
-                            ->minItems(1)
-                            ->addActionLabel('Agregar producto')
-                            ->reorderable(false)
-                            ->required(),
-                        TextEntry::make('total_compra')
-                            ->label('Total de la compra')
-                            ->state(fn (Get $get): string => lempiras(self::totalDe($get('lineas'))))
-                            ->weight('bold'),
+                        LineasCompra::make('lineas')
+                            ->label('Productos')
+                            ->hiddenLabel(),
                     ]),
-                Textarea::make('notas')
-                    ->label('Notas')
-                    ->rows(2)
-                    ->maxLength(1000),
+                Section::make('Notas')
+                    ->icon(Heroicon::OutlinedChatBubbleBottomCenterText)
+                    ->compact()
+                    ->extraAttributes(['class' => 'pv'])
+                    ->schema([
+                        Textarea::make('notas')
+                            ->hiddenLabel()
+                            ->placeholder('Ej. Faltó una caja, el proveedor la manda el lunes…')
+                            ->rows(2)
+                            ->autosize()
+                            ->maxLength(1000),
+                    ]),
             ]);
     }
 
@@ -176,59 +134,6 @@ final class CompraForm
             ->all();
 
         return $opciones;
-    }
-
-    /**
-     * Productos activos del proveedor: [id => "CÓDIGO · DESCRIPCIÓN"].
-     *
-     * @return array<int, string>
-     */
-    private static function productosDe(mixed $proveedorId): array
-    {
-        if (! is_numeric($proveedorId)) {
-            return [];
-        }
-
-        /** @var array<int, string> $opciones */
-        $opciones = Producto::query()
-            ->activos()
-            ->where('proveedor_id', (int) $proveedorId)
-            ->orderBy('descripcion')
-            ->get(['id', 'codigo', 'descripcion'])
-            ->mapWithKeys(fn (Producto $producto): array => [$producto->id => $producto->etiqueta()])
-            ->all();
-
-        return $opciones;
-    }
-
-    /**
-     * "Hoy: L. 1,380.00 la caja" (con ISV si es gravado).
-     */
-    private static function costoDeHoy(mixed $productoId, mixed $unidad): ?string
-    {
-        $producto = is_numeric($productoId) ? Producto::query()->find((int) $productoId) : null;
-
-        if (! $producto instanceof Producto) {
-            return null;
-        }
-
-        $unidad = $unidad instanceof UnidadVenta ? $unidad : (UnidadVenta::tryFrom(is_string($unidad) ? $unidad : '') ?? UnidadVenta::Caja);
-        $costo = CalculadoraPrecio::aPantalla($producto->costo_unidad, $producto->gravado, $producto->unidadesEn($unidad));
-
-        return 'Hoy: '.lempiras($costo).($unidad === UnidadVenta::Caja ? " la caja de {$producto->unidades_por_caja}" : ' la unidad');
-    }
-
-    private static function totalDe(mixed $lineas): float
-    {
-        $total = 0.0;
-
-        foreach (is_array($lineas) ? $lineas : [] as $fila) {
-            if (is_array($fila)) {
-                $total += round(self::numero($fila['cantidad'] ?? 0) * self::numero($fila['costo'] ?? 0), 2);
-            }
-        }
-
-        return $total;
     }
 
     private static function numero(mixed $valor): float

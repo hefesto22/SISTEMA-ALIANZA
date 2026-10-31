@@ -11,6 +11,7 @@ use App\Filament\Resources\Compras\Schemas\CompraForm;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Proveedor;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
@@ -63,6 +64,32 @@ class CreateCompra extends CreateRecord
 
             $this->halt();
         }
+    }
+
+    /**
+     * "Registrar compra" va en la barra de abajo con el total (LineasCompra);
+     * aquí queda Cancelar.
+     *
+     * @return array<Action>
+     */
+    protected function getFormActions(): array
+    {
+        return [
+            $this->getCancelFormAction(),
+        ];
+    }
+
+    public function getSubheading(): ?string
+    {
+        $usuario = Acceso::usuario();
+
+        if ($usuario === null || $usuario->veTodasLasBodegas()) {
+            return null;
+        }
+
+        $bodega = $usuario->bodega;
+
+        return $bodega instanceof Bodega ? "Entra a {$bodega->nombre}" : null;
     }
 
     protected function getCreatedNotificationTitle(): ?string
