@@ -100,10 +100,11 @@ class FacturaResource extends Resource
                     ->color('gray')
                     ->sortable()
                     ->visibleFrom('md'),
+                // En una línea: toma el espacio que sobra y lo largo se corta con "…"; al pasar el mouse se ve completo.
                 TextColumn::make('cliente_nombre')
                     ->label('Cliente')
-                    ->limit(32)
-                    ->tooltip(fn (Factura $record): ?string => mb_strlen($record->cliente_nombre) > 32 ? $record->cliente_nombre : null),
+                    ->tooltip(fn (Factura $record): string => $record->cliente_nombre)
+                    ->extraCellAttributes(['class' => 'celda-recortada']),
                 TextColumn::make('pedido.numero')
                     ->label('Pedido')
                     ->size(TextSize::Small)
@@ -128,9 +129,10 @@ class FacturaResource extends Resource
                 TextColumn::make('historial')
                     ->label('Qué pasó')
                     ->state(fn (Factura $record): string => self::historial($record))
-                    ->color(fn (Factura $record): ?string => $record->estaAnulada() && $record->reemplazo === null ? 'danger' : 'gray')
+                    ->color(fn (Factura $record): string => $record->estaAnulada() && $record->reemplazo === null ? 'danger' : 'gray')
                     ->size(TextSize::ExtraSmall)
                     ->wrap()
+                    ->extraCellAttributes(['style' => 'min-width: 13rem'])
                     ->visible(fn (Component $livewire): bool => ! in_array(data_get($livewire, 'activeTab'), [null, 'vigentes'], true))
                     ->visibleFrom('md'),
             ])

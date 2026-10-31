@@ -52,12 +52,17 @@ class AdminPanelProvider extends PanelProvider
         .'</style>';
 
     /**
-     * En los listados no sale la ruta "Pedidos > Listado" arriba del título:
-     * no dice nada que no diga el menú. En Ver, Editar o Crear sí queda (sirve
-     * para regresar al listado).
+     * Listados:
+     *  - no sale la ruta "Pedidos > Listado" arriba del título: no dice nada
+     *    que no diga el menú (en Ver, Editar o Crear sí queda, para regresar);
+     *  - la columna con clase "celda-recortada" toma el espacio que sobra y su
+     *    texto queda en una línea, cortado con "…" si no cabe.
      */
     private const ESTILO_LISTADOS = '<style>'
         .'.fi-resource-list-records-page .fi-breadcrumbs{display:none}'
+        .'.fi-ta-cell.celda-recortada{width:100%;max-width:0;min-width:8rem}'
+        .'.fi-ta-cell.celda-recortada>.fi-ta-col{min-width:0}'
+        .'.fi-ta-cell.celda-recortada .fi-ta-text,.fi-ta-cell.celda-recortada .fi-ta-text>*{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
         .'</style>';
 
     public function panel(Panel $panel): Panel
