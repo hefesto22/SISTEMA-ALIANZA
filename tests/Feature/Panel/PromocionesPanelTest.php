@@ -54,6 +54,7 @@ test('administración crea un combo y se le genera el código', function (): voi
             'beneficio_unidad'      => UnidadVenta::Unidad->value,
             'tipo'                  => 'mitad',
             'activa'                => true,
+            'bodegas'               => [$this->bodega->id],
         ])
         ->assertHasNoActionErrors();
 
@@ -61,13 +62,46 @@ test('administración crea un combo y se le genera el código', function (): voi
 
     $promo = Promocion::query()->latest('id')->firstOrFail();
 
-    expect($promo->codigo)->toBe('PROMO-'.str_pad((string) $promo->id, 4, '0', STR_PAD_LEFT))
+    expect($promo->bodegas->pluck('id')->all())->toBe([$this->bodega->id])
+        ->and($promo->codigo)->toBe('PROMO-'.str_pad((string) $promo->id, 4, '0', STR_PAD_LEFT))
         ->and($promo->nombre)->toBe('TOFFEE + NUTRINE')
         ->and($promo->descuento_porcentaje)->toBe(50.0)
         ->and($promo->created_by)->toBe($this->admin->id)
         ->and($promo->activa)->toBeTrue()
         ->and($promo->condiciones->pluck('producto_id')->all())->toBe([$this->toffee->id, $this->nutrine->id])
         ->and($promo->resumen())->toBe('Compra 2 cajas de BUTTER TOFFEE 12X100G + 1 caja de BABY NUTRINE 24X50G → 1 unidad de BABY CREMA 12X100ML a mitad de precio');
+});
+
+test('el encargado crea promociones solo para su bodega', function (): void {
+    $encargado = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $encargado->assignRole(Rol::Bodega->value);
+    $this->actingAs($encargado);
+    $undoRepeaterFake = Repeater::fake();
+
+    Livewire::test(ManagePromociones::class)
+        ->mountAction('create')
+        ->assertFormFieldHidden('bodegas');
+
+    Livewire::test(ManagePromociones::class)
+        ->callAction('create', data: [
+            'nombre'      => 'Toffee de la bodega',
+            'condiciones' => [
+                ['producto_id' => $this->toffee->id, 'cantidad' => 1, 'unidad' => UnidadVenta::Caja->value],
+            ],
+            'producto_beneficio_id' => $this->nutrine->id,
+            'cantidad_beneficio'    => 1,
+            'beneficio_unidad'      => UnidadVenta::Unidad->value,
+            'tipo'                  => 'gratis',
+            'activa'                => true,
+        ])
+        ->assertHasNoActionErrors();
+
+    $undoRepeaterFake();
+
+    $promo = Promocion::query()->latest('id')->firstOrFail();
+
+    expect($promo->bodegas->pluck('id')->all())->toBe([$this->bodega->id])
+        ->and($encargado->can('update', $promo))->toBeTrue();
 });
 
 test('se activa y desactiva con el interruptor', function (): void {

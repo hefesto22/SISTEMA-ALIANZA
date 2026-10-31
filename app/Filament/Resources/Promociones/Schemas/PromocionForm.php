@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Promociones\Schemas;
 
 use App\Enums\UnidadVenta;
+use App\Filament\Support\Acceso;
+use App\Models\Bodega;
+use App\Models\Existencia;
 use App\Models\Producto;
 use App\Models\Promocion;
 use App\Support\Texto;
@@ -21,6 +24,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -34,6 +38,10 @@ use Throwable;
  *
  * La tarjeta es resources/views/filament/promociones/vista-previa.blade.php.
  * El código (PROMO-0001) se genera solo al guardar.
+ *
+ * Bodegas: administración escoge una o varias (ninguna = todas); la del
+ * encargado queda en su bodega. En el buscador de productos sale cuánto hay
+ * de cada uno en esas bodegas, primero los que tienen.
  */
 class PromocionForm
 {
@@ -80,7 +88,7 @@ class PromocionForm
                                     TableColumn::make('En')->width('115px'),
                                 ])
                                 ->schema([
-                                    self::producto('producto_id')
+                                    self::producto('producto_id', '../../bodegas')
                                         ->hiddenLabel()
                                         ->distinct(),
                                     self::cantidad('cantidad')
@@ -99,7 +107,7 @@ class PromocionForm
                         ->compact()
                         ->columns(4)
                         ->schema([
-                            self::producto('producto_beneficio_id')
+                            self::producto('producto_beneficio_id', 'bodegas')
                                 ->label('Producto')
                                 ->columnSpanFull(),
                             self::cantidad('cantidad_beneficio')
@@ -141,6 +149,15 @@ class PromocionForm
                 ])->columnSpan(8),
 
                 Group::make([
+                    Select::make('bodegas')
+                        ->label('Bodegas donde vale')
+                        ->relationship('bodegas', 'nombre', fn (Builder $query): Builder => $query->where('activa', true)->orderBy('nombre'))
+                        ->multiple()
+                        ->preload()
+                        ->placeholder('Todas las bodegas')
+                        ->helperText('Sin escoger ninguna, vale en todas.')
+                        ->live()
+                        ->visible(fn (): bool => Acceso::veTodo()),
                     View::make('filament.promociones.vista-previa')
                         ->viewData(fn (Get $get, ?Promocion $record): array => self::vistaPrevia($get, $record)),
                     TextInput::make('descripcion')
@@ -173,22 +190,154 @@ class PromocionForm
         return $data;
     }
 
-    private static function producto(string $campo): Select
+    /**
+     * La promoción del encargado queda en su bodega (él no la escoge).
+     */
+    public static function enSuBodega(Promocion $promocion): void
+    {
+        $usuario = Acceso::usuario();
+
+        if ($usuario === null || $usuario->veTodasLasBodegas() || $usuario->bodega_id === null) {
+            return;
+        }
+
+        $promocion->bodegas()->sync([$usuario->bodega_id]);
+    }
+
+    /**
+     * Buscador de productos con cuánto hay de cada uno en las bodegas de la
+     * promoción ($rutaBodegas: dónde está el campo "bodegas" desde este).
+     */
+    private static function producto(string $campo, string $rutaBodegas): Select
     {
         return Select::make($campo)
             ->placeholder('Buscar por código o nombre…')
             ->searchable()
-            ->getSearchResultsUsing(fn (string $search): array => Producto::query()
-                ->activos()
-                ->buscar($search)
-                ->orderBy('descripcion')
-                ->limit(50)
-                ->get()
-                ->mapWithKeys(fn (Producto $p): array => [$p->id => $p->etiqueta()])
-                ->all())
-            ->getOptionLabelUsing(fn (mixed $value): ?string => Producto::query()->whereKey($value)->first()?->etiqueta())
+            ->allowHtml()
+            ->getSearchResultsUsing(fn (string $search, Get $get): array => self::opciones($search, self::bodegasDeExistencia($get($rutaBodegas))))
+            ->getOptionLabelUsing(function (mixed $value, Get $get): ?string {
+                $producto = Producto::query()->whereKey($value)->first();
+
+                if (! $producto instanceof Producto) {
+                    return null;
+                }
+
+                $hay = self::existenciaEn(self::bodegasDeExistencia($get($rutaBodegas)), [$producto->id]);
+
+                return self::etiquetaConExistencia($producto, $hay[$producto->id] ?? 0);
+            })
             ->required()
             ->live();
+    }
+
+    /**
+     * Productos activos que coinciden, los que tienen existencia primero.
+     *
+     * @param list<int>|null $bodegas
+     *
+     * @return array<int, string>
+     */
+    private static function opciones(string $buscar, ?array $bodegas): array
+    {
+        $productos = Producto::query()
+            ->activos()
+            ->buscar($buscar)
+            ->orderBy('descripcion')
+            ->limit(50)
+            ->get();
+
+        $hay = self::existenciaEn($bodegas, $productos->modelKeys());
+
+        /** @var array<int, string> $opciones */
+        $opciones = $productos
+            ->sortBy(fn (Producto $producto): int => ($hay[$producto->id] ?? 0) > 0 ? 0 : 1)
+            ->mapWithKeys(fn (Producto $producto): array => [$producto->id => self::etiquetaConExistencia($producto, $hay[$producto->id] ?? 0)])
+            ->all();
+
+        return $opciones;
+    }
+
+    /**
+     * "CÓDIGO · DESCRIPCIÓN" y, a la derecha, "Hay 3 CJ + 2 UN" (verde) o
+     * "Sin existencia" (rojo).
+     */
+    private static function etiquetaConExistencia(Producto $producto, int $hay): string
+    {
+        $texto = $hay > 0 ? 'Hay '.Existencia::enCajas($hay, $producto->unidades_por_caja) : 'Sin existencia';
+        $color = $hay > 0 ? 'var(--success-500)' : 'var(--danger-500)';
+
+        return '<span style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;width:100%">'
+            .'<span style="min-width:0">'.e($producto->etiqueta()).'</span>'
+            .'<span style="flex-shrink:0;font-size:.75rem;font-weight:700;color:'.$color.'">'.e($texto).'</span>'
+            .'</span>';
+    }
+
+    /**
+     * En qué bodegas se cuenta la existencia: la del encargado; para
+     * administración, las que escogió (null = todas).
+     *
+     * @return list<int>|null
+     */
+    private static function bodegasDeExistencia(mixed $escogidas): ?array
+    {
+        $usuario = Acceso::usuario();
+
+        if ($usuario !== null && ! $usuario->veTodasLasBodegas()) {
+            return $usuario->bodega_id !== null ? [$usuario->bodega_id] : [];
+        }
+
+        $ids = [];
+
+        foreach (is_array($escogidas) ? $escogidas : [] as $id) {
+            if (is_numeric($id)) {
+                $ids[] = (int) $id;
+            }
+        }
+
+        return $ids === [] ? null : $ids;
+    }
+
+    /**
+     * [producto_id => unidades] en esas bodegas (null = todas).
+     *
+     * @param list<int>|null $bodegas
+     * @param array<mixed> $productos
+     *
+     * @return array<int, int>
+     */
+    private static function existenciaEn(?array $bodegas, array $productos): array
+    {
+        if ($productos === [] || $bodegas === []) {
+            return [];
+        }
+
+        /** @var array<int, int> $hay */
+        $hay = Existencia::query()
+            ->whereIn('producto_id', $productos)
+            ->when($bodegas !== null, fn (Builder $query): Builder => $query->whereIn('bodega_id', $bodegas ?? []))
+            ->groupBy('producto_id')
+            ->selectRaw('producto_id, SUM(cantidad) as total')
+            ->pluck('total', 'producto_id')
+            ->map(fn (mixed $cantidad): int => (int) $cantidad)
+            ->all();
+
+        return $hay;
+    }
+
+    /**
+     * "Todas las bodegas", o las que escogió administración, o la del encargado.
+     */
+    private static function textoBodegas(mixed $escogidas): string
+    {
+        $ids = self::bodegasDeExistencia($escogidas);
+
+        if ($ids === null) {
+            return 'Todas las bodegas';
+        }
+
+        $nombres = Bodega::query()->whereKey($ids)->orderBy('nombre')->pluck('nombre')->all();
+
+        return $nombres === [] ? 'Todas las bodegas' : implode(', ', $nombres);
     }
 
     private static function cantidad(string $campo): TextInput
@@ -248,6 +397,7 @@ class PromocionForm
         return [
             'nombre'   => Texto::mayusculas((string) $get('nombre')),
             'codigo'   => $record->codigo ?? null,
+            'bodegas'  => self::textoBodegas($get('bodegas')),
             'activa'   => (bool) $get('activa'),
             'vigencia' => self::vigencia($get('vigente_desde'), $get('vigente_hasta')),
             'compra'   => $compra,

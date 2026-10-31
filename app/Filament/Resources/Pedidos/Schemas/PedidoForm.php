@@ -24,7 +24,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -32,7 +31,6 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\HtmlString;
 
 /**
  * Preventa: el vendedor escoge el cliente y agrega productos (unidad o caja).
@@ -42,8 +40,10 @@ use Illuminate\Support\HtmlString;
  * lista tipo carrito (App\Filament\Schemas\Components\LineasPedido) con el
  * buscador arriba y, abajo, el total con el botón Guardar siempre a la vista.
  *
- * Si hay promociones vigentes se muestran arriba de los productos y el total
- * estimado ya trae el descuento. Si no hay, el formulario queda como siempre.
+ * Promociones de la bodega: van dentro de la lista de productos (se agregan
+ * de un toque, y al tocar un producto que está en promoción se le pregunta
+ * al vendedor si la agrega) y el total estimado ya trae el descuento. Si no
+ * hay, el formulario queda como siempre.
  */
 class PedidoForm
 {
@@ -144,20 +144,6 @@ class PedidoForm
                             ->required(),
                     ]),
 
-                Section::make('Promociones de hoy')
-                    ->description(fn (): string => self::cuantasPromociones().'. Se aplican solas cuando el cliente lleva los productos.')
-                    ->icon(Heroicon::OutlinedGift)
-                    ->columnSpanFull()
-                    ->collapsible()
-                    ->collapsed()
-                    ->extraAttributes(['class' => 'pv'])
-                    ->visible(fn (): bool => Promocion::query()->vigentes()->exists())
-                    ->schema([
-                        TextEntry::make('promociones_vigentes')
-                            ->hiddenLabel()
-                            ->state(fn (): HtmlString => self::listaPromociones()),
-                    ]),
-
                 Section::make('Productos')
                     ->description('Busque por código o nombre y toque el producto. Precios de hoy con ISV; bodega los confirma al despachar.')
                     ->icon(Heroicon::OutlinedShoppingCart)
@@ -185,36 +171,47 @@ class PedidoForm
     }
 
     /**
-     * Total del pedido con los precios de hoy y las promociones que ya
-     * aplican: lo mismo que verá bodega (misma cuenta que RecalcularPedido).
-     * Lo pide la lista de productos cada que se deja de tocar.
+     * Total del pedido con los precios de hoy y las promociones de la bodega
+     * que ya aplican: lo mismo que verá bodega (misma cuenta que
+     * RecalcularPedido). Lo pide la lista de productos cada que se deja de
+     * tocar. "descuentos" es lo que la promoción le quita a cada producto,
+     * con ISV, para mostrarlo en su fila.
      *
      * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
      *
-     * @return array{total: float, ahorro: float, promociones: string}
+     * @return array{total: float, ahorro: float, promociones: string, descuentos: array<int, float>}
      */
-    public static function resumenDe(array $lineas): array
+    public static function resumenDe(array $lineas, ?int $bodegaId = null): array
     {
-        [$conProducto, $promociones] = self::calcular($lineas);
+        [$conProducto, $promociones] = self::calcular($lineas, $bodegaId);
         $tasaIsv = CalculadoraPrecio::tasaIsv();
         $total = 0.0;
         $ahorro = 0.0;
+        $descuentos = [];
 
         // Bruto − descuento = neto, ISV sobre el neto.
         foreach ($conProducto as $clave => $linea) {
+            $gravado = $linea['producto']->gravado;
             $bruto = round($linea['producto']->precioPara($linea['unidad']) * $linea['cantidad'], 2);
             $aplicado = $promociones->descuentoDe($clave);
             $descuento = round(min($bruto, $aplicado->monto ?? 0.0), 2);
             $neto = round($bruto - $descuento, 2);
 
             $ahorro += $descuento;
-            $total += $neto + ($linea['producto']->gravado ? round($neto * $tasaIsv, 2) : 0.0);
+            $total += $neto + ($gravado ? round($neto * $tasaIsv, 2) : 0.0);
+
+            if ($descuento > 0) {
+                $id = $linea['producto']->id;
+                $conIsv = ($gravado ? round($bruto * $tasaIsv, 2) - round($neto * $tasaIsv, 2) : 0.0) + $descuento;
+                $descuentos[$id] = round(($descuentos[$id] ?? 0.0) + $conIsv, 2);
+            }
         }
 
         return [
             'total'       => round($total, 2),
             'ahorro'      => round($ahorro, 2),
-            'promociones' => Promocion::query()->vigentes()->exists() ? self::promocionesAplicadas($promociones) : '',
+            'promociones' => Promocion::query()->vigentes()->paraBodega($bodegaId)->exists() ? self::promocionesAplicadas($promociones) : '',
+            'descuentos'  => $descuentos,
         ];
     }
 
@@ -309,21 +306,14 @@ class PedidoForm
         });
     }
 
-    private static function cuantasPromociones(): string
-    {
-        $cuantas = Promocion::query()->vigentes()->count();
-
-        return $cuantas === 1 ? '1 vigente' : "{$cuantas} vigentes";
-    }
-
     /**
-     * Las líneas con su producto, y lo que dejan las promociones vigentes.
+     * Las líneas con su producto, y lo que dejan las promociones vigentes en la bodega.
      *
      * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
      *
      * @return array{0: array<int, array{producto: Producto, unidad: UnidadVenta, cantidad: int}>, 1: ResultadoPromociones}
      */
-    private static function calcular(array $lineas): array
+    private static function calcular(array $lineas, ?int $bodegaId): array
     {
         if ($lineas === []) {
             return [[], new ResultadoPromociones];
@@ -346,24 +336,9 @@ class PedidoForm
             $paraMotor[] = new LineaPromocion($clave, $producto->id, $producto->unidades_por_caja, $unidad, $linea['cantidad'], $producto->precioPara($unidad));
         }
 
-        $vigentes = Promocion::query()->vigentes()->with(['condiciones.producto', 'productoBeneficio'])->orderBy('id')->get();
+        $vigentes = Promocion::query()->vigentes()->paraBodega($bodegaId)->with(['condiciones.producto', 'productoBeneficio'])->orderBy('id')->get();
 
         return [$conProducto, app(MotorPromociones::class)->calcular($paraMotor, $vigentes)];
-    }
-
-    private static function listaPromociones(): HtmlString
-    {
-        $filas = Promocion::query()
-            ->vigentes()
-            ->with(['condiciones.producto', 'productoBeneficio'])
-            ->orderBy('id')
-            ->get()
-            ->map(fn (Promocion $p): string => '<li style="margin-bottom:4px"><b>'.e((string) $p->codigo).'</b> · '.e($p->nombre)
-                .'<br><span style="opacity:.75">'.e($p->resumen()).'</span>'
-                .($p->descripcion ? '<br><span style="opacity:.75">'.e($p->descripcion).'</span>' : '').'</li>')
-            ->implode('');
-
-        return new HtmlString('<ul style="font-size:.875rem">'.$filas.'</ul>');
     }
 
     private static function promocionesAplicadas(ResultadoPromociones $resultado): string

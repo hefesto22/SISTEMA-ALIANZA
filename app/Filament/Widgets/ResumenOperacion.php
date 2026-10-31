@@ -14,7 +14,6 @@ use App\Filament\Support\Acceso;
 use App\Models\CambioPrecio;
 use App\Models\Pedido;
 use App\Models\Producto;
-use App\Models\Promocion;
 use App\Models\Proveedor;
 use Filament\Support\Icons\Heroicon;
 use Filament\Widgets\StatsOverviewWidget;
@@ -68,7 +67,7 @@ class ResumenOperacion extends StatsOverviewWidget
             ->descriptionIcon(Heroicon::OutlinedShoppingCart)
             ->color('success');
 
-        $promociones = Acceso::puede('ViewAny:Promocion') ? Promocion::query()->vigentes()->count() : 0;
+        $promociones = Acceso::puede('ViewAny:Promocion') ? PromocionResource::vigentesQueVe() : 0;
 
         if ($promociones > 0) {
             $stats[] = Stat::make('Promociones vigentes', $promociones)

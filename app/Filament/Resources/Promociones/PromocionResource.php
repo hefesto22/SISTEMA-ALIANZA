@@ -21,13 +21,16 @@ use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Promociones "si compra X, Y sale gratis / a mitad / con N%".
  *
- * Administración las crea y las activa o desactiva con el interruptor.
- * El vendedor solo ve las vigentes, y el menú le aparece únicamente
- * cuando hay alguna; si no hay, la preventa sigue igual que siempre.
+ * Cada una vale en una o varias bodegas (ninguna = todas). Administración
+ * las crea y cambia todas; el encargado, las de su bodega. Se activan o
+ * desactivan con el interruptor. El vendedor solo ve las vigentes de su
+ * bodega, y el menú le aparece únicamente cuando hay alguna; si no hay, la
+ * preventa sigue igual que siempre.
  *
  * @extends \Filament\Resources\Resource<Promocion>
  */
@@ -56,13 +59,21 @@ class PromocionResource extends Resource
     }
 
     /**
-     * El vendedor solo ve las vigentes hoy.
+     * Administración ve todas; los demás, las que valen en su bodega (el
+     * vendedor, solo las vigentes hoy).
      */
     public static function getEloquentQuery(): Builder
     {
+        $usuario = Acceso::usuario();
         $query = Promocion::query()
-            ->with(['condiciones.producto', 'productoBeneficio'])
+            ->with(['condiciones.producto', 'productoBeneficio', 'bodegas'])
             ->withCount('items');
+
+        if ($usuario === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        $query->visiblesPara($usuario);
 
         return Acceso::esVendedor() ? $query->vigentes() : $query;
     }
@@ -73,14 +84,24 @@ class PromocionResource extends Resource
             return false;
         }
 
-        return ! Acceso::esVendedor() || Promocion::query()->vigentes()->exists();
+        return ! Acceso::esVendedor() || self::vigentesQueVe() > 0;
     }
 
     public static function getNavigationBadge(): ?string
     {
-        $vigentes = Promocion::query()->vigentes()->count();
+        $vigentes = self::vigentesQueVe();
 
         return $vigentes > 0 ? (string) $vigentes : null;
+    }
+
+    /**
+     * Vigentes hoy de las que ve quien entró (las de su bodega).
+     */
+    public static function vigentesQueVe(): int
+    {
+        $usuario = Acceso::usuario();
+
+        return $usuario === null ? 0 : Promocion::query()->vigentes()->visiblesPara($usuario)->count();
     }
 
     public static function getNavigationBadgeColor(): string
@@ -122,6 +143,12 @@ class PromocionResource extends Resource
                     ->label('Vigencia')
                     ->state(fn (Promocion $record): string => self::vigencia($record))
                     ->color('gray'),
+                TextColumn::make('bodegas_texto')
+                    ->label('Bodegas')
+                    ->state(fn (Promocion $record): string => $record->bodegasTexto())
+                    ->color('gray')
+                    ->wrap()
+                    ->visible(! $esVendedor),
                 TextColumn::make('items_count')
                     ->label('Aplicada')
                     ->formatStateUsing(fn (mixed $state): string => (int) $state === 1 ? '1 vez' : ((int) $state).' veces')
@@ -132,7 +159,8 @@ class PromocionResource extends Resource
                     ->label('Activa')
                     ->onColor('success')
                     ->visible($puedeEditar)
-                    ->disabled(! $puedeEditar)
+                    // El encargado no apaga las de varias bodegas ni las de todas.
+                    ->disabled(fn (Promocion $record): bool => ! Gate::allows('update', $record))
                     ->afterStateUpdated(function (Promocion $record, bool $state): void {
                         Notification::make()
                             ->title($state ? "{$record->codigo} activada" : "{$record->codigo} desactivada")

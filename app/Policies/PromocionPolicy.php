@@ -4,69 +4,76 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Promocion;
+use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
-use Illuminate\Foundation\Auth\User as AuthUser;
 
 /**
- * Permisos en formato Shield ("Accion:Modelo"); se asignan por rol
- * desde el panel (Roles) o con RolesSistemaSeeder.
+ * Permisos Shield ("Accion:Promocion") + de quién es cada promoción:
+ *  - administración arma y cambia las de todas las bodegas;
+ *  - el encargado crea las de su bodega y solo cambia las que son
+ *    únicamente de su bodega (las de varias o de todas, solo las ve);
+ *  - el vendedor ve las que valen en su bodega.
  */
 class PromocionPolicy
 {
     use HandlesAuthorization;
 
-    public function viewAny(AuthUser $authUser): bool
+    public function viewAny(User $user): bool
     {
-        return $authUser->can('ViewAny:Promocion');
+        return $user->can('ViewAny:Promocion');
     }
 
-    public function view(AuthUser $authUser): bool
+    public function view(User $user, Promocion $promocion): bool
     {
-        return $authUser->can('View:Promocion');
+        return $user->can('View:Promocion') && $promocion->esVisiblePara($user);
     }
 
-    public function create(AuthUser $authUser): bool
+    /**
+     * El encargado necesita tener bodega: la promoción queda en la suya.
+     */
+    public function create(User $user): bool
     {
-        return $authUser->can('Create:Promocion');
+        return $user->can('Create:Promocion') && ($user->veTodasLasBodegas() || $user->bodega_id !== null);
     }
 
-    public function update(AuthUser $authUser): bool
+    public function update(User $user, Promocion $promocion): bool
     {
-        return $authUser->can('Update:Promocion');
+        return $user->can('Update:Promocion') && $promocion->esEditablePor($user);
     }
 
-    public function delete(AuthUser $authUser): bool
+    public function delete(User $user, Promocion $promocion): bool
     {
-        return $authUser->can('Delete:Promocion');
+        return $user->can('Delete:Promocion') && $promocion->esEditablePor($user);
     }
 
-    public function restore(AuthUser $authUser): bool
+    public function restore(User $user, Promocion $promocion): bool
     {
-        return $authUser->can('Restore:Promocion');
+        return $user->can('Restore:Promocion') && $promocion->esEditablePor($user);
     }
 
-    public function forceDelete(AuthUser $authUser): bool
+    public function forceDelete(User $user, Promocion $promocion): bool
     {
-        return $authUser->can('ForceDelete:Promocion');
+        return $user->can('ForceDelete:Promocion') && $promocion->esEditablePor($user);
     }
 
-    public function forceDeleteAny(AuthUser $authUser): bool
+    public function forceDeleteAny(User $user): bool
     {
-        return $authUser->can('ForceDeleteAny:Promocion');
+        return $user->can('ForceDeleteAny:Promocion');
     }
 
-    public function restoreAny(AuthUser $authUser): bool
+    public function restoreAny(User $user): bool
     {
-        return $authUser->can('RestoreAny:Promocion');
+        return $user->can('RestoreAny:Promocion');
     }
 
-    public function replicate(AuthUser $authUser): bool
+    public function replicate(User $user, Promocion $promocion): bool
     {
-        return $authUser->can('Replicate:Promocion');
+        return $user->can('Replicate:Promocion') && $promocion->esEditablePor($user);
     }
 
-    public function reorder(AuthUser $authUser): bool
+    public function reorder(User $user): bool
     {
-        return $authUser->can('Reorder:Promocion');
+        return $user->can('Reorder:Promocion');
     }
 }

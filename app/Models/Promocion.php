@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -27,6 +28,10 @@ use Illuminate\Support\Carbon;
  * El código (PROMO-0001) se genera solo. Solo cuenta en los pedidos
  * mientras esté activa y dentro de sus fechas; el cálculo vive en
  * App\Domain\Promociones\MotorPromociones.
+ *
+ * Bodegas: vale en las que tenga marcadas; sin ninguna, en todas.
+ * Administración las arma para una o varias; el encargado, solo para la
+ * suya (y solo cambia las que son únicamente de su bodega).
  *
  * @property int $id
  * @property string|null $codigo
@@ -43,6 +48,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Collection<int, PromocionCondicion> $condiciones
+ * @property-read Collection<int, Bodega> $bodegas
  * @property-read Producto $productoBeneficio
  * @property-read User|null $creador
  */
@@ -135,6 +141,16 @@ class Promocion extends Model
     }
 
     /**
+     * Bodegas donde vale; sin ninguna, vale en todas.
+     *
+     * @return BelongsToMany<Bodega, $this>
+     */
+    public function bodegas(): BelongsToMany
+    {
+        return $this->belongsToMany(Bodega::class, 'promocion_bodega');
+    }
+
+    /**
      * Líneas de pedido donde se aplicó.
      *
      * @return HasMany<PedidoItem, $this>
@@ -163,6 +179,70 @@ class Promocion extends Model
             ->where(function (Builder $q) use ($dia): void {
                 $q->whereNull('vigente_hasta')->orWhere('vigente_hasta', '>=', $dia);
             });
+    }
+
+    /**
+     * Las que valen en esa bodega: las de todas las bodegas y las que la
+     * tienen marcada. Sin bodega (administración sin escoger), solo las de
+     * todas.
+     *
+     * @param Builder<Promocion> $query
+     *
+     * @return Builder<Promocion>
+     */
+    public function scopeParaBodega(Builder $query, ?int $bodegaId): Builder
+    {
+        return $query->where(function (Builder $q) use ($bodegaId): void {
+            $q->whereDoesntHave('bodegas');
+
+            if ($bodegaId !== null) {
+                $q->orWhereHas('bodegas', fn (Builder $bodega): Builder => $bodega->where('bodegas.id', $bodegaId));
+            }
+        });
+    }
+
+    /**
+     * Administración ve todas; los demás, las que valen en su bodega.
+     *
+     * @param Builder<Promocion> $query
+     *
+     * @return Builder<Promocion>
+     */
+    public function scopeVisiblesPara(Builder $query, User $user): Builder
+    {
+        return $user->veTodasLasBodegas() ? $query : $this->scopeParaBodega($query, $user->bodega_id);
+    }
+
+    public function esVisiblePara(User $user): bool
+    {
+        if ($user->veTodasLasBodegas() || $this->bodegas->isEmpty()) {
+            return true;
+        }
+
+        return $user->bodega_id !== null && $this->bodegas->contains('id', $user->bodega_id);
+    }
+
+    /**
+     * Administración cambia todas; el encargado, solo las que son únicamente
+     * de su bodega (las de varias bodegas o de todas son de administración).
+     */
+    public function esEditablePor(User $user): bool
+    {
+        if ($user->veTodasLasBodegas()) {
+            return true;
+        }
+
+        return $user->bodega_id !== null
+            && $this->bodegas->count() === 1
+            && $this->bodegas->first()?->id === $user->bodega_id;
+    }
+
+    /**
+     * "Todas las bodegas" o "SANTA ROSA DE COPÁN, OCOTEPEQUE".
+     */
+    public function bodegasTexto(): string
+    {
+        return $this->bodegas->isEmpty() ? 'Todas las bodegas' : $this->bodegas->pluck('nombre')->sort()->implode(', ');
     }
 
     public function estaVigente(?CarbonInterface $fecha = null): bool

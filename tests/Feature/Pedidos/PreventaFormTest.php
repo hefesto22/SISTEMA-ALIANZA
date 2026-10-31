@@ -118,10 +118,41 @@ test('el total que pide el teléfono trae las promociones', function (): void {
         ->toMatchArray(['total' => 2760.0, 'ahorro' => 0.0]);
 
     // 30 + 25.30 = 55.30 − 12.65 (nutrine a mitad) = 42.65 + 15% ISV = 49.05
-    expect(PedidoForm::resumenDe([
+    $resumen = PedidoForm::resumenDe([
         ['id' => null, 'producto_id' => $toffee->id, 'unidad' => 'unidad', 'cantidad' => 1],
         ['id' => null, 'producto_id' => $nutrine->id, 'unidad' => 'unidad', 'cantidad' => 1],
-    ]))->toMatchArray(['total' => 49.05, 'ahorro' => 12.65]);
+    ]);
+
+    // En la fila del producto se ve lo que le quita la promoción (con ISV).
+    expect($resumen)->toMatchArray(['total' => 49.05, 'ahorro' => 12.65])
+        ->and(array_keys($resumen['descuentos']))->toBe([$nutrine->id])
+        ->and($resumen['descuentos'][$nutrine->id])->toBeGreaterThan(12.65);
+});
+
+test('la preventa trae las promociones de hoy de su bodega, con lo que hay que agregar para llevarlas', function (): void {
+    $regalo = Producto::factory()->precio(10.0, 20.0)->create(['descripcion' => 'JABON DE REGALO']);
+    $otra = Bodega::factory()->create();
+
+    $suya = Promocion::factory()->para($this->producto, $regalo, cantidad: 2, unidadCondicion: UnidadVenta::Caja)->create();
+    $suya->bodegas()->sync([$this->bodega->id]);
+    $deOtra = Promocion::factory()->para($this->producto, $regalo)->create();
+    $deOtra->bodegas()->sync([$otra->id]);
+
+    $this->actingAs($this->vendedor);
+
+    /** @var array{promos: list<array<string, mixed>>, productos: array<int, array<string, mixed>>} $hoy */
+    $hoy = Livewire::test(CreatePedido::class)
+        ->instance()
+        ->callSchemaComponentMethod('form.items', 'promocionesDeHoy', []);
+
+    expect(array_column($hoy['promos'], 'id'))->toBe([$suya->id])
+        ->and($hoy['promos'][0]['compra'])->toBe([$this->producto->id])
+        ->and($hoy['promos'][0]['regalo'])->toBe($regalo->id)
+        ->and($hoy['promos'][0]['lineas'])->toBe([
+            ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2],
+            ['producto_id' => $regalo->id, 'unidad' => 'unidad', 'cantidad' => 1],
+        ])
+        ->and(array_keys($hoy['productos']))->toEqualCanonicalizing([$this->producto->id, $regalo->id]);
 });
 
 test('un producto lleva cajas y unidades en el mismo pedido; si viene repetido se junta', function (): void {

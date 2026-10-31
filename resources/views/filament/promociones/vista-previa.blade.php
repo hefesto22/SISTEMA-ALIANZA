@@ -6,6 +6,7 @@
     $compra ??= [];
     $regalo ??= null;
     $nota ??= '';
+    $bodegas ??= '';
 @endphp
 
 <style>
@@ -45,6 +46,9 @@
         <div class="pv-chips">
             <span @class(['pv-chip', 'ok' => $activa])>{{ $activa ? 'Activa' : 'Inactiva' }}</span>
             <span class="pv-chip">{{ $vigencia }}</span>
+            @if ($bodegas !== '')
+                <span class="pv-chip">{{ $bodegas }}</span>
+            @endif
         </div>
     </div>
 

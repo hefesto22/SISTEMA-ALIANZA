@@ -23,7 +23,7 @@ use Illuminate\Database\Eloquent\Collection;
  * cuyo precio ya quedó por debajo del costo de hoy pasa al precio de hoy:
  * no se vende a pérdida.
  *
- * Promociones: se aplican las vigentes hoy. Con $respetarPromocionesDelPedido
+ * Promociones: se aplican las vigentes hoy en la bodega del pedido. Con $respetarPromocionesDelPedido
  * (al despachar) también cuentan las que ya tenía el pedido aunque se hayan
  * desactivado después: al cliente se le respeta lo que le ofrecieron.
  *
@@ -63,7 +63,7 @@ final class RecalcularPedido
             );
         }
 
-        $resultado = $this->motor->calcular($lineas, $this->promociones($items, $respetarPromocionesDelPedido));
+        $resultado = $this->motor->calcular($lineas, $this->promociones($pedido, $items, $respetarPromocionesDelPedido));
 
         $subtotal = 0.0;
         $descuento = 0.0;
@@ -97,15 +97,16 @@ final class RecalcularPedido
     }
 
     /**
-     * Vigentes hoy y, si se pide, también las que ya traía el pedido.
+     * Vigentes hoy en la bodega del pedido y, si se pide, también las que ya
+     * traía el pedido.
      *
      * @param Collection<int, PedidoItem> $items
      *
      * @return Collection<int, Promocion>
      */
-    private function promociones(Collection $items, bool $respetarPromocionesDelPedido): Collection
+    private function promociones(Pedido $pedido, Collection $items, bool $respetarPromocionesDelPedido): Collection
     {
-        $promociones = Promocion::query()->vigentes()->with('condiciones')->get();
+        $promociones = Promocion::query()->vigentes()->paraBodega($pedido->bodega_id)->with('condiciones')->get();
 
         $delPedido = $items->pluck('promocion_id')->filter()->unique()->values()->all();
 

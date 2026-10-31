@@ -15,6 +15,7 @@ use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Producto;
+use App\Models\Promocion;
 use Closure;
 use Filament\Forms\Components\Contracts\HasNestedRecursiveValidationRules;
 use Filament\Forms\Components\Field;
@@ -42,6 +43,11 @@ use Livewire\Attributes\Renderless;
  * Con "controlar existencias" encendido (Configuración) lo que no tiene
  * disponible se ve en el buscador pero no se agrega, y no se pide (ni se
  * guarda) más de lo disponible.
+ *
+ * Promociones: las vigentes hoy en la bodega del pedido van arriba de la
+ * lista para agregarlas de un toque (lo que pide la promoción más el
+ * regalo). Si el vendedor toca un producto que está en una promoción, se le
+ * pregunta si agrega la promoción o solo el producto.
  *
  * Vista: resources/views/filament/pedidos/lineas-pedido.blade.php (también
  * trae la barra de abajo con el total y Guardar).
@@ -173,7 +179,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      *
      * @param array<mixed> $lineas
      *
-     * @return array{total: float, ahorro: float, promociones: string}
+     * @return array{total: float, ahorro: float, promociones: string, descuentos: array<int, float>}
      */
     #[ExposedLivewireMethod]
     #[Renderless]
@@ -181,7 +187,89 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     {
         $this->sinRedibujar();
 
-        return PedidoForm::resumenDe(self::normalizar($lineas));
+        return PedidoForm::resumenDe(self::normalizar($lineas), $this->bodegaDelPedido());
+    }
+
+    /**
+     * Las promociones de hoy otra vez (administración cambió la bodega).
+     *
+     * @return array{promos: list<array<string, mixed>>, productos: array<int, array<string, mixed>>}
+     */
+    #[ExposedLivewireMethod]
+    #[Renderless]
+    public function promocionesDeHoy(): array
+    {
+        $this->sinRedibujar();
+
+        return $this->getPromocionesDeHoy();
+    }
+
+    /**
+     * Promociones vigentes hoy en la bodega del pedido, como las usa el
+     * teléfono: qué hay que agregar para llevarla ("lineas": lo que pide la
+     * promoción más el regalo, en su unidad), qué productos la activan
+     * ("compra") y cuál es el regalo; y los datos de esos productos, con lo
+     * disponible.
+     *
+     * @return array{promos: list<array<string, mixed>>, productos: array<int, array<string, mixed>>}
+     */
+    public function getPromocionesDeHoy(): array
+    {
+        $bodega = $this->bodegaDelPedido();
+        $promociones = Promocion::query()
+            ->vigentes()
+            ->paraBodega($bodega)
+            ->with(['condiciones.producto', 'productoBeneficio'])
+            ->orderBy('id')
+            ->get();
+
+        if ($promociones->isEmpty()) {
+            return ['promos' => [], 'productos' => []];
+        }
+
+        $productos = [];
+
+        foreach ($promociones as $promocion) {
+            foreach ($promocion->condiciones as $condicion) {
+                $productos[$condicion->producto_id] = $condicion->producto;
+            }
+
+            $productos[$promocion->producto_beneficio_id] = $promocion->productoBeneficio;
+        }
+
+        $ids = array_keys($productos);
+        $hay = Disponible::existencia($bodega, $ids);
+        $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
+        $datos = [];
+
+        foreach ($productos as $id => $producto) {
+            $datos[$id] = self::datosDe($producto, $hay[$id] ?? 0, $apartado[$id] ?? 0);
+        }
+
+        $promos = [];
+
+        foreach ($promociones as $promocion) {
+            $lineas = [];
+
+            foreach ($promocion->condiciones as $condicion) {
+                self::sumarLinea($lineas, $condicion->producto_id, $condicion->unidad, $condicion->cantidad);
+            }
+
+            self::sumarLinea($lineas, $promocion->producto_beneficio_id, $promocion->beneficio_unidad, $promocion->cantidad_beneficio);
+
+            $promos[] = [
+                'id'      => $promocion->id,
+                'codigo'  => (string) $promocion->codigo,
+                'nombre'  => $promocion->nombre,
+                'resumen' => $promocion->resumen(),
+                'nota'    => $promocion->descripcion,
+                'compra'  => array_values(array_unique($promocion->condiciones->pluck('producto_id')->all())),
+                'regalo'  => $promocion->producto_beneficio_id,
+                'lineas'  => array_values($lineas),
+            ];
+        }
+
+        return ['promos' => $promos, 'productos' => $datos];
     }
 
     /**
@@ -392,6 +480,19 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         }
 
         return null;
+    }
+
+    /**
+     * Suma una línea de la promoción (el mismo producto en la misma unidad va
+     * junto: "compre 2 y lleve 1 más" son 3).
+     *
+     * @param array<string, array{producto_id: int, unidad: string, cantidad: int}> $lineas
+     */
+    private static function sumarLinea(array &$lineas, int $productoId, UnidadVenta $unidad, int $cantidad): void
+    {
+        $clave = $productoId.'-'.$unidad->value;
+        $lineas[$clave] ??= ['producto_id' => $productoId, 'unidad' => $unidad->value, 'cantidad' => 0];
+        $lineas[$clave]['cantidad'] += max(1, $cantidad);
     }
 
     private static function entero(mixed $valor): int

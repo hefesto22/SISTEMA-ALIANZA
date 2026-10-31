@@ -20,6 +20,12 @@
     muestra lo disponible (lo de otros pedidos ya va restado). Con
     "controlar existencias" encendido los que no tienen se ven pero no se
     pueden agregar, y no se deja pedir más de lo disponible.
+
+    Promociones de hoy (las de la bodega del pedido): arriba de la lista,
+    cada una con "Agregar al pedido" (lo que pide la promoción más el
+    regalo). En el buscador los productos en promoción salen marcados y, al
+    tocar uno que todavía no lleva, se pregunta si agrega la promoción o solo
+    el producto. En la fila, lo que la promoción le descuenta (o "Gratis").
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
@@ -30,22 +36,25 @@
 
     $statePath = $getStatePath();
     $lineasIniciales = LineasPedido::normalizar($getState());
-    $resumen = PedidoForm::resumenDe($lineasIniciales);
+    $resumen = PedidoForm::resumenDe($lineasIniciales, $field->bodegaDelPedido());
+    $hoy = $getPromocionesDeHoy();
     $productosIniciales = count(array_unique(array_column($lineasIniciales, 'producto_id')));
     $edicion = (bool) $getRecord()?->exists;
 
     $config = [
-        'clave'     => $getKey(),
-        'productos' => (object) $getProductosDeLineas(),
-        'total'     => $resumen['total'],
-        'ahorro'    => $resumen['ahorro'],
-        'promos'    => $resumen['promociones'],
-        'tasa'      => CalculadoraPrecio::tasaIsv(),
-        'simbolo'   => (string) config('honduras.moneda.simbolo', 'L.'),
-        'maximo'    => LineasPedido::MAXIMO_CANTIDAD,
-        'edicion'   => $edicion,
-        'controlar' => Configuracion::actual()->controlar_existencias,
-        'veTodo'    => Acceso::veTodo(),
+        'clave'      => $getKey(),
+        'productos'  => (object) ($getProductosDeLineas() + $hoy['productos']),
+        'hoy'        => $hoy['promos'],
+        'descuentos' => (object) $resumen['descuentos'],
+        'total'      => $resumen['total'],
+        'ahorro'     => $resumen['ahorro'],
+        'promos'     => $resumen['promociones'],
+        'tasa'       => CalculadoraPrecio::tasaIsv(),
+        'simbolo'    => (string) config('honduras.moneda.simbolo', 'L.'),
+        'maximo'     => LineasPedido::MAXIMO_CANTIDAD,
+        'edicion'    => $edicion,
+        'controlar'  => Configuracion::actual()->controlar_existencias,
+        'veTodo'     => Acceso::veTodo(),
     ];
 @endphp
 
@@ -98,6 +107,55 @@
         .dark .pv-tope { color: var(--warning-400); }
         .pv-paso:disabled { opacity: 0.35; cursor: not-allowed; }
         .pv-aviso { padding: 0.75rem 0.875rem; font-size: 0.8rem; color: var(--gray-500); }
+
+        /* ── Promociones (panel, pregunta y marcas) ── */
+        .pv-resultado-promo { display: inline-flex; align-items: center; gap: 0.25rem; justify-self: start; margin-top: 0.1rem; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; color: var(--success-700); background: color-mix(in oklab, var(--success-500) 14%, transparent); }
+        .dark .pv-resultado-promo { color: var(--success-400); }
+        .pv-resultado-promo svg { width: 0.85rem; height: 0.85rem; }
+        .pv-promos { border-radius: 0.75rem; outline: 1px solid color-mix(in oklab, var(--success-500) 40%, transparent); background: color-mix(in oklab, var(--success-500) 7%, transparent); overflow: hidden; }
+        .pv-promos-boton { display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.75rem 0.875rem; text-align: start; color: var(--success-700); }
+        .dark .pv-promos-boton { color: var(--success-400); }
+        .pv-promos-boton > svg { flex-shrink: 0; width: 1.25rem; height: 1.25rem; }
+        .pv-promos-titulo { font-size: 0.9rem; font-weight: 700; }
+        .pv-promos-cuantas { min-width: 1.4rem; padding: 0 0.4rem; border-radius: 999px; text-align: center; font-size: 0.75rem; font-weight: 800; line-height: 1.4rem; color: #fff; background: var(--success-600); }
+        .pv-promos-ver { margin-inline-start: auto; font-size: 0.8rem; font-weight: 600; }
+        .pv-promos-lista { display: grid; gap: 0.6rem; padding: 0 0.75rem 0.75rem; max-height: min(26rem, 60vh); overflow-y: auto; overscroll-behavior: contain; }
+        .pv-promo { display: grid; gap: 0.35rem; padding: 0.75rem 0.85rem; border-radius: 0.625rem; background: #fff; outline: 1px solid rgb(3 7 18 / 0.08); }
+        .dark .pv-promo { background: var(--gray-900); outline-color: rgb(255 255 255 / 0.1); }
+        .pv-promo-arriba { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+        .pv-promo-codigo { font-size: 0.7rem; font-weight: 700; padding: 0.05rem 0.45rem; border-radius: 0.375rem; color: var(--gray-500); outline: 1px dashed var(--gray-300); }
+        .dark .pv-promo-codigo { color: var(--gray-400); outline-color: var(--gray-700); }
+        .pv-promo-nombre { font-size: 0.9rem; font-weight: 700; line-height: 1.3; }
+        .pv-promo-resumen { font-size: 0.82rem; line-height: 1.4; }
+        .pv-promo-nota { font-size: 0.75rem; font-style: italic; color: var(--gray-500); }
+        .dark .pv-promo-nota { color: var(--gray-400); }
+        .pv-promo-agregar { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; margin-top: 0.2rem; padding: 0.55rem 0.9rem; border-radius: 0.5rem; font-size: 0.85rem; font-weight: 700; color: #fff; background: var(--success-600); }
+        .pv-promo-agregar:hover { background: var(--success-700); }
+        .pv-promo-agregar svg { width: 1rem; height: 1rem; }
+        .pv-promo-ok { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.82rem; font-weight: 600; color: var(--success-700); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
+        .dark .pv-promo-ok { color: var(--success-400); }
+        .pv-promo-ok svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; }
+        .pv-corta-texto { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.15rem; }
+        .pv-linea-promo { justify-self: start; font-size: 0.72rem; font-weight: 700; color: var(--success-700); }
+        .dark .pv-linea-promo { color: var(--success-400); }
+
+        /* ¿Agrega la promoción? En el teléfono sale abajo; en la computadora, al centro. */
+        .pv-pregunta-fondo { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 0; background: rgb(3 7 18 / 0.55); }
+        .pv-pregunta { display: grid; gap: 0.6rem; width: 100%; max-width: 32rem; max-height: 85vh; overflow-y: auto; padding: 1.1rem 1rem calc(1rem + env(safe-area-inset-bottom)); border-radius: 1rem 1rem 0 0; background: var(--gray-50); box-shadow: 0 -10px 30px rgb(0 0 0 / 0.2); }
+        .dark .pv-pregunta { background: var(--gray-800); }
+        .pv-pregunta-titulo { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; font-weight: 800; color: var(--success-700); }
+        .dark .pv-pregunta-titulo { color: var(--success-400); }
+        .pv-pregunta-titulo svg { width: 1.4rem; height: 1.4rem; }
+        .pv-pregunta-producto { font-size: 0.9rem; font-weight: 600; }
+        .pv-pregunta-dile { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--gray-500); }
+        .dark .pv-pregunta-dile { color: var(--gray-400); }
+        .pv-pregunta .pv-promo-agregar { width: 100%; padding: 0.7rem 1rem; font-size: 0.95rem; }
+        .pv-pregunta-no { width: 100%; padding: 0.7rem 1rem; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 600; color: var(--gray-700); outline: 1px solid rgb(3 7 18 / 0.15); }
+        .dark .pv-pregunta-no { color: var(--gray-200); outline-color: rgb(255 255 255 / 0.18); }
+        @media (min-width: 640px) {
+            .pv-pregunta-fondo { align-items: center; padding: 1rem; }
+            .pv-pregunta { border-radius: 1rem; padding-bottom: 1.1rem; }
+        }
 
         /* ── Último pedido del cliente ── */
         .pv-ultimo { display: grid; gap: 0.5rem; padding: 0.875rem 1rem; border-radius: 0.75rem; background: color-mix(in oklab, var(--primary-500) 8%, transparent); outline: 1px solid color-mix(in oklab, var(--primary-500) 35%, transparent); }
@@ -212,6 +270,15 @@
             sinExistencia: '',
             esperaSinExistencia: null,
             ultimo: null,
+            promosHoy: @js($config['hoy']),
+            verPromos: false,
+            pregunta: null,
+            avisoPromo: '',
+            esperaAvisoPromo: null,
+            promoAgregada: '',
+            esperaPromoAgregada: null,
+            turnoPromos: 0,
+            descuentos: @js($config['descuentos']),
             total: @js($config['total']),
             ahorro: @js($config['ahorro']),
             promociones: @js($config['promos']),
@@ -241,6 +308,11 @@
                 this.ordenProductos = [...new Set(this.lineas.map((l) => Number(l.producto_id)))]
 
                 this.$watch('lineas', () => this.recalcular())
+
+                {{-- Administración: al cambiar la bodega, las promociones son las de esa bodega. --}}
+                if (@js($config['veTodo'])) {
+                    this.$wire.$watch('data.bodega_id', () => this.pedirPromos())
+                }
 
                 {{-- Al crear: si el cliente ya tiene pedidos, ofrecer los mismos productos. --}}
                 if (! @js($config['edicion'])) {
@@ -489,6 +561,7 @@
                 if (this.lineas.length === 0) {
                     this.ahorro = 0
                     this.promociones = ''
+                    this.descuentos = {}
 
                     return
                 }
@@ -509,6 +582,7 @@
                     this.total = r.total
                     this.ahorro = r.ahorro
                     this.promociones = r.promociones
+                    this.descuentos = r.descuentos ?? {}
                 } catch (e) {}
             },
 
@@ -595,7 +669,7 @@
                 this.buscando = false
             },
 
-            {{-- Tocar un producto: suma 1 unidad y su fila queda abierta para poner cajas o unidades. Sin disponible (controlando la existencia) no entra: avisa. --}}
+            {{-- Tocar un producto: suma 1 unidad y su fila queda abierta para poner cajas o unidades. Sin disponible (controlando la existencia) no entra: avisa. Si está en promoción y todavía no lo lleva, primero pregunta si agrega la promoción. --}}
             agregar(p) {
                 if (this.bloqueado(p)) {
                     this.sinExistencia = p.descripcion
@@ -606,6 +680,21 @@
                 }
 
                 this.sinExistencia = ''
+
+                if (this.lleva(p.id) === '' && this.enPromo(p.id)) {
+                    this.productos[Number(p.id)] = p
+                    this.avisoPromo = ''
+                    this.pregunta = { p: p, promos: this.promosDe(p.id) }
+                    this.cerrarBusqueda()
+                    this.$refs.buscador.blur()
+
+                    return
+                }
+
+                this.agregarProducto(p)
+            },
+
+            agregarProducto(p) {
                 const id = Number(p.id)
                 this.productos[id] = p
                 this.recordar(id)
@@ -614,6 +703,113 @@
                 this.resaltar(id)
                 this.cerrarBusqueda()
                 this.$refs.buscador.blur()
+            },
+
+            {{-- "No, solo el producto": entra como siempre (1 unidad y la fila abierta). --}}
+            soloProducto() {
+                const p = this.pregunta?.p
+
+                this.pregunta = null
+
+                if (p) {
+                    this.agregarProducto(p)
+                }
+            },
+
+            {{-- Promociones en las que entra el producto: lo pide la promoción o es el regalo. --}}
+            promosDe(id) {
+                return this.promosHoy.filter((pr) => pr.compra.includes(Number(id)) || Number(pr.regalo) === Number(id))
+            },
+
+            enPromo(id) {
+                return this.promosDe(id).length > 0
+            },
+
+            {{-- Controlando la existencia: el primer producto de la promoción que no alcanza ('' si alcanza todo). --}}
+            noAlcanzaPara(promo) {
+                if (! @js($config['controlar']) || this.sinBodegaEscogida()) {
+                    return ''
+                }
+
+                const pide = {}
+
+                for (const l of promo.lineas) {
+                    const caja = Math.max(1, Number(this.productos[l.producto_id]?.caja ?? 1))
+                    pide[l.producto_id] = (pide[l.producto_id] ?? 0) + Number(l.cantidad) * (l.unidad === 'caja' ? caja : 1)
+                }
+
+                for (const id of Object.keys(pide)) {
+                    const hay = this.hayDe(id)
+                    const caja = Math.max(1, Number(this.productos[id]?.caja ?? 1))
+                    const yaVa = this.cant(id, 'caja') * caja + this.cant(id, 'unidad')
+
+                    if (hay !== null && yaVa + pide[id] > hay) {
+                        return this.nombreDe(id)
+                    }
+                }
+
+                return ''
+            },
+
+            {{-- Agrega lo que pide la promoción más el regalo (sobre lo que ya lleve). --}}
+            agregarPromo(promo) {
+                const falta = this.noAlcanzaPara(promo)
+
+                if (falta !== '') {
+                    this.avisoPromo = 'No alcanza ' + falta + ' en la bodega para esta promoción.'
+                    clearTimeout(this.esperaAvisoPromo)
+                    this.esperaAvisoPromo = setTimeout(() => this.avisoPromo = '', 4000)
+
+                    return
+                }
+
+                for (const l of promo.lineas) {
+                    this.recordar(l.producto_id)
+                    this.fijarCant(l.producto_id, l.unidad, this.cant(l.producto_id, l.unidad) + Number(l.cantidad))
+                }
+
+                this.pregunta = null
+                this.verPromos = false
+                this.abierta = null
+                this.avisoPromo = ''
+                this.promoAgregada = 'Se agregó ' + promo.codigo + ' · ' + promo.nombre
+                clearTimeout(this.esperaPromoAgregada)
+                this.esperaPromoAgregada = setTimeout(() => this.promoAgregada = '', 3500)
+
+                if (promo.lineas.length > 0) {
+                    this.resaltar(Number(promo.lineas[0].producto_id))
+                }
+            },
+
+            async pedirPromos() {
+                const turno = ++this.turnoPromos
+
+                try {
+                    const r = await this.llamar('promocionesDeHoy', {})
+
+                    if (turno !== this.turnoPromos || ! r) {
+                        return
+                    }
+
+                    Object.assign(this.productos, r.productos)
+                    this.promosHoy = r.promos
+                } catch (e) {}
+            },
+
+            {{-- Lo que la promoción le quita al producto, con ISV (lo calcula el servidor). --}}
+            descuentoDe(id) {
+                return Number(this.descuentos?.[id] ?? 0)
+            },
+
+            {{-- "Gratis" si la promoción lo deja en cero; si no, "Promo −L. 12.00". --}}
+            textoPromo(id) {
+                const descuento = this.descuentoDe(id)
+
+                return descuento >= this.subtotalDe(id) - 0.005 ? 'Gratis' : 'Promo −' + this.dinero(descuento)
+            },
+
+            netoDe(id) {
+                return this.redondear(Math.max(0, this.subtotalDe(id) - this.descuentoDe(id)))
             },
 
             abrir(id) {
@@ -670,6 +866,7 @@
                             <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
                             <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
                             <span class="pv-resultado-lleva" x-show="lleva(p.id) !== ''" x-text="'Ya lleva ' + lleva(p.id) + ' · tocar suma 1 UN'"></span>
+                            <span class="pv-resultado-promo" x-show="enPromo(p.id)" x-cloak>{{ svg('heroicon-m-gift') }} En promoción</span>
                         </span>
                         <span
                             class="pv-resultado-hay"
@@ -687,6 +884,44 @@
                     : 'No hay productos activos con ese código o nombre.'"></div>
                 <div class="pv-aviso" x-show="! buscado && buscar.trim().length === 1">Escriba al menos 2 letras (o el código).</div>
             </div>
+        </div>
+
+        {{-- Promociones de hoy de la bodega: se agregan de un toque --}}
+        @if ($config['hoy'] !== [] || $config['veTodo'])
+            <div class="pv-promos" x-show="promosHoy.length > 0" @if ($config['hoy'] === []) style="display: none" @endif>
+                <button type="button" class="pv-promos-boton" x-on:click="verPromos = ! verPromos" x-bind:aria-expanded="verPromos">
+                    {{ svg('heroicon-m-gift') }}
+                    <span class="pv-promos-titulo">Promociones de hoy</span>
+                    <span class="pv-promos-cuantas" x-text="promosHoy.length">{{ count($config['hoy']) }}</span>
+                    <span class="pv-promos-ver" x-text="verPromos ? 'Cerrar' : 'Ver y agregar'">Ver y agregar</span>
+                </button>
+
+                <div class="pv-promos-lista" x-show="verPromos" x-cloak>
+                    <div class="pv-aviso-sin" x-show="avisoPromo !== '' && ! pregunta" x-cloak>
+                        {{ svg('heroicon-m-no-symbol') }}
+                        <span x-text="avisoPromo"></span>
+                    </div>
+
+                    <template x-for="pr in promosHoy" x-bind:key="pr.id">
+                        <div class="pv-promo">
+                            <div class="pv-promo-arriba">
+                                <span class="pv-promo-codigo" x-text="pr.codigo"></span>
+                                <span class="pv-promo-nombre" x-text="pr.nombre"></span>
+                            </div>
+                            <div class="pv-promo-resumen" x-text="pr.resumen"></div>
+                            <div class="pv-promo-nota" x-show="pr.nota" x-text="pr.nota"></div>
+                            <button type="button" class="pv-promo-agregar" x-on:click="agregarPromo(pr)">
+                                {{ svg('heroicon-m-plus') }} Agregar al pedido
+                            </button>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        @endif
+
+        <div class="pv-promo-ok" x-show="promoAgregada !== ''" x-cloak>
+            {{ svg('heroicon-m-check-circle') }}
+            <span x-text="promoAgregada"></span>
         </div>
 
         {{-- Último pedido de este cliente (al crear, con la lista vacía) --}}
@@ -717,21 +952,25 @@
                             <span class="pv-cant pv-cant-caja" x-show="cant(id, 'caja') > 0" x-text="cant(id, 'caja') + ' CJ'"></span>
                             <span class="pv-cant" x-show="cant(id, 'unidad') > 0" x-text="cant(id, 'unidad') + ' UN'"></span>
                         </span>
-                        <span class="pv-corta-nombre" x-text="nombreDe(id)"></span>
-                        <span class="pv-linea-subtotal" x-text="dinero(subtotalDe(id))"></span>
+                        <span class="pv-corta-texto">
+                            <span class="pv-corta-nombre" x-text="nombreDe(id)"></span>
+                            <span class="pv-linea-promo" x-show="descuentoDe(id) > 0" x-cloak x-text="textoPromo(id)"></span>
+                        </span>
+                        <span class="pv-linea-subtotal" x-text="dinero(netoDe(id))"></span>
                     </button>
 
                     {{-- Abierta: cajas y unidades del mismo producto --}}
                     <div class="pv-detalle" x-show="abierta === id">
                         <div class="pv-linea-arriba" x-on:click="abrir(id)">
                             <div class="pv-linea-nombre" x-text="nombreDe(id)"></div>
-                            <div class="pv-linea-subtotal" x-text="dinero(subtotalDe(id))"></div>
+                            <div class="pv-linea-subtotal" x-text="dinero(netoDe(id))"></div>
                             <button type="button" class="pv-quitar" x-on:click.stop="quitarProducto(id)" aria-label="Quitar del pedido" title="Quitar">
                                 {{ svg('heroicon-m-x-mark') }}
                             </button>
                         </div>
 
                         <div class="pv-linea-precio" x-text="precioDe(id)"></div>
+                        <div class="pv-linea-promo" x-show="descuentoDe(id) > 0" x-cloak x-text="textoPromo(id) + ' por promoción'"></div>
                         <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]), 'pv-hay-nada': (hayDe(id) ?? 0) <= 0 }" x-text="textoHay(id)"></div>
                         <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: disponible ' + enCajas(Math.max(0, hayDe(id) ?? 0), productos[id]?.caja)"></div>
 
@@ -790,6 +1029,39 @@
         </div>
 
         <div x-show="promociones" x-html="promociones" @if ($resumen['promociones'] === '') style="display: none" @endif>{!! $resumen['promociones'] !!}</div>
+
+        {{-- Producto en promoción: ¿agrega la promoción o solo el producto? --}}
+        <div class="pv-pregunta-fondo" x-show="pregunta" x-cloak x-transition.opacity x-on:click.self="pregunta = null" x-on:keydown.escape.window="pregunta = null">
+            <div class="pv-pregunta" role="dialog" aria-modal="true" aria-labelledby="pv-pregunta-titulo">
+                <div class="pv-pregunta-titulo" id="pv-pregunta-titulo">
+                    {{ svg('heroicon-m-gift') }}
+                    <span>Este producto está en promoción</span>
+                </div>
+                <div class="pv-pregunta-producto" x-text="pregunta?.p?.descripcion ?? ''"></div>
+                <div class="pv-pregunta-dile">Dígale al cliente:</div>
+
+                <div class="pv-aviso-sin" x-show="avisoPromo !== ''" x-cloak>
+                    {{ svg('heroicon-m-no-symbol') }}
+                    <span x-text="avisoPromo"></span>
+                </div>
+
+                <template x-for="pr in (pregunta?.promos ?? [])" x-bind:key="pr.id">
+                    <div class="pv-promo">
+                        <div class="pv-promo-arriba">
+                            <span class="pv-promo-codigo" x-text="pr.codigo"></span>
+                            <span class="pv-promo-nombre" x-text="pr.nombre"></span>
+                        </div>
+                        <div class="pv-promo-resumen" x-text="pr.resumen"></div>
+                        <div class="pv-promo-nota" x-show="pr.nota" x-text="pr.nota"></div>
+                        <button type="button" class="pv-promo-agregar" x-on:click="agregarPromo(pr)">
+                            {{ svg('heroicon-m-plus') }} Agregar la promoción
+                        </button>
+                    </div>
+                </template>
+
+                <button type="button" class="pv-pregunta-no" x-on:click="soloProducto()">No, solo el producto</button>
+            </div>
+        </div>
 
         {{-- Total y Guardar: en el teléfono queda fija abajo --}}
         <div class="pv-barra">

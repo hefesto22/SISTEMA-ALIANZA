@@ -146,13 +146,50 @@ test('si al despachar ya no se cumple la condición, el producto se cobra comple
         ->and($lineaGravada->fresh()?->promocion_id)->toBeNull();
 });
 
-test('solo administración crea promociones; bodega y vendedor solo las ven', function (): void {
+test('administración cambia todas; el encargado crea y cambia solo las de su bodega; el vendedor solo las ve', function (): void {
     $admin = User::factory()->create();
     $admin->assignRole(Rol::Administrador->value);
+    $otra = Bodega::factory()->create();
+
+    $deSuBodega = promoCajaExento($this->gravado, $this->exento);
+    $deSuBodega->bodegas()->sync([$this->bodega->id]);
+    $deVarias = promoCajaExento($this->gravado, $this->exento);
+    $deVarias->bodegas()->sync([$this->bodega->id, $otra->id]);
+    $deTodas = promoCajaExento($this->gravado, $this->exento);
+    $deOtra = promoCajaExento($this->gravado, $this->exento);
+    $deOtra->bodegas()->sync([$otra->id]);
 
     expect($admin->can('create', Promocion::class))->toBeTrue()
-        ->and($this->encargado->can('viewAny', Promocion::class))->toBeTrue()
-        ->and($this->encargado->can('create', Promocion::class))->toBeFalse()
+        ->and($admin->can('update', $deVarias))->toBeTrue()
+        ->and($this->encargado->can('create', Promocion::class))->toBeTrue()
+        ->and($this->encargado->can('update', $deSuBodega))->toBeTrue()
+        ->and($this->encargado->can('delete', $deSuBodega))->toBeTrue()
+        ->and($this->encargado->can('update', $deVarias))->toBeFalse()
+        ->and($this->encargado->can('update', $deTodas))->toBeFalse()
+        ->and($this->encargado->can('view', $deTodas))->toBeTrue()
+        ->and($this->encargado->can('view', $deOtra))->toBeFalse()
         ->and($this->vendedor->can('viewAny', Promocion::class))->toBeTrue()
-        ->and($this->vendedor->can('update', Promocion::class))->toBeFalse();
+        ->and($this->vendedor->can('update', $deSuBodega))->toBeFalse();
+
+    // Lo que ve cada uno: administración todas; los demás, las que valen en su bodega.
+    expect(Promocion::query()->visiblesPara($this->vendedor)->orderBy('id')->pluck('id')->all())->toBe([$deSuBodega->id, $deVarias->id, $deTodas->id])
+        ->and(Promocion::query()->visiblesPara($admin)->count())->toBe(4);
+});
+
+test('cada bodega aplica solo sus promociones (y las de todas las bodegas)', function (): void {
+    $otra = Bodega::factory()->create();
+    $promo = promoCajaExento($this->gravado, $this->exento);
+    $promo->bodegas()->sync([$otra->id]);
+
+    $pedido = pedidoConPromo($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+
+    expect($pedido->descuento)->toBe(0.0);
+
+    $promo->bodegas()->sync([$this->bodega->id, $otra->id]);
+
+    expect(app(RecalcularPedido::class)->ejecutar($pedido)->descuento)->toBe(50.0);
+
+    $promo->bodegas()->sync([]);
+
+    expect(app(RecalcularPedido::class)->ejecutar($pedido)->descuento)->toBe(50.0);
 });
