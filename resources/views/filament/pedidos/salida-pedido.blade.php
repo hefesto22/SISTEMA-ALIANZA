@@ -1,13 +1,14 @@
 {{--
     Validar y Corregir: cuánto sale de cada producto (App\Filament\Schemas\Components\SalidaDePedido).
 
-    Una tarjeta por producto, como en la preventa: lo que pidió, cuánto hay en
-    la bodega, cuánto saca este pedido y cuánto quedaría (se recalcula al
-    tocar) y abajo un contador de CAJAS y otro de UNIDADES. Se puede mandar
-    menos, más o en la otra unidad (unidades sueltas si una caja vino dañada).
-    "No hay" deja el producto en 0 y "Sí hay" lo regresa a lo pedido. Lo que
-    no va completo o va de más se dice en palabras en la tarjeta y en un
-    resumen abajo.
+    Pensado para pedidos largos (30 productos o más): cada producto es una
+    fila corta con lo que sale ("2 CJ", "3 UN"), el nombre, lo que pidió y, a
+    la derecha, si cambió ("−1 CJ", "+3 UN", "No sale") y cuánto queda en la
+    bodega. Al tocarla se abre: cuánto hay en la bodega, cuánto saca este
+    pedido y cuánto quedaría, y los contadores de CAJAS y UNIDADES con − y +
+    (se puede mandar menos, más o en la otra unidad: unidades sueltas si una
+    caja vino dañada). Arriba, filtros: todos, con cambios, no alcanza. Abajo,
+    un resumen de lo que no va completo y de lo que va de más.
 
     El estado son las líneas del pedido más, sin id, la unidad que cada
     producto no trae (LineasPedido::datos); aquí se juntan por producto.
@@ -24,26 +25,60 @@
 <x-dynamic-component :component="$getFieldWrapperView()" :field="$field">
     @once
         <style>
-            .sp { --sp-tenue: var(--gray-500); --sp-linea: var(--gray-100); --sp-borde: rgb(3 7 18 / 0.08); --sp-suave: var(--gray-50); display: grid; gap: 0.5rem; font-size: 0.875rem; }
+            .sp { --sp-tenue: var(--gray-500); --sp-linea: var(--gray-100); --sp-borde: rgb(3 7 18 / 0.08); --sp-suave: var(--gray-50); display: grid; gap: 0.6rem; font-size: 0.875rem; }
             .dark .sp { --sp-tenue: var(--gray-400); --sp-linea: rgb(255 255 255 / 0.06); --sp-borde: rgb(255 255 255 / 0.1); --sp-suave: rgb(255 255 255 / 0.03); }
 
+            /* ── Arriba: cuántos y filtros ── */
             .sp-resumen { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--sp-tenue); }
             .sp-resumen-ok { color: var(--success-600); }
             .sp-resumen-falta { color: var(--warning-600); }
             .dark .sp-resumen-ok { color: var(--success-400); }
             .dark .sp-resumen-falta { color: var(--warning-400); }
+            .sp-filtros { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+            .sp-filtro { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.65rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; color: var(--gray-600); outline: 1px solid var(--sp-borde); }
+            .dark .sp-filtro { color: var(--gray-300); }
+            .sp-filtro b { font-weight: 700; font-variant-numeric: tabular-nums; opacity: 0.75; }
+            .sp-filtro.sp-activo { color: #fff; background: var(--primary-600); outline-color: var(--primary-600); }
+            .sp-filtro.sp-activo b { opacity: 1; }
+            .sp-vacio { padding: 1.25rem 1rem; text-align: center; font-size: 0.85rem; color: var(--sp-tenue); }
 
+            /* ── Lista ── */
             .sp-lista { display: grid; margin: 0; padding: 0; list-style: none; border-radius: 0.75rem; outline: 1px solid var(--sp-borde); overflow: hidden; }
-            .sp-fila { display: grid; gap: 0.65rem; padding: 0.8rem 0.875rem; border-bottom: 1px solid var(--sp-linea); transition: background-color 0.2s ease; }
+            .sp-fila { border-bottom: 1px solid var(--sp-linea); transition: background-color 0.2s ease; }
             .sp-fila:last-child { border-bottom: 0; }
             .sp-fila.sp-fila-nada { background: color-mix(in oklab, var(--danger-500) 6%, transparent); }
             .sp-fila.sp-fila-parcial { background: color-mix(in oklab, var(--warning-500) 5%, transparent); }
             .sp-fila.sp-fila-mas { background: color-mix(in oklab, var(--info-500) 6%, transparent); }
+            .sp-fila.sp-abierta { background: color-mix(in oklab, var(--primary-500) 6%, transparent); }
 
-            .sp-texto { min-width: 0; display: grid; gap: 0.3rem; }
-            .sp-nombre { min-width: 0; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-            .sp-fila-nada .sp-nombre { text-decoration: line-through; color: var(--sp-tenue); }
-            .sp-meta { display: flex; flex-wrap: wrap; gap: 0.1rem 0.65rem; font-size: 0.78rem; color: var(--sp-tenue); font-variant-numeric: tabular-nums; }
+            /* Fila corta: lo que sale, nombre, cambio y lo que queda. Al tocarla se abre. */
+            .sp-corta { display: flex; align-items: center; gap: 0.625rem; width: 100%; padding: 0.6rem 0.875rem; text-align: start; cursor: pointer; }
+            .sp-corta:focus-visible { outline: 2px solid var(--primary-600); outline-offset: -2px; }
+            .sp-cants { flex-shrink: 0; display: grid; gap: 0.2rem; min-width: 3.6rem; }
+            .sp-cant { padding: 0.25rem 0.4rem; border-radius: 0.5rem; text-align: center; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.02em; line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--primary-700); background: color-mix(in oklab, var(--primary-500) 14%, transparent); outline: 1px solid color-mix(in oklab, var(--primary-500) 45%, transparent); }
+            .dark .sp-cant { color: var(--primary-200); }
+            .sp-cant.sp-cant-caja, .dark .sp-cant.sp-cant-caja { color: #fff; background: var(--primary-600); outline-color: var(--primary-600); }
+            .sp-cant.sp-cant-cero, .dark .sp-cant.sp-cant-cero { color: var(--sp-tenue); background: transparent; outline: 1px dashed var(--sp-borde); }
+            .sp-corta-texto { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.1rem; }
+            .sp-corta-nombre { font-size: 0.85rem; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .sp-fila-nada .sp-corta-nombre { text-decoration: line-through; color: var(--sp-tenue); }
+            .sp-corta-meta { font-size: 0.72rem; color: var(--sp-tenue); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .sp-corta-lado { flex-shrink: 0; display: grid; justify-items: end; gap: 0.2rem; text-align: end; }
+            .sp-chip { padding: 0.1rem 0.45rem; border-radius: 0.375rem; font-size: 0.7rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--warning-700); background: color-mix(in oklab, var(--warning-500) 14%, transparent); }
+            .dark .sp-chip { color: var(--warning-300); }
+            .sp-chip.sp-chip-mas { color: var(--info-700); background: color-mix(in oklab, var(--info-500) 14%, transparent); }
+            .dark .sp-chip.sp-chip-mas { color: var(--info-300); }
+            .sp-chip.sp-chip-nada { color: var(--danger-700); background: color-mix(in oklab, var(--danger-500) 14%, transparent); }
+            .dark .sp-chip.sp-chip-nada { color: var(--danger-300); }
+            .sp-corta-quedan { font-size: 0.7rem; color: var(--sp-tenue); white-space: nowrap; font-variant-numeric: tabular-nums; }
+            .sp-corta-quedan.sp-neg { font-weight: 700; color: var(--danger-600); }
+            .dark .sp-corta-quedan.sp-neg { color: var(--danger-400); }
+            .sp-flecha { flex-shrink: 0; width: 1rem; height: 1rem; color: var(--sp-tenue); transition: transform 0.15s ease; }
+            .sp-abierta .sp-flecha { transform: rotate(180deg); }
+
+            /* Fila abierta. */
+            .sp-detalle { display: grid; gap: 0.65rem; padding: 0 0.875rem 0.875rem; }
+            .sp-meta { display: flex; flex-wrap: wrap; gap: 0.1rem 0.65rem; font-size: 0.78rem; color: var(--sp-tenue); }
             .sp-meta strong { font-weight: 700; color: var(--gray-700); }
             .dark .sp-meta strong { color: var(--gray-200); }
 
@@ -89,15 +124,16 @@
             .sp-stepper input:focus { outline: none; box-shadow: none; }
             .sp-stepper input::-webkit-outer-spin-button, .sp-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-            .sp-acciones { margin-inline-start: auto; display: grid; justify-items: end; gap: 0.3rem; }
+            .sp-acciones { margin-inline-start: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.4rem 0.75rem; }
             .sp-boton { min-width: 5.25rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
             .sp-no { color: var(--danger-600); outline: 1px solid color-mix(in oklab, var(--danger-500) 40%, transparent); }
             .sp-no:hover { background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
             .dark .sp-no { color: var(--danger-400); }
             .sp-si { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 12%, transparent); outline: 1px solid color-mix(in oklab, var(--success-500) 45%, transparent); }
             .dark .sp-si { color: var(--success-400); }
-            .sp-volver { font-size: 0.75rem; font-weight: 600; color: var(--primary-600); text-decoration: underline; text-underline-offset: 2px; }
-            .dark .sp-volver { color: var(--primary-400); }
+            .sp-enlace { font-size: 0.78rem; font-weight: 600; color: var(--primary-600); }
+            .sp-enlace.sp-subrayado { text-decoration: underline; text-underline-offset: 2px; }
+            .dark .sp-enlace { color: var(--primary-400); }
 
             /* Resumen de lo que no va completo y de lo que va de más, antes de confirmar. */
             .sp-incompletas { display: grid; gap: 0.3rem; padding: 0.7rem 0.875rem; border-radius: 0.75rem; font-size: 0.8rem; line-height: 1.4; color: var(--warning-800); background: color-mix(in oklab, var(--warning-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--warning-500) 40%, transparent); }
@@ -108,6 +144,12 @@
             .sp-incompletas b { font-weight: 700; }
             .sp-incompletas.sp-de-mas { color: var(--info-800); background: color-mix(in oklab, var(--info-500) 10%, transparent); outline-color: color-mix(in oklab, var(--info-500) 40%, transparent); }
             .dark .sp-incompletas.sp-de-mas { color: var(--info-300); }
+
+            /* Teléfono: un poco menos de relleno. */
+            @media (max-width: 639.98px) {
+                .sp-corta { padding: 0.55rem 0.75rem; gap: 0.5rem; }
+                .sp-detalle { padding: 0 0.75rem 0.8rem; }
+            }
         </style>
     @endonce
 
@@ -119,10 +161,19 @@
             filas: $wire.$entangle(@js($statePath)),
             paraValidar: @js($esParaValidar()),
             maximo: @js(\App\Domain\Pedidos\AjustarLineas::MAXIMO),
+            abierta: null,
+            filtro: 'todos',
 
             init() {
                 if (! Array.isArray(this.filas)) {
                     this.filas = Object.values(this.filas ?? {})
+                }
+
+                {{-- Un solo producto: ya abierto. --}}
+                const grupos = this.grupos()
+
+                if (grupos.length === 1) {
+                    this.abierta = grupos[0].id
                 }
             },
 
@@ -160,6 +211,17 @@
                 return orden
             },
 
+            gruposVisibles() {
+                if (this.filtro === 'cambios') return this.grupos().filter((grupo) => this.difiere(grupo))
+                if (this.filtro === 'alcance') return this.grupos().filter((grupo) => this.noAlcanza(grupo))
+
+                return this.grupos()
+            },
+
+            abrir(grupo) {
+                this.abierta = this.abierta === grupo.id ? null : grupo.id
+            },
+
             filasDe(grupo) {
                 return [grupo.caja, grupo.unidad].filter(Boolean)
             },
@@ -190,6 +252,10 @@
                 return signo + partes.join(' + ')
             },
 
+            sigla(fila) {
+                return fila.es_caja ? 'CJ' : 'UN'
+            },
+
             {{-- "1 caja", "3 cajas", "1 unidad", "5 unidades". --}}
             palabras(cantidad, fila) {
                 cantidad = this.n(cantidad)
@@ -203,6 +269,14 @@
                     .filter((fila) => this.n(fila.cantidad) > 0)
                     .map((fila) => this.palabras(fila.cantidad, fila))
                     .join(' y ')
+            },
+
+            {{-- "2 CJ + 3 UN" (en la fila corta). --}}
+            pidioCorto(grupo) {
+                return this.filasDe(grupo)
+                    .filter((fila) => this.n(fila.cantidad) > 0)
+                    .map((fila) => this.n(fila.cantidad) + ' ' + this.sigla(fila))
+                    .join(' + ')
             },
 
             total(grupo) {
@@ -221,6 +295,27 @@
                 this.filasDe(grupo).forEach((fila) => fila.sale = this.n(fila.cantidad))
             },
 
+            {{-- A la derecha de la fila corta: "−1 CJ", "+3 UN", "No sale"; vacío si sale como se pidió. --}}
+            cambioCorto(grupo) {
+                if (! this.difiere(grupo)) return ''
+                if (this.total(grupo) === 0) return 'No sale'
+
+                return this.filasDe(grupo)
+                    .filter((fila) => this.n(fila.sale) !== this.n(fila.cantidad))
+                    .map((fila) => {
+                        const diferencia = this.n(fila.sale) - this.n(fila.cantidad)
+
+                        return (diferencia > 0 ? '+' : '−') + Math.abs(diferencia) + ' ' + this.sigla(fila)
+                    })
+                    .join(' ')
+            },
+
+            claseCambio(grupo) {
+                if (this.total(grupo) === 0) return 'sp-chip-nada'
+
+                return this.filasDe(grupo).some((fila) => this.n(fila.sale) < this.n(fila.cantidad)) ? '' : 'sp-chip-mas'
+            },
+
             {{-- Unidades que saca este pedido del producto (cajas y unidades). --}}
             saleDelProducto(grupo) {
                 return this.filasDe(grupo).reduce((suma, fila) => suma + this.n(fila.sale) * Math.max(1, this.n(fila.por_unidad)), 0)
@@ -233,6 +328,10 @@
 
             quedan(grupo) {
                 return this.n(grupo.info.hay_unidades) - (grupo.info.mueve ? this.cambio(grupo) : 0)
+            },
+
+            noAlcanza(grupo) {
+                return grupo.info.mueve && this.quedan(grupo) < 0
             },
 
             {{-- Como PedidoItem: "No sale: pidió 2 cajas", "No va completo: falta 1 caja de 3", "Va de más: …"; vacío si va justo. --}}
@@ -281,6 +380,7 @@
             },
 
             claseGrupo(grupo) {
+                if (this.abierta === grupo.id) return 'sp-abierta'
                 if (this.total(grupo) === 0) return 'sp-fila-nada'
                 if (this.filasDe(grupo).some((fila) => this.n(fila.cantidad) > 0 && this.n(fila.sale) < this.n(fila.cantidad))) return 'sp-fila-parcial'
                 if (this.filasDe(grupo).some((fila) => this.n(fila.sale) > this.n(fila.cantidad))) return 'sp-fila-mas'
@@ -309,14 +409,46 @@
             ></span>
         </div>
 
-        <ul class="sp-lista">
-            <template x-for="grupo in grupos()" x-bind:key="grupo.id">
-                <li class="sp-fila" x-bind:class="claseGrupo(grupo)">
-                    <div class="sp-texto">
-                        <div class="sp-nombre" x-text="grupo.info.descripcion ?? grupo.info.producto"></div>
+        {{-- Con muchos productos: ver solo los que cambiaron o los que no alcanzan. --}}
+        <div class="sp-filtros" x-show="grupos().length > 1">
+            <button type="button" class="sp-filtro" x-bind:class="{ 'sp-activo': filtro === 'todos' }" x-on:click="filtro = 'todos'">Todos <b x-text="grupos().length"></b></button>
+            <button type="button" class="sp-filtro" x-bind:class="{ 'sp-activo': filtro === 'cambios' }" x-on:click="filtro = 'cambios'">Con cambios <b x-text="grupos().filter((grupo) => difiere(grupo)).length"></b></button>
+            <button type="button" class="sp-filtro" x-show="filtro === 'alcance' || grupos().some((grupo) => noAlcanza(grupo))" x-bind:class="{ 'sp-activo': filtro === 'alcance' }" x-on:click="filtro = 'alcance'">No alcanza <b x-text="grupos().filter((grupo) => noAlcanza(grupo)).length"></b></button>
+        </div>
 
+        <ul class="sp-lista">
+            <template x-for="grupo in gruposVisibles()" x-bind:key="grupo.id">
+                <li class="sp-fila" x-bind:class="claseGrupo(grupo)">
+                    {{-- Fila corta --}}
+                    <button type="button" class="sp-corta" x-on:click="abrir(grupo)" x-bind:aria-expanded="abierta === grupo.id">
+                        <span class="sp-cants">
+                            <template x-for="fila in filasDe(grupo).filter((fila) => n(fila.sale) > 0)" x-bind:key="'cant-' + sigla(fila)">
+                                <span class="sp-cant" x-bind:class="{ 'sp-cant-caja': fila.es_caja }" x-text="n(fila.sale) + ' ' + sigla(fila)"></span>
+                            </template>
+                            <span class="sp-cant sp-cant-cero" x-show="total(grupo) === 0">0</span>
+                        </span>
+
+                        <span class="sp-corta-texto">
+                            <span class="sp-corta-nombre" x-text="grupo.info.descripcion ?? grupo.info.producto"></span>
+                            <span class="sp-corta-meta" x-text="(grupo.info.codigo ? grupo.info.codigo + ' · ' : '') + 'pidió ' + pidioCorto(grupo)"></span>
+                        </span>
+
+                        <span class="sp-corta-lado">
+                            <span class="sp-chip" x-show="cambioCorto(grupo) !== ''" x-bind:class="claseCambio(grupo)" x-text="cambioCorto(grupo)"></span>
+                            <span
+                                class="sp-corta-quedan"
+                                x-show="grupo.info.mueve"
+                                x-bind:class="{ 'sp-neg': noAlcanza(grupo) }"
+                                x-text="noAlcanza(grupo) ? 'no alcanza −' + enCajas(-quedan(grupo), grupo.info.por_caja) : 'quedan ' + enCajas(quedan(grupo), grupo.info.por_caja)"
+                            ></span>
+                        </span>
+
+                        <svg class="sp-flecha" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+                    </button>
+
+                    {{-- Fila abierta --}}
+                    <div class="sp-detalle" x-show="abierta === grupo.id">
                         <div class="sp-meta">
-                            <span x-show="grupo.info.codigo" x-text="grupo.info.codigo"></span>
                             <span>Pidió <strong x-text="pidio(grupo)"></strong></span>
                         </div>
 
@@ -336,51 +468,55 @@
                             </div>
                         </div>
 
-                        <div class="sp-no-alcanza" x-show="grupo.info.mueve && quedan(grupo) < 0" x-text="'No alcanza: faltan ' + enCajas(-quedan(grupo), grupo.info.por_caja) + ' en la bodega'"></div>
+                        <div class="sp-no-alcanza" x-show="noAlcanza(grupo)" x-text="'No alcanza: faltan ' + enCajas(-quedan(grupo), grupo.info.por_caja) + ' en la bodega'"></div>
 
-                        <template x-for="fila in filasDe(grupo)" x-bind:key="'estado-' + (fila.es_caja ? 'caja' : 'unidad')">
+                        <template x-for="fila in filasDe(grupo)" x-bind:key="'estado-' + sigla(fila)">
                             <div class="sp-estado" x-bind:class="claseEstado(fila)" x-show="estado(fila) !== ''" x-text="estado(fila)"></div>
                         </template>
-                    </div>
 
-                    <div class="sp-controles">
-                        <template x-for="fila in filasDe(grupo)" x-bind:key="'cantidad-' + (fila.es_caja ? 'caja' : 'unidad')">
-                            <div class="sp-cantidad">
-                                <span class="sp-cantidad-etiqueta">
-                                    <span x-text="fila.es_caja ? 'Cajas de ' + fila.por_caja : 'Unidades'"></span>
-                                    <em x-text="n(fila.cantidad) > 0 ? 'pidió ' + n(fila.cantidad) : 'no pidió'"></em>
-                                </span>
-                                <div class="sp-stepper" x-bind:class="{ 'sp-stepper-caja': fila.es_caja }">
-                                    <button type="button" class="sp-paso" x-bind:aria-label="fila.es_caja ? 'Una caja menos' : 'Una unidad menos'" x-on:click="mover(fila, -1)" x-bind:disabled="n(fila.sale) <= 0">{{ svg('heroicon-m-minus') }}</button>
-                                    <input
-                                        type="number"
-                                        inputmode="numeric"
-                                        min="0"
-                                        x-bind:max="maximo"
-                                        x-bind:aria-label="fila.es_caja ? 'Cajas que salen' : 'Unidades que salen'"
-                                        x-bind:value="fila.sale"
-                                        x-on:focus="$event.target.select()"
-                                        x-on:change="poner(fila, $event.target.value); $event.target.value = fila.sale"
-                                    >
-                                    <button type="button" class="sp-paso" x-bind:aria-label="fila.es_caja ? 'Una caja más' : 'Una unidad más'" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= maximo">{{ svg('heroicon-m-plus') }}</button>
+                        <div class="sp-controles">
+                            <template x-for="fila in filasDe(grupo)" x-bind:key="'cantidad-' + sigla(fila)">
+                                <div class="sp-cantidad">
+                                    <span class="sp-cantidad-etiqueta">
+                                        <span x-text="fila.es_caja ? 'Cajas de ' + fila.por_caja : 'Unidades'"></span>
+                                        <em x-text="n(fila.cantidad) > 0 ? 'pidió ' + n(fila.cantidad) : 'no pidió'"></em>
+                                    </span>
+                                    <div class="sp-stepper" x-bind:class="{ 'sp-stepper-caja': fila.es_caja }">
+                                        <button type="button" class="sp-paso" x-bind:aria-label="fila.es_caja ? 'Una caja menos' : 'Una unidad menos'" x-on:click="mover(fila, -1)" x-bind:disabled="n(fila.sale) <= 0">{{ svg('heroicon-m-minus') }}</button>
+                                        <input
+                                            type="number"
+                                            inputmode="numeric"
+                                            min="0"
+                                            x-bind:max="maximo"
+                                            x-bind:aria-label="fila.es_caja ? 'Cajas que salen' : 'Unidades que salen'"
+                                            x-bind:value="fila.sale"
+                                            x-on:focus="$event.target.select()"
+                                            x-on:change="poner(fila, $event.target.value); $event.target.value = fila.sale"
+                                            x-on:keydown.enter.prevent="poner(fila, $event.target.value); $event.target.value = fila.sale; $event.target.blur()"
+                                        >
+                                        <button type="button" class="sp-paso" x-bind:aria-label="fila.es_caja ? 'Una caja más' : 'Una unidad más'" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= maximo">{{ svg('heroicon-m-plus') }}</button>
+                                    </div>
                                 </div>
-                            </div>
-                        </template>
+                            </template>
 
-                        <div class="sp-acciones">
-                            <button type="button" class="sp-boton sp-no" x-show="total(grupo) > 0" x-on:click="noHay(grupo)">No hay</button>
-                            <button type="button" class="sp-boton sp-si" x-show="total(grupo) === 0" x-on:click="comoSePidio(grupo)">Sí hay</button>
-                            <button type="button" class="sp-volver" x-show="total(grupo) > 0 && difiere(grupo)" x-on:click="comoSePidio(grupo)">Volver a lo pedido</button>
+                            <div class="sp-acciones">
+                                <button type="button" class="sp-enlace sp-subrayado" x-show="total(grupo) > 0 && difiere(grupo)" x-on:click="comoSePidio(grupo)">Volver a lo pedido</button>
+                                <button type="button" class="sp-boton sp-no" x-show="total(grupo) > 0" x-on:click="noHay(grupo)">No hay</button>
+                                <button type="button" class="sp-boton sp-si" x-show="total(grupo) === 0" x-on:click="comoSePidio(grupo)">Sí hay</button>
+                                <button type="button" class="sp-enlace" x-show="grupos().length > 1" x-on:click="abierta = null">Listo</button>
+                            </div>
                         </div>
                     </div>
                 </li>
             </template>
+
+            <li class="sp-vacio" x-show="gruposVisibles().length === 0" x-text="filtro === 'alcance' ? 'Todo alcanza en la bodega.' : 'Todo sale como se pidió.'"></li>
         </ul>
 
         <div class="sp-incompletas" x-show="incompletas().length > 0" x-cloak>
             <strong>No va completo</strong>
             <ul>
-                <template x-for="fila in incompletas()" x-bind:key="'falta-' + fila.producto_id + '-' + (fila.es_caja ? 'caja' : 'unidad')">
+                <template x-for="fila in incompletas()" x-bind:key="'falta-' + fila.producto_id + '-' + sigla(fila)">
                     <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
                 </template>
             </ul>
@@ -389,7 +525,7 @@
         <div class="sp-incompletas sp-de-mas" x-show="deMas().length > 0" x-cloak>
             <strong>Va de más</strong>
             <ul>
-                <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.producto_id + '-' + (fila.es_caja ? 'caja' : 'unidad')">
+                <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.producto_id + '-' + sigla(fila)">
                     <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
                 </template>
             </ul>
