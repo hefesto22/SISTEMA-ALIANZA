@@ -1028,7 +1028,7 @@
             </template>
         </div>
 
-        <div x-show="promociones" x-html="promociones" @if ($resumen['promociones'] === '') style="display: none" @endif>{!! $resumen['promociones'] !!}</div>
+        <div x-show="promociones && lineas.length > 0" x-html="promociones" @if ($resumen['promociones'] === '' || $lineasIniciales === []) style="display: none" @endif>{!! $resumen['promociones'] !!}</div>
 
         {{-- Producto en promoción: ¿agrega la promoción o solo el producto? --}}
         <div class="pv-pregunta-fondo" x-show="pregunta" x-cloak x-transition.opacity x-on:click.self="pregunta = null" x-on:keydown.escape.window="pregunta = null">

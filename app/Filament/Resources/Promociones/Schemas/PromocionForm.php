@@ -215,7 +215,7 @@ class PromocionForm
             ->searchable()
             ->allowHtml()
             ->getSearchResultsUsing(fn (string $search, Get $get): array => self::opciones($search, self::bodegasDeExistencia($get($rutaBodegas))))
-            ->getOptionLabelUsing(function (mixed $value, Get $get): ?string {
+            ->getOptionLabelUsing(function (mixed $value, Get $get) use ($rutaBodegas): ?string {
                 $producto = Producto::query()->whereKey($value)->first();
 
                 if (! $producto instanceof Producto) {
