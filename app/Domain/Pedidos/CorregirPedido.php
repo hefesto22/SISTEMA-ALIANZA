@@ -9,6 +9,7 @@ use App\Domain\Facturacion\AnularFactura;
 use App\Domain\Inventario\SalidaDePedido;
 use App\Enums\EstadoPedido;
 use App\Enums\TipoMovimiento;
+use App\Enums\UnidadVenta;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\User;
@@ -36,10 +37,11 @@ final class CorregirPedido
 
     /**
      * @param array<int, int|string|null> $sale [id de línea => cantidad que sale]; si falta una línea se queda como estaba
+     * @param list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}> $nuevas productos del pedido en la unidad que no traían (ver AjustarLineas)
      */
-    public function ejecutar(Pedido $pedido, array $sale, User $usuario, ?string $motivo = null): Pedido
+    public function ejecutar(Pedido $pedido, array $sale, User $usuario, ?string $motivo = null, array $nuevas = []): Pedido
     {
-        return DB::transaction(function () use ($pedido, $sale, $usuario, $motivo): Pedido {
+        return DB::transaction(function () use ($pedido, $sale, $usuario, $motivo, $nuevas): Pedido {
             $pedido = Pedido::query()->lockForUpdate()->findOrFail($pedido->id);
 
             if (! $pedido->estaValidado()) {
@@ -48,7 +50,7 @@ final class CorregirPedido
 
             $antes = self::cantidades($pedido);
 
-            AjustarLineas::aplicar($pedido, $sale, faltaSaleCompleta: false);
+            AjustarLineas::aplicar($pedido, $sale, faltaSaleCompleta: false, nuevas: $nuevas);
 
             if (self::cantidades($pedido) === $antes) {
                 throw new ReglaNegocioException("No cambió ninguna cantidad del pedido {$pedido->numero}: no hay nada que corregir.");

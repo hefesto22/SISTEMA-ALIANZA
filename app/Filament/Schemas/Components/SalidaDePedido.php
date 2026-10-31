@@ -9,17 +9,17 @@ use Closure;
 use Filament\Forms\Components\Field;
 
 /**
- * Validar y Corregir: cuánto sale de cada línea del pedido, una fila por
- * línea: si es caja o unidad, lo que pidió y, del producto, cuánto hay en la
- * bodega, cuánto saca este pedido y cuánto quedaría. Con − y + para "Sale" y
- * un botón "No hay" que la deja en 0 (y "Sí hay" la regresa). Lo que no va
- * completo se dice en palabras ("falta 1 caja de 3"). Todo pasa en el
- * teléfono; al servidor solo va al confirmar.
+ * Validar y Corregir: cuánto sale de cada producto del pedido, como en la
+ * preventa: un contador de cajas y otro de unidades, con lo que pidió, cuánto
+ * hay en la bodega, cuánto saca este pedido y cuánto quedaría. "No hay" lo
+ * deja en 0 y "Sí hay" lo regresa a lo pedido. Puede salir menos de lo
+ * pedido, más, o en la otra unidad (unidades sueltas si una caja vino
+ * dañada); cada cosa se dice en palabras ("falta 1 caja de 3"). Todo pasa
+ * en el teléfono; al servidor solo va al confirmar.
  *
- * Estado: list<array{id: int, sale: int, ...}> como lo arma
- * App\Filament\Resources\Pedidos\Actions\LineasPedido::datos() (trae también
- * lo que se muestra). Lo que vale es id y sale. Puede salir menos de lo
- * pedido o más (el cliente pidió más); la fila lo dice.
+ * Estado: list<array{id: int|null, producto_id: int, es_caja: bool, sale: int, ...}>
+ * como lo arma App\Filament\Resources\Pedidos\Actions\LineasPedido::datos(): las
+ * líneas del pedido y, sin id, la unidad que cada producto no trae.
  *
  * Vista: resources/views/filament/pedidos/salida-pedido.blade.php
  */
@@ -73,7 +73,8 @@ class SalidaDePedido extends Field
 
         $statePath = $this->getStatePath();
 
-        $rules["{$statePath}.*.id"] = ['required', 'integer'];
+        $rules["{$statePath}.*.id"] = ['nullable', 'integer'];
+        $rules["{$statePath}.*.producto_id"] = ['required', 'integer'];
         $rules["{$statePath}.*.sale"] = ['required', 'integer', 'min:0', 'max:'.AjustarLineas::MAXIMO];
     }
 

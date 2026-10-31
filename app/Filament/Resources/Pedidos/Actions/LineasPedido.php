@@ -12,6 +12,7 @@ use App\Models\Configuracion;
 use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
+use App\Models\Producto;
 use Filament\Schemas\Components\Component;
 
 /**
@@ -44,6 +45,11 @@ final class LineasPedido
      * inventario no sacaron nada y corregirlos no mueve la existencia
      * ("mueve" = false).
      *
+     * Primero van las líneas del pedido (en orden) y después, de cada
+     * producto, la unidad que no trae (sin id, "pidió 0"): así el modal
+     * muestra cajas y unidades de cada producto y bodega puede mandar en la
+     * otra (en unidades si una caja vino dañada, por ejemplo).
+     *
      * @return array{items: list<array<string, mixed>>}
      */
     public static function datos(Pedido $pedido, bool $segunExistencia = false): array
@@ -67,27 +73,80 @@ final class LineasPedido
                 $quedan[$item->producto_id] = ($quedan[$item->producto_id] ?? 0) - $sale * $porUnidad;
             }
 
-            $filas[] = [
-                'id'             => $item->id,
-                'producto_id'    => $item->producto_id,
-                'producto'       => $item->producto->etiqueta(),
-                'codigo'         => $item->producto->codigo,
-                'descripcion'    => $item->producto->descripcion,
-                'unidad'         => $item->unidad->getLabel(),
-                'es_caja'        => $item->unidad === UnidadVenta::Caja,
-                'sigla'          => $item->unidad === UnidadVenta::Caja ? 'CJ' : 'UN',
-                'por_unidad'     => $item->producto->unidadesEn($item->unidad),
-                'por_caja'       => $item->producto->unidades_por_caja,
-                'cantidad'       => $item->cantidad,
-                'hay'            => Existencia::enCajas($hay[$item->producto_id] ?? 0, $item->producto->unidades_por_caja),
-                'hay_unidades'   => $hay[$item->producto_id] ?? 0,
-                'salio_unidades' => $salio[$item->producto_id] ?? 0,
-                'mueve'          => $mueve,
-                'sale'           => $sale,
-            ];
+            $filas[] = self::fila($item->id, $item->producto, $item->unidad, $item->cantidad, $sale, $hay, $salio, $mueve);
+        }
+
+        // La otra unidad de cada producto (la caja solo si trae más de 1).
+        foreach ($items->unique('producto_id') as $item) {
+            foreach ([UnidadVenta::Caja, UnidadVenta::Unidad] as $unidad) {
+                $yaViene = $items->contains(fn (PedidoItem $otra): bool => $otra->producto_id === $item->producto_id && $otra->unidad === $unidad);
+
+                if (! $yaViene && ($unidad === UnidadVenta::Unidad || $item->producto->unidades_por_caja > 1)) {
+                    $filas[] = self::fila(null, $item->producto, $unidad, 0, 0, $hay, $salio, $mueve);
+                }
+            }
         }
 
         return ['items' => $filas];
+    }
+
+    /**
+     * Las líneas que bodega llenó en la unidad que el pedido no traía:
+     * [{producto_id, unidad, cantidad}] para ValidarDespacho / CorregirPedido.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}>
+     */
+    public static function nuevas(array $data): array
+    {
+        $nuevas = [];
+
+        foreach ((array) ($data['items'] ?? []) as $fila) {
+            if (! is_array($fila) || isset($fila['id']) || ! is_numeric($fila['producto_id'] ?? null) || ! is_numeric($fila['sale'] ?? null)) {
+                continue;
+            }
+
+            if ((int) $fila['sale'] > 0) {
+                $nuevas[] = [
+                    'producto_id' => (int) $fila['producto_id'],
+                    'unidad'      => ($fila['es_caja'] ?? false) ? UnidadVenta::Caja : UnidadVenta::Unidad,
+                    'cantidad'    => (int) $fila['sale'],
+                ];
+            }
+        }
+
+        return $nuevas;
+    }
+
+    /**
+     * Una fila del modal.
+     *
+     * @param array<int, int> $hay unidades en la bodega por producto
+     * @param array<int, int> $salio unidades que ya sacó el pedido por producto
+     *
+     * @return array<string, mixed>
+     */
+    private static function fila(?int $id, Producto $producto, UnidadVenta $unidad, int $cantidad, int $sale, array $hay, array $salio, bool $mueve): array
+    {
+        return [
+            'id'             => $id,
+            'producto_id'    => $producto->id,
+            'producto'       => $producto->etiqueta(),
+            'codigo'         => $producto->codigo,
+            'descripcion'    => $producto->descripcion,
+            'unidad'         => $unidad->getLabel(),
+            'es_caja'        => $unidad === UnidadVenta::Caja,
+            'sigla'          => $unidad === UnidadVenta::Caja ? 'CJ' : 'UN',
+            'por_unidad'     => $producto->unidadesEn($unidad),
+            'por_caja'       => $producto->unidades_por_caja,
+            'cantidad'       => $cantidad,
+            'hay'            => Existencia::enCajas($hay[$producto->id] ?? 0, $producto->unidades_por_caja),
+            'hay_unidades'   => $hay[$producto->id] ?? 0,
+            'salio_unidades' => $salio[$producto->id] ?? 0,
+            'mueve'          => $mueve,
+            'sale'           => $sale,
+        ];
     }
 
     /**

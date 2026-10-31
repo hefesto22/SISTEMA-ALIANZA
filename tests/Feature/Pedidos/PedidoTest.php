@@ -102,6 +102,43 @@ test('bodega puede mandar más de lo pedido: se cobra lo que sale y queda dicho'
         ->and(LineasPedido::incompletas($despachado))->toBe("Va de más: {$this->gravado->descripcion} (+1 unidad, pidió 2).");
 });
 
+test('al validar, cada producto trae su caja y su unidad aunque el pedido traiga una sola', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    $filas = LineasPedido::datos($pedido)['items'];
+
+    // Primero las líneas del pedido; después, sin id, la unidad que no traen.
+    expect(array_map(fn (array $fila): array => [$fila['id'] === null, $fila['producto_id'], $fila['es_caja'], $fila['cantidad']], $filas))->toBe([
+        [false, $this->gravado->id, false, 2],
+        [false, $this->exento->id, true, 1],
+        [true, $this->gravado->id, true, 0],
+        [true, $this->exento->id, false, 0],
+    ]);
+
+    // Lo que bodega llena en esas filas entra como línea nueva.
+    $filas[3]['sale'] = 7;
+
+    expect(LineasPedido::nuevas(['items' => $filas]))->toBe([['producto_id' => $this->exento->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 7]]);
+});
+
+test('bodega puede mandar en la otra unidad: una caja dañada sale en unidades sueltas', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    [, $lineaExenta] = $pedido->items->all();
+
+    // La caja del exento (10) vino dañada: la caja no sale y salen 7 sueltas.
+    $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [$lineaExenta->id => 0], $this->vendedor, [
+        ['producto_id' => $this->exento->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 7],
+    ]);
+
+    $sueltas = $despachado->items()->where('producto_id', $this->exento->id)->where('unidad', UnidadVenta::Unidad)->sole();
+
+    // 2 × 100 = 200 (+30 ISV) y 7 × 50 = 350 exento → 580
+    expect($sueltas->cantidad)->toBe(0)
+        ->and($sueltas->cantidad_despachada)->toBe(7)
+        ->and($sueltas->deMasEnPalabras())->toBe('Va de más: 7 unidades (no lo pidió en unidades)')
+        ->and($lineaExenta->fresh()?->faltaEnPalabras())->toBe('No sale: pidió 1 caja')
+        ->and($despachado->total)->toBe(580.0);
+});
+
 test('un pedido despachado no se puede validar otra vez', function (): void {
     $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
     app(ValidarDespacho::class)->ejecutar($pedido, [], $this->vendedor);

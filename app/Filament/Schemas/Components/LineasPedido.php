@@ -230,6 +230,11 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             $enBodega = $hay[$item->producto_id] ?? 0;
             $disponible = $enBodega - ($apartado[$item->producto_id] ?? 0);
 
+            // Lo que bodega agregó al validar (pidió 0) no es del pedido del cliente.
+            if ($item->cantidad < 1) {
+                continue;
+            }
+
             // No se vende o (si se controla la existencia) ya no hay disponible.
             if (! $item->producto->activo || ($controlar && $disponible < 1)) {
                 $fuera++;

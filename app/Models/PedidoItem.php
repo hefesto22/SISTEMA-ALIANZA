@@ -117,7 +117,8 @@ class PedidoItem extends Model
 
     /**
      * "Va de más: 1 unidad más de lo pedido (pidió 2)" (corto: "+1 unidad,
-     * pidió 2"). Null si no salió de más.
+     * pidió 2"). Si bodega la agregó en la otra unidad (pidió 0): "Va de
+     * más: 45 unidades (no lo pidió en unidades)". Null si no salió de más.
      */
     public function deMasEnPalabras(bool $corto = false): ?string
     {
@@ -125,6 +126,14 @@ class PedidoItem extends Model
 
         if ($mas === 0) {
             return null;
+        }
+
+        if ($this->cantidad === 0) {
+            $enOtra = 'no lo pidió en '.($this->unidad === UnidadVenta::Caja ? 'cajas' : 'unidades');
+
+            return $corto
+                ? '+'.self::enPalabras($mas, $this->unidad).', '.$enOtra
+                : 'Va de más: '.self::enPalabras($mas, $this->unidad).' ('.$enOtra.')';
         }
 
         return $corto
@@ -140,6 +149,10 @@ class PedidoItem extends Model
      */
     public function faltaEnPalabras(bool $corto = false): ?string
     {
+        if ($this->cantidad === 0) {
+            return null;
+        }
+
         if ($this->cantidad_despachada === 0) {
             return ($corto ? 'no sale' : 'No sale').': pidió '.self::enPalabras($this->cantidad, $this->unidad);
         }

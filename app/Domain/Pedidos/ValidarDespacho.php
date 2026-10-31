@@ -9,6 +9,7 @@ use App\Domain\Inventario\SalidaDePedido;
 use App\Enums\EstadoPedido;
 use App\Enums\PrecioAlDespachar;
 use App\Enums\TipoMovimiento;
+use App\Enums\UnidadVenta;
 use App\Models\Configuracion;
 use App\Models\Pedido;
 use App\Models\User;
@@ -39,17 +40,18 @@ final class ValidarDespacho
 
     /**
      * @param array<int, int|string|null> $despachado [id de línea => cantidad que sale]; si falta una línea sale completa
+     * @param list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}> $nuevas productos del pedido en la unidad que no traían (ver AjustarLineas)
      */
-    public function ejecutar(Pedido $pedido, array $despachado, User $usuario): Pedido
+    public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = []): Pedido
     {
-        return DB::transaction(function () use ($pedido, $despachado, $usuario): Pedido {
+        return DB::transaction(function () use ($pedido, $despachado, $usuario, $nuevas): Pedido {
             $pedido = Pedido::query()->lockForUpdate()->findOrFail($pedido->id);
 
             if (! $pedido->estaPendiente()) {
                 throw new ReglaNegocioException("El pedido {$pedido->numero} ya está {$pedido->estado->getLabel()}; no se puede validar otra vez.");
             }
 
-            AjustarLineas::aplicar($pedido, $despachado, faltaSaleCompleta: true);
+            AjustarLineas::aplicar($pedido, $despachado, faltaSaleCompleta: true, nuevas: $nuevas);
 
             $precioDelPedido = Configuracion::actual()->precio_al_despachar === PrecioAlDespachar::Pedido;
 

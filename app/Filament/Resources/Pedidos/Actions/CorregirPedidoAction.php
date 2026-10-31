@@ -59,7 +59,7 @@ final class CorregirPedidoAction
                 $motivo = is_string($data['motivo'] ?? null) ? $data['motivo'] : null;
 
                 try {
-                    $pedido = app(CorregirPedido::class)->ejecutar($record, LineasPedido::cantidades($data, $record), $usuario, $motivo);
+                    $pedido = app(CorregirPedido::class)->ejecutar($record, LineasPedido::cantidades($data, $record), $usuario, $motivo, LineasPedido::nuevas($data));
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
 
