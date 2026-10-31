@@ -23,6 +23,7 @@ use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\HtmlString;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Throwable;
 
@@ -66,7 +67,8 @@ class AdminPanelProvider extends PanelProvider
             // Colores: tema shadcn (openplain/filament-shadcn-theme) escogido
             // en Sistema → Configuración, con grises zinc como shadcn/ui.
             ->brandName(fn (): string => env('APP_BRAND_NAME', config('app.name', 'Olympo')))
-            ->brandLogo(fn (): ?string => self::brandingValue('logoUrl'))
+            // Sin logo cargado: las iniciales en un cuadrito del color del tema y el nombre.
+            ->brandLogo(fn (): string|HtmlString => self::brandingValue('logoUrl') ?? new HtmlString(view('filament.menu.marca')->render()))
             ->darkModeBrandLogo(fn (): ?string => self::brandingValue('logoUrl'))
             ->brandLogoHeight('2.5rem')
             ->favicon(fn (): ?string => self::brandingValue('faviconUrl'))
@@ -101,16 +103,19 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->plugins([
                 FilamentShieldPlugin::make()
-                    ->navigationGroup('Administración')
-                    ->navigationSort(3),
+                    ->navigationGroup('Sistema')
+                    ->navigationSort(2),
             ])
             ->databaseNotifications()
             ->databaseNotificationsPolling('30s')
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
-            ->navigationGroups(['Ventas', 'Inventario', 'Precios', 'Administración'])
+            ->navigationGroups(['Ventas', 'Inventario', 'Precios', 'Administración', 'Sistema'])
+            ->sidebarWidth('17rem')
             ->sidebarCollapsibleOnDesktop()
             // Todo se guarda en MAYÚSCULAS (GuardaEnMayusculas): se escribe ya en mayúsculas.
-            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES)
+            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES.view('filament.menu.estilos')->render())
+            // Abajo del menú: quién entró, su rol y su bodega.
+            ->renderHook(PanelsRenderHook::SIDEBAR_FOOTER, fn (): string => view('filament.menu.pie')->render())
             // Imprimir hojas de pedidos ahí mismo, sin abrir otra pestaña.
             ->renderHook(PanelsRenderHook::BODY_END, fn (): string => view('filament.imprimir-hoja')->render());
     }

@@ -10,6 +10,7 @@ use App\Enums\TemaPanel;
 use App\Models\BrandingSetting;
 use App\Models\Configuracion;
 use App\Support\ImageOptimizer;
+use BackedEnum;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Radio;
@@ -19,6 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 /**
@@ -39,6 +41,8 @@ class BrandingSettingsPage extends Page
 {
     protected string $view = 'filament.pages.branding-settings';
 
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
+
     public function getTitle(): string
     {
         return 'Configuración del Sistema';
@@ -56,7 +60,7 @@ class BrandingSettingsPage extends Page
 
     public static function getNavigationSort(): ?int
     {
-        return 99;
+        return 3;
     }
 
     /**

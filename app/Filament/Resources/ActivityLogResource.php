@@ -28,15 +28,17 @@ class ActivityLogResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
-    protected static ?string $modelLabel = 'Registro de Actividad';
+    protected static ?string $modelLabel = 'Registro de actividad';
 
-    protected static ?string $pluralModelLabel = 'Registros de Actividad';
+    protected static ?string $pluralModelLabel = 'Registros de actividad';
+
+    protected static bool $hasTitleCaseModelLabel = false;
 
     protected static ?int $navigationSort = 99;
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Administración';
+        return 'Sistema';
     }
 
     public static function canCreate(): bool
