@@ -276,6 +276,15 @@ test('en Facturas el encargado ve solo las de su bodega', function (): void {
     Livewire::test(ListFacturas::class)
         ->assertCanSeeTableRecords([$facturaCop])
         ->assertCanNotSeeTableRecords([$facturaOco]);
+
+    // Administración ve las dos y las busca también por el número del pedido.
+    $this->actingAs($this->admin);
+
+    Livewire::test(ListFacturas::class)
+        ->assertCanSeeTableRecords([$facturaCop, $facturaOco])
+        ->searchTable((string) $deOco->numero)
+        ->assertCanSeeTableRecords([$facturaOco])
+        ->assertCanNotSeeTableRecords([$facturaCop]);
 });
 
 test('el CAI se valida: formato, rango que no choque con otro; queda asignado a sus bodegas', function (): void {

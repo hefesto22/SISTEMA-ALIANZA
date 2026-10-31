@@ -10,26 +10,29 @@ use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
 use App\Models\Factura;
+use App\Models\Pedido;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Resources\Resource;
+use Filament\Support\Enums\FontFamily;
+use Filament\Support\Enums\FontWeight;
+use Filament\Support\Enums\TextSize;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\Layout\Stack;
-use Filament\Tables\Columns\ViewColumn;
-use Filament\Tables\Enums\FiltersLayout;
+use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Component;
 
 /**
- * Historial de facturas en tarjetas (como Pedidos): las vigentes y las
- * anuladas (con quién, cuándo, por qué y cuál la sustituyó). Las anuladas
- * hay que retirarlas al cliente y guardarlas marcadas ANULADA.
+ * Historial de facturas, una por renglón: las vigentes y las anuladas (con
+ * quién, cuándo, por qué y cuál la sustituyó). Las anuladas hay que
+ * retirarlas al cliente y guardarlas marcadas ANULADA.
  *
  * Solo consulta: las facturas se emiten al imprimir un pedido y se anulan
  * al corregirlo.
@@ -57,35 +60,85 @@ class FacturaResource extends Resource
 
     /**
      * Las de los pedidos que esta persona ve: administración todas, bodega
-     * las de su bodega.
+     * las de su bodega. Solo se cargan las columnas que la lista usa.
      */
     public static function getEloquentQuery(): Builder
     {
         $usuario = Acceso::usuario();
-        $query = Factura::query()->with(['pedido.vendedor', 'bodega', 'reemplazaA', 'reemplazo', 'anulador', 'emisor']);
+        $query = Factura::query()->with([
+            'pedido:id,numero,estado,bodega_id',
+            'bodega:id,nombre',
+            'reemplazaA:id,numero',
+            'reemplazo:id,reemplaza_a_id,numero',
+            'anulador:id,name',
+        ]);
 
         return $usuario === null ? $query->whereRaw('1 = 0') : $query->visiblesPara($usuario);
     }
 
+    /**
+     * Una factura por renglón, para que mil se lean igual de rápido: número,
+     * fecha, cliente, pedido, total y estado. Lo que pasó con ella (a cuál
+     * sustituye, por qué se anuló) va en el estado al pasar el mouse, y en
+     * su columna en Anuladas y Todas. En el teléfono quedan número, cliente
+     * y total.
+     */
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
-                Stack::make([
-                    ViewColumn::make('tarjeta')
-                        ->view('filament.facturas.tarjeta')
-                        ->state(fn (Factura $record): string => $record->numero)
-                        ->searchable(query: fn (Builder $query, string $search): Builder => self::buscar($query, $search)),
-                ]),
+                TextColumn::make('numero')
+                    ->label('Factura')
+                    ->fontFamily(FontFamily::Mono)
+                    ->size(TextSize::Small)
+                    ->weight(FontWeight::SemiBold)
+                    ->searchable(query: fn (Builder $query, string $search): Builder => self::buscar($query, $search)),
+                TextColumn::make('fecha_emision')
+                    ->label('Emitida')
+                    ->dateTime('d/m/Y H:i')
+                    ->size(TextSize::Small)
+                    ->color('gray')
+                    ->sortable()
+                    ->visibleFrom('md'),
+                TextColumn::make('cliente_nombre')
+                    ->label('Cliente')
+                    ->limit(32)
+                    ->tooltip(fn (Factura $record): ?string => mb_strlen($record->cliente_nombre) > 32 ? $record->cliente_nombre : null),
+                TextColumn::make('pedido.numero')
+                    ->label('Pedido')
+                    ->size(TextSize::Small)
+                    ->color('gray')
+                    ->visibleFrom('lg'),
+                TextColumn::make('bodega.nombre')
+                    ->label('Bodega')
+                    ->size(TextSize::Small)
+                    ->color('gray')
+                    ->visible(fn (): bool => Acceso::veTodo())
+                    ->visibleFrom('xl'),
+                TextColumn::make('total')
+                    ->formatStateUsing(fn (float $state): string => lempiras($state))
+                    ->weight(FontWeight::SemiBold)
+                    ->color(fn (Factura $record): ?string => $record->estaAnulada() ? 'gray' : null)
+                    ->alignEnd()
+                    ->sortable(),
+                TextColumn::make('estado')
+                    ->badge()
+                    ->tooltip(fn (Factura $record): ?string => ($historial = self::historial($record)) === '—' ? null : $historial)
+                    ->visibleFrom('sm'),
+                TextColumn::make('historial')
+                    ->label('Qué pasó')
+                    ->state(fn (Factura $record): string => self::historial($record))
+                    ->color(fn (Factura $record): ?string => $record->estaAnulada() && $record->reemplazo === null ? 'danger' : 'gray')
+                    ->size(TextSize::ExtraSmall)
+                    ->wrap()
+                    ->visible(fn (Component $livewire): bool => ! in_array(data_get($livewire, 'activeTab'), [null, 'vigentes'], true))
+                    ->visibleFrom('md'),
             ])
-            ->contentGrid(['md' => 2, 'xl' => 3])
-            ->extraAttributes(['class' => 'facturas-tarjetas'])
             ->defaultSort('fecha_emision', 'desc')
-            ->paginated([12, 24, 48])
-            ->defaultPaginationPageOption(12)
-            ->searchPlaceholder('Buscar por número de factura o de pedido, cliente o RTN…')
-            ->filtersLayout(FiltersLayout::AboveContentCollapsible)
-            ->filtersFormColumns(['md' => 2, 'xl' => 4])
+            ->striped()
+            ->paginated([25, 50, 100])
+            ->defaultPaginationPageOption(25)
+            ->searchPlaceholder('Número de factura o pedido, cliente o RTN…')
             ->filters([
                 SelectFilter::make('bodega_id')
                     ->label('Bodega')
@@ -98,14 +151,13 @@ class FacturaResource extends Resource
                         DatePicker::make('hasta'),
                     ])
                     ->columns(2)
-                    ->columnSpan(2)
                     ->query(function (Builder $query, array $data): Builder {
                         if (filled($data['desde'] ?? null)) {
-                            $query->whereDate('fecha_emision', '>=', $data['desde']);
+                            $query->where('fecha_emision', '>=', Carbon::parse((string) $data['desde'])->startOfDay());
                         }
 
                         if (filled($data['hasta'] ?? null)) {
-                            $query->whereDate('fecha_emision', '<=', $data['hasta']);
+                            $query->where('fecha_emision', '<=', Carbon::parse((string) $data['hasta'])->endOfDay());
                         }
 
                         return $query;
@@ -113,18 +165,12 @@ class FacturaResource extends Resource
             ])
             ->recordUrl(fn (Factura $record): string => PedidoResource::getUrl('view', ['record' => $record->pedido_id]))
             ->recordActions([
-                Action::make('pedido')
-                    ->label('Ver pedido')
-                    ->icon(Heroicon::OutlinedEye)
-                    ->button()
-                    ->outlined()
-                    ->color('gray')
-                    ->url(fn (Factura $record): string => PedidoResource::getUrl('view', ['record' => $record->pedido_id])),
                 Action::make('copia')
                     ->label('Imprimir copia')
+                    ->tooltip('Imprimir copia')
                     ->icon(Heroicon::OutlinedPrinter)
-                    ->button()
-                    ->outlined()
+                    ->iconButton()
+                    ->color('gray')
                     ->visible(fn (Factura $record): bool => ! $record->estaAnulada() && Gate::allows('imprimir', $record->pedido))
                     ->action(function (Factura $record, Component $livewire): void {
                         ImprimirPedidoAction::ejecutar($livewire, [$record->pedido_id], ModoImpresion::Copia);
@@ -151,10 +197,10 @@ class FacturaResource extends Resource
         $like = '%'.$search.'%';
 
         return $query->where(fn (Builder $q): Builder => $q
-            ->where('numero', 'ilike', $like)
-            ->orWhere('cliente_nombre', 'ilike', $like)
-            ->orWhere('cliente_rtn', 'ilike', $like)
-            ->orWhereHas('pedido', fn (Builder $p): Builder => $p->where('numero', 'ilike', $like)));
+            ->where('facturas.numero', 'ilike', $like)
+            ->orWhere('facturas.cliente_nombre', 'ilike', $like)
+            ->orWhere('facturas.cliente_rtn', 'ilike', $like)
+            ->orWhereIn('facturas.pedido_id', Pedido::query()->where('numero', 'ilike', $like)->select('id')));
     }
 
     /**

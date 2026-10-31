@@ -161,7 +161,9 @@ class Factura extends Model
     }
 
     /**
-     * Las facturas de los pedidos que esta persona puede ver.
+     * Las facturas de los pedidos que esta persona puede ver. Administración
+     * todas y el encargado las de su bodega (la factura guarda la bodega de su
+     * pedido: va directo al índice, sin pasar por pedidos).
      *
      * @param Builder<Factura> $query
      *
@@ -169,6 +171,14 @@ class Factura extends Model
      */
     public function scopeVisiblesPara(Builder $query, User $user): Builder
     {
+        if ($user->veTodasLasBodegas()) {
+            return $query;
+        }
+
+        if (! $user->esVendedor() && $user->bodega_id !== null) {
+            return $query->where('facturas.bodega_id', $user->bodega_id);
+        }
+
         return $query->whereIn('pedido_id', Pedido::query()->visiblePara($user)->select('id'));
     }
 

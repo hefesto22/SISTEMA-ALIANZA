@@ -9,6 +9,7 @@ use App\Filament\Resources\Facturas\FacturaResource;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\On;
 
@@ -28,28 +29,14 @@ class ListFacturas extends ListRecords
     }
 
     /**
-     * "Hoy: 3 facturas por L. 1,250.00 · 1 anulada: retire esa hoja…"
+     * Sin texto arriba (la pestaña Anuladas ya dice cuántas hay); en esa
+     * pestaña, lo que hay que hacer con las hojas.
      */
-    public function getSubheading(): string
+    public function table(Table $table): Table
     {
-        $hoy = FacturaResource::getEloquentQuery()
-            ->where('estado', EstadoFactura::Vigente)
-            ->whereDate('fecha_emision', today());
-        $cuantas = (clone $hoy)->count();
-        $monto = (float) (clone $hoy)->sum('total');
-        $anuladas = FacturaResource::getEloquentQuery()->where('estado', EstadoFactura::Anulada)->count();
-
-        $partes = [$cuantas === 0
-            ? 'Hoy no se ha emitido ninguna factura'
-            : 'Hoy: '.($cuantas === 1 ? '1 factura' : "{$cuantas} facturas").' por '.lempiras($monto)];
-
-        if ($anuladas > 0) {
-            $partes[] = $anuladas === 1
-                ? '1 anulada: retire esa hoja al cliente y guárdela marcada ANULADA'
-                : "{$anuladas} anuladas: retire esas hojas al cliente y guárdelas marcadas ANULADA";
-        }
-
-        return implode(' · ', $partes).'.';
+        return $table->description(fn (): ?string => $this->activeTab === 'anuladas'
+            ? 'Retire estas hojas al cliente y guárdelas marcadas ANULADA.'
+            : null);
     }
 
     /**
