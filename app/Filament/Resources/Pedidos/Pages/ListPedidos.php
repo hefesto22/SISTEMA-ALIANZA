@@ -46,35 +46,21 @@ class ListPedidos extends ListRecords
     }
 
     /**
-     * "Todas las bodegas · 6 pendientes · L. 4,250.00 por validar · 3 por imprimir · 1 fuera de ruta".
+     * Bodega y administración no llevan texto: las pestañas ya dicen cuántos
+     * hay de cada uno. El vendedor no tiene pestañas: se le dice por qué sus
+     * pedidos desaparecen al validarlos.
      */
-    public function getSubheading(): string
+    public function getSubheading(): ?string
     {
-        $pendientes = PedidoResource::getEloquentQuery()->where('estado', EstadoPedido::Pendiente);
+        if (! Acceso::esVendedor()) {
+            return null;
+        }
 
+        $pendientes = PedidoResource::getEloquentQuery()->where('estado', EstadoPedido::Pendiente);
         $cuantos = (clone $pendientes)->count();
         $monto = (float) (clone $pendientes)->sum('total');
-        $fuera = (clone $pendientes)->where('fuera_de_ruta', true)->count();
 
-        // El vendedor solo ve sus pendientes: al validarlos, bodega se los lleva.
-        if (Acceso::esVendedor()) {
-            return "Sus pedidos por validar: {$cuantos} · ".lempiras($monto).'. Cuando bodega los valida ya no salen aquí.';
-        }
-
-        $porImprimir = PedidoResource::getEloquentQuery()->where('estado', EstadoPedido::PorImprimir)->count();
-
-        $partes = [
-            Acceso::veTodo() ? 'Todas las bodegas' : 'Vendedores de su bodega',
-            $cuantos.' '.($cuantos === 1 ? 'pendiente' : 'pendientes'),
-            lempiras($monto).' por validar',
-            "{$porImprimir} por imprimir",
-        ];
-
-        if ($fuera > 0) {
-            $partes[] = "{$fuera} fuera de ruta";
-        }
-
-        return implode(' · ', $partes);
+        return "Sus pedidos por validar: {$cuantos} · ".lempiras($monto).'. Cuando bodega los valida ya no salen aquí.';
     }
 
     /**

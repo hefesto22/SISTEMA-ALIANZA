@@ -51,6 +51,15 @@ class AdminPanelProvider extends PanelProvider
         .'.fi-modal-window.modal-telefono .fi-modal-footer-actions>*{width:100%}'
         .'</style>';
 
+    /**
+     * En los listados no sale la ruta "Pedidos > Listado" arriba del título:
+     * no dice nada que no diga el menú. En Ver, Editar o Crear sí queda (sirve
+     * para regresar al listado).
+     */
+    private const ESTILO_LISTADOS = '<style>'
+        .'.fi-resource-list-records-page .fi-breadcrumbs{display:none}'
+        .'</style>';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -113,7 +122,7 @@ class AdminPanelProvider extends PanelProvider
             ->sidebarWidth('17rem')
             ->sidebarCollapsibleOnDesktop()
             // Todo se guarda en MAYÚSCULAS (GuardaEnMayusculas): se escribe ya en mayúsculas.
-            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES.view('filament.menu.estilos')->render())
+            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES.self::ESTILO_LISTADOS.view('filament.menu.estilos')->render())
             // Abajo del menú: quién entró, su rol y su bodega.
             ->renderHook(PanelsRenderHook::SIDEBAR_FOOTER, fn (): string => view('filament.menu.pie')->render())
             // Imprimir hojas de pedidos ahí mismo, sin abrir otra pestaña.

@@ -55,7 +55,7 @@ test('el seeder crea 10 pedidos pendientes con distintos productos y al repetirl
         ->and(PedidoItem::query()->distinct()->count('producto_id'))->toBeGreaterThanOrEqual(6);
 });
 
-test('los pedidos se ven en tarjetas, con resumen arriba, y se buscan por cliente', function (): void {
+test('los pedidos se ven en tarjetas, sin texto de resumen arriba, y se buscan por cliente', function (): void {
     $this->actingAs($this->admin);
 
     $fuera = Pedido::query()->with('cliente')->where('fuera_de_ruta', true)->firstOrFail();
@@ -63,8 +63,8 @@ test('los pedidos se ven en tarjetas, con resumen arriba, y se buscan por client
 
     Livewire::test(ListPedidos::class)
         ->assertOk()
-        ->assertSee('10 pendientes')
-        ->assertSee('1 fuera de ruta')
+        ->assertDontSee('10 pendientes')
+        ->assertDontSee('por validar')
         ->assertSee($fuera->cliente->nombre)
         ->assertSee((string) $fuera->numero)
         ->assertSee('Fuera de ruta')
