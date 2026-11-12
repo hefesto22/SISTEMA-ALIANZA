@@ -6,6 +6,7 @@ namespace App\Domain\Reportes;
 
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Models\Bodega;
+use App\Models\Proveedor;
 use App\Models\User;
 
 /**
@@ -42,5 +43,13 @@ final class AlcanceReporte
         }
 
         return $bodega;
+    }
+
+    /**
+     * El proveedor escogido en el filtro (null = todos).
+     */
+    public static function proveedor(mixed $pedido): ?Proveedor
+    {
+        return is_numeric($pedido) ? Proveedor::query()->find((int) $pedido) : null;
     }
 }

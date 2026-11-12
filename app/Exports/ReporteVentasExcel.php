@@ -11,7 +11,8 @@ use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
 /**
  * El reporte de ventas en Excel: una hoja por parte (resumen, por día, por
- * bodega, por vendedor, por producto, por cliente), según lo que se escogió.
+ * bodega, por proveedor, por vendedor, por producto, por cliente), según lo
+ * que se escogió.
  */
 final class ReporteVentasExcel implements Export, WithMultipleSheets
 {
@@ -34,6 +35,10 @@ final class ReporteVentasExcel implements Export, WithMultipleSheets
 
             if ($this->reporte->bodega === null) {
                 $hojas[] = $this->hoja('Por bodega', 'Bodega', $this->reporte->porBodega());
+            }
+
+            if ($this->reporte->proveedor === null) {
+                $hojas[] = $this->hoja('Por proveedor', 'Proveedor', $this->reporte->porProveedor(), conCodigo: false);
             }
         }
 
@@ -173,7 +178,7 @@ final class ReporteVentasExcel implements Export, WithMultipleSheets
     {
         return [
             $this->reporte->titulo(VentasDelPeriodo::ver($this->ver)),
-            'Periodo: '.$this->reporte->periodo->texto().' · '.$this->reporte->nombreBodega(),
+            'Periodo: '.$this->reporte->periodo->texto().' · '.$this->reporte->alcance(),
             'Montos en lempiras. Venta, costo y ganancia sin ISV; el total lleva ISV. Sacado el '.now()->format('d/m/Y H:i').'.',
         ];
     }

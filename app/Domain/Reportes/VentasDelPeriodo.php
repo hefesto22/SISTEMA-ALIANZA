@@ -9,6 +9,7 @@ use App\Enums\TipoMovimiento;
 use App\Enums\UnidadVenta;
 use App\Models\Bodega;
 use App\Models\Existencia;
+use App\Models\Proveedor;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use stdClass;
@@ -27,8 +28,11 @@ use stdClass;
  *    salida: su costo se estima con el de hoy y se avisa cuántos son.
  *  - Ganancia: venta − costo. Margen: ganancia ÷ venta.
  *
- * Se puede sacar todo junto o cada parte: totales (con el detalle por día y
- * por bodega), por vendedor, por producto o por cliente.
+ * Se puede sacar todo junto o cada parte: totales (con el detalle por día,
+ * por bodega y por proveedor), por vendedor, por producto o por cliente.
+ *
+ * Con un proveedor escogido solo cuentan sus productos: lo que se vendió de
+ * ese proveedor (en la bodega escogida o en cada una), sus pedidos y clientes.
  */
 final class VentasDelPeriodo
 {
@@ -51,6 +55,7 @@ final class VentasDelPeriodo
     public function __construct(
         public readonly Periodo $periodo,
         public readonly ?Bodega $bodega,
+        public readonly ?Proveedor $proveedor = null,
     ) {}
 
     public static function ver(mixed $ver): string
@@ -77,7 +82,15 @@ final class VentasDelPeriodo
     }
 
     /**
-     * "ventas-por-vendedor-copan-2026-11-01_2026-11-30".
+     * "Todas las bodegas" o "BODEGA COPÁN · Proveedor: MERHONSA".
+     */
+    public function alcance(): string
+    {
+        return $this->nombreBodega().($this->proveedor === null ? '' : ' · Proveedor: '.$this->proveedor->etiqueta());
+    }
+
+    /**
+     * "ventas-por-vendedor-copan-merhonsa-2026-11-01_2026-11-30".
      */
     public function nombreArchivo(string $ver): string
     {
@@ -85,6 +98,7 @@ final class VentasDelPeriodo
             'ventas',
             $ver === 'todo' ? null : str_replace('_', '-', $ver),
             $this->bodega === null ? 'todas' : str($this->bodega->codigo)->slug()->toString(),
+            $this->proveedor === null ? null : str($this->proveedor->etiqueta())->slug()->toString(),
             $this->periodo->enArchivo(),
         ])->filter()->implode('-');
     }
@@ -139,6 +153,20 @@ final class VentasDelPeriodo
             .self::SUMAS.' FROM lineas l JOIN bodegas b ON b.id = l.bodega_id GROUP BY b.id, b.codigo, b.nombre ORDER BY venta DESC, b.nombre');
 
         return array_map(fn (stdClass $f): FilaVenta => self::fila($f, self::texto($f->nombre), self::texto($f->codigo)), $filas);
+    }
+
+    /**
+     * Cuánto se vendió de cada proveedor (sin proveedor escogido).
+     *
+     * @return list<FilaVenta>
+     */
+    public function porProveedor(): array
+    {
+        $filas = $this->consultar('SELECT COALESCE(NULLIF(pv.nombre_corto, \'\'), pv.nombre) AS nombre, COUNT(DISTINCT l.pedido_id) AS pedidos, COUNT(DISTINCT l.cliente_id) AS clientes, COALESCE(SUM(l.unidades), 0) AS unidades, '
+            .self::SUMAS.' FROM lineas l JOIN productos p ON p.id = l.producto_id JOIN proveedores pv ON pv.id = p.proveedor_id'
+            .' GROUP BY pv.id, pv.nombre, pv.nombre_corto ORDER BY venta DESC, nombre');
+
+        return array_map(fn (stdClass $f): FilaVenta => self::fila($f, self::texto($f->nombre)), $filas);
     }
 
     /**
@@ -209,20 +237,23 @@ final class VentasDelPeriodo
         $clientes = self::incluye($ver, 'clientes') ? $this->porCliente() : null;
 
         return [
-            'ver'        => $ver,
-            'titulo'     => $this->titulo($ver),
-            'periodo'    => $this->periodo->texto(),
-            'bodega'     => $this->nombreBodega(),
-            'todas'      => $this->bodega === null,
-            'totales'    => $this->totales(),
-            'estimados'  => $this->pedidosEstimados(),
-            'verTotales' => self::incluye($ver, 'totales'),
-            'dias'       => self::incluye($ver, 'totales') ? $this->porDia() : [],
-            'bodegas'    => self::incluye($ver, 'totales') && $this->bodega === null ? $this->porBodega() : [],
-            'vendedores' => $vendedores === null ? null : self::recortar($vendedores, $limite),
-            'productos'  => $productos === null ? null : self::recortar($productos, $limite),
-            'clientes'   => $clientes === null ? null : self::recortar($clientes, $limite),
-            'cuantos'    => [
+            'ver'         => $ver,
+            'titulo'      => $this->titulo($ver),
+            'periodo'     => $this->periodo->texto(),
+            'bodega'      => $this->nombreBodega(),
+            'alcance'     => $this->alcance(),
+            'proveedor'   => $this->proveedor?->etiqueta(),
+            'todas'       => $this->bodega === null,
+            'totales'     => $this->totales(),
+            'estimados'   => $this->pedidosEstimados(),
+            'verTotales'  => self::incluye($ver, 'totales'),
+            'dias'        => self::incluye($ver, 'totales') ? $this->porDia() : [],
+            'bodegas'     => self::incluye($ver, 'totales') && $this->bodega === null ? $this->porBodega() : [],
+            'proveedores' => self::incluye($ver, 'totales') && $this->proveedor === null ? $this->porProveedor() : [],
+            'vendedores'  => $vendedores === null ? null : self::recortar($vendedores, $limite),
+            'productos'   => $productos === null ? null : self::recortar($productos, $limite),
+            'clientes'    => $clientes === null ? null : self::recortar($clientes, $limite),
+            'cuantos'     => [
                 'vendedores' => $vendedores === null ? 0 : count($vendedores),
                 'productos'  => $productos === null ? 0 : count($productos),
                 'clientes'   => $clientes === null ? 0 : count($clientes),
@@ -262,6 +293,7 @@ final class VentasDelPeriodo
     /**
      * ped    = pedidos despachados en el periodo (y la bodega)
      * it     = lo cobrado por pedido y producto, y las unidades que salieron
+     *          (solo los productos del proveedor, si se escogió uno)
      * k      = lo que costó según el kárdex (despacho + correcciones)
      * lineas = todo junto; sin kárdex, el costo se estima con el de hoy
      *
@@ -284,6 +316,13 @@ final class VentasDelPeriodo
         }
 
         $valores[] = UnidadVenta::Caja->value;
+        $deProveedor = '';
+
+        if ($this->proveedor !== null) {
+            $deProveedor = ' WHERE pr.proveedor_id = ?';
+            $valores[] = $this->proveedor->id;
+        }
+
         $valores[] = TipoMovimiento::Despacho->value;
         $valores[] = TipoMovimiento::Correccion->value;
 
@@ -299,7 +338,7 @@ final class VentasDelPeriodo
                     SUM(COALESCE(i.cantidad_despachada, i.cantidad) * CASE WHEN i.unidad = ? THEN GREATEST(pr.unidades_por_caja, 1) ELSE 1 END) AS unidades
                 FROM pedido_items i
                 JOIN ped ON ped.id = i.pedido_id
-                JOIN productos pr ON pr.id = i.producto_id
+                JOIN productos pr ON pr.id = i.producto_id{$deProveedor}
                 GROUP BY i.pedido_id, i.producto_id
             ),
             k AS (

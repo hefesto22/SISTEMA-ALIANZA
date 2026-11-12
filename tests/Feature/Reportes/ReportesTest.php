@@ -248,7 +248,7 @@ test('el Excel de ventas se arma de verdad: códigos como texto y montos como n�
     $resumen = $libro->getSheetByName('Resumen');
 
     // Encabezado en 1-3, títulos en la 5, datos desde la 6.
-    expect($libro->getSheetNames())->toBe(['Resumen', 'Por día', 'Por bodega', 'Por vendedor', 'Por producto', 'Por cliente'])
+    expect($libro->getSheetNames())->toBe(['Resumen', 'Por día', 'Por bodega', 'Por proveedor', 'Por vendedor', 'Por producto', 'Por cliente'])
         ->and($productos?->getCell('A6')->getDataType())->toBe(DataType::TYPE_STRING)
         ->and($productos?->getCell('A6')->getValue())->toBe($this->gravado->codigo)
         ->and($productos?->getCell('H6')->getValue())->toEqual(1500)
@@ -356,4 +356,46 @@ test('PDF / Imprimir abre la vista de impresión en un modal; la hoja de adentro
     $this->get(route('reportes.ventas.imprimir', $hoy))
         ->assertOk()
         ->assertSee('window.print');
+});
+
+test('ventas de un proveedor: solo cuentan sus productos, en una bodega o en cada una', function (): void {
+    // Otro proveedor: 4 unidades a L 25 (costo 20) en Copán. Con lo de siempre, el total del mes es L 1,700.
+    $otro = Producto::factory()->exento()->precio(20.0, 25.0)->create(['unidades_por_caja' => 1]);
+    app(AjustarExistencia::class)->ejecutar($this->copan->id, $otro, 10, $this->admin, 'conteo');
+    pedidoDeReporte($this->copan, $this->vendedor, [[$otro, UnidadVenta::Unidad, 4]], $this->admin);
+    ventasDeReporte($this);
+
+    $deJabon = $this->gravado->proveedor;
+    $deOtro = $otro->proveedor;
+
+    $todas = new VentasDelPeriodo(Periodo::de('hoy'), null);
+    $jabon = new VentasDelPeriodo(Periodo::de('hoy'), null, $deJabon);
+    $soloOtro = new VentasDelPeriodo(Periodo::de('hoy'), null, $deOtro);
+
+    expect($todas->totales()->venta)->toBe(1700.0)
+        ->and(array_map(fn ($f) => [$f->nombre, $f->venta], $todas->porProveedor()))->toBe([
+            [$deJabon->etiqueta(), 1600.0],
+            [$deOtro->etiqueta(), 100.0],
+        ])
+        ->and($jabon->totales()->venta)->toBe(1600.0)
+        ->and($jabon->totales()->pedidos)->toBe(2)
+        ->and(array_map(fn ($f) => [$f->nombre, $f->venta], $jabon->porBodega()))->toBe([['BODEGA COPÁN', 1300.0], ['BODEGA OCOTEPEQUE', 300.0]])
+        ->and($soloOtro->totales()->venta)->toBe(100.0)
+        ->and($soloOtro->totales()->costo)->toBe(80.0)
+        ->and($soloOtro->totales()->pedidos)->toBe(1)
+        ->and((new VentasDelPeriodo(Periodo::de('hoy'), $this->ocote, $deOtro))->totales()->pedidos)->toBe(0)
+        ->and($jabon->alcance())->toBe('Todas las bodegas · Proveedor: '.$deJabon->etiqueta());
+
+    $this->actingAs($this->admin);
+
+    Livewire::test(ReporteVentas::class)
+        ->assertSee('L. 1,700.00')
+        ->fillForm(['proveedor_id' => $deOtro->id])
+        ->assertSee('L. 100.00')
+        ->assertDontSee('L. 1,700.00');
+
+    $this->get(route('reportes.ventas.imprimir', ['desde' => now()->toDateString(), 'hasta' => now()->toDateString(), 'proveedor' => $deOtro->id]))
+        ->assertOk()
+        ->assertSee('Proveedor: '.$deOtro->etiqueta())
+        ->assertDontSee('L. 1,700.00');
 });

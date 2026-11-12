@@ -10,7 +10,7 @@
     @php($d = $this->datos())
 
     <div wire:loading.delay.class="rp-cargando">
-        <div class="rp-encabezado">{{ $d['periodo'] }} · {{ $d['bodega'] }}</div>
+        <div class="rp-encabezado">{{ $d['periodo'] }} · {{ $d['alcance'] }}</div>
         @include('reportes.partes.ventas', ['d' => $d])
     </div>
 </x-filament-panels::page>

@@ -13,7 +13,7 @@
 
 <div class="rp">
     @if ($t->pedidos === 0)
-        <div class="rp-vacio">No hay ventas despachadas del {{ $d['periodo'] }} en {{ $d['todas'] ? 'ninguna bodega' : $d['bodega'] }}.</div>
+        <div class="rp-vacio">No hay ventas despachadas{{ $d['proveedor'] ? ' de '.$d['proveedor'] : '' }} del {{ $d['periodo'] }} en {{ $d['todas'] ? 'ninguna bodega' : $d['bodega'] }}.</div>
     @else
         @if ($d['verTotales'])
             <section class="rp-kpis">
@@ -97,6 +97,55 @@
                         </tfoot>
                     </table>
                 </div>
+            </section>
+        @endif
+
+        @if ($d['proveedores'] !== [])
+            <section class="rp-seccion">
+                <h2>Por proveedor <small>del que más vendió al que menos</small></h2>
+                <div class="rp-tabla">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Proveedor</th>
+                                <th class="n">Pedidos</th>
+                                <th class="n">Clientes</th>
+                                <th class="n">Venta</th>
+                                <th class="n">Costo</th>
+                                <th class="n">Ganancia</th>
+                                <th class="n">Margen</th>
+                                <th class="n">Total con ISV</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($d['proveedores'] as $f)
+                                <tr>
+                                    <td class="nombre">{{ $f->nombre }}</td>
+                                    <td class="n">{{ number_format($f->pedidos) }}</td>
+                                    <td class="n">{{ number_format($f->clientes) }}</td>
+                                    <td class="n">{{ lempiras($f->venta) }}</td>
+                                    <td class="n">{{ lempiras($f->costo) }}</td>
+                                    <td @class(['n', 'neg' => $f->ganancia() < 0])>{{ lempiras($f->ganancia()) }}</td>
+                                    <td class="n">{{ $pct($f->margen()) }}</td>
+                                    <td class="n">{{ lempiras($f->total) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td>Total</td>
+                                <td class="n">{{ number_format($t->pedidos) }}</td>
+                                <td class="n">{{ number_format($t->clientes) }}</td>
+                                <td class="n">{{ lempiras($t->venta) }}</td>
+                                <td class="n">{{ lempiras($t->costo) }}</td>
+                                <td @class(['n', 'neg' => $t->ganancia() < 0])>{{ lempiras($t->ganancia()) }}</td>
+                                <td class="n">{{ $pct($t->margen()) }}</td>
+                                <td class="n">{{ lempiras($t->total) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <div class="rp-nota">Un pedido con productos de varios proveedores cuenta en cada uno; en el total, una vez.</div>
             </section>
         @endif
 

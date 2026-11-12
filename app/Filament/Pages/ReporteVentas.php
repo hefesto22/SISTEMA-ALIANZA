@@ -11,6 +11,7 @@ use App\Exports\ReporteVentasExcel;
 use App\Filament\Support\Acceso;
 use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
+use App\Models\Proveedor;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -31,7 +32,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * desde donde se imprime o se guarda el PDF).
  *
  * Administración saca el de todas las bodegas o el de una; el encargado,
- * solo el de su bodega. Las cuentas: App\Domain\Reportes\VentasDelPeriodo.
+ * solo el de su bodega. Con un proveedor escogido sale solo lo que se vendió
+ * de sus productos (y, con todas las bodegas, cuánto en cada una). Las cuentas: App\Domain\Reportes\VentasDelPeriodo.
  *
  * @property Schema $form
  */
@@ -74,11 +76,12 @@ class ReporteVentas extends Page
     public function mount(): void
     {
         $this->form->fill([
-            'periodo'   => 'mes',
-            'desde'     => now()->startOfMonth()->toDateString(),
-            'hasta'     => now()->toDateString(),
-            'bodega_id' => null,
-            'ver'       => 'todo',
+            'periodo'      => 'mes',
+            'desde'        => now()->startOfMonth()->toDateString(),
+            'hasta'        => now()->toDateString(),
+            'bodega_id'    => null,
+            'proveedor_id' => null,
+            'ver'          => 'todo',
         ]);
     }
 
@@ -110,6 +113,12 @@ class ReporteVentas extends Page
                         ->options(fn (): array => Bodega::query()->orderBy('nombre')->pluck('nombre', 'id')->all())
                         ->live()
                         ->visible(fn (): bool => Acceso::veTodo()),
+                    Select::make('proveedor_id')
+                        ->label('Proveedor')
+                        ->placeholder('Todos los proveedores')
+                        ->options(fn (): array => Proveedor::query()->orderBy('nombre')->get()->mapWithKeys(fn (Proveedor $p): array => [$p->id => $p->etiqueta()])->all())
+                        ->searchable()
+                        ->live(),
                     ToggleButtons::make('ver')
                         ->label('Ver')
                         ->options(VentasDelPeriodo::VER)
@@ -147,6 +156,7 @@ class ReporteVentas extends Page
         return new VentasDelPeriodo(
             Periodo::de(self::texto($this->filtros['periodo'] ?? null), $this->filtros['desde'] ?? null, $this->filtros['hasta'] ?? null),
             AlcanceReporte::bodega($usuario, $this->filtros['bodega_id'] ?? null),
+            AlcanceReporte::proveedor($this->filtros['proveedor_id'] ?? null),
         );
     }
 
@@ -161,7 +171,7 @@ class ReporteVentas extends Page
     }
 
     /**
-     * Para la hoja de imprimir: las fechas ya resueltas, la bodega y lo que se ve.
+     * Para la hoja de imprimir: las fechas ya resueltas, la bodega, el proveedor y lo que se ve.
      *
      * @return array<string, int|string>
      */
@@ -170,10 +180,11 @@ class ReporteVentas extends Page
         $reporte = $this->reporte();
 
         return array_filter([
-            'desde'  => $reporte->periodo->desde->toDateString(),
-            'hasta'  => $reporte->periodo->hasta->toDateString(),
-            'bodega' => $reporte->bodega?->id,
-            'ver'    => $this->ver(),
+            'desde'     => $reporte->periodo->desde->toDateString(),
+            'hasta'     => $reporte->periodo->hasta->toDateString(),
+            'bodega'    => $reporte->bodega?->id,
+            'proveedor' => $reporte->proveedor?->id,
+            'ver'       => $this->ver(),
         ], fn (mixed $valor): bool => $valor !== null);
     }
 
