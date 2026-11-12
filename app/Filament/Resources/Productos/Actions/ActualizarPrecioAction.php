@@ -31,6 +31,11 @@ use Illuminate\Support\Facades\Auth;
  * la ganancia, el precio de la caja y de la unidad, y lo que se guarda sin ISV.
  * Aplica a TODAS las bodegas y deja historial.
  *
+ * El precio de venta puede ser calculado (costo promedio + % de utilidad; se
+ * recalcula solo en cada compra) o fijo (lo pone la empresa a mano, p. ej.
+ * para estar mejor que la competencia; las compras cambian el costo pero no
+ * ese precio). Si se escribe un precio distinto al calculado, queda fijo.
+ *
  * Por dentro se lleva cada monto POR UNIDAD Y SIN ISV (costo_base, precio_base)
  * con 6 decimales; lo que se ve en pantalla sale de ahí según el modo. Así, al
  * cambiar entre caja y unidad nada se descuadra: caja de 48 a L. 594.49 ⇄
@@ -39,6 +44,10 @@ use Illuminate\Support\Facades\Auth;
 final class ActualizarPrecioAction
 {
     private const CAMBIO_SOSPECHOSO = 0.25;
+
+    private const CALCULADO = 'calculado';
+
+    private const FIJO = 'fijo';
 
     /** Montos un poco más grandes y con números alineados. */
     private const ESTILO_MONTO = 'font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums;';
@@ -61,6 +70,7 @@ final class ActualizarPrecioAction
 
                 return [
                     'costo_por'    => $factor > 1 ? 'caja' : 'unidad',
+                    'modo_precio'  => $record->precio_fijo ? self::FIJO : self::CALCULADO,
                     'costo_base'   => $record->costo_unidad,
                     'precio_base'  => $record->precio_unidad,
                     'costo'        => CalculadoraPrecio::aPantalla($record->costo_unidad, $record->gravado, $factor),
@@ -98,6 +108,21 @@ final class ActualizarPrecioAction
                             ->afterStateUpdated(function (Get $get, Set $set, Producto $record): void {
                                 self::alCambiarCosto($get, $set, $record);
                             }),
+                        ToggleButtons::make('modo_precio')
+                            ->label('Precio de venta')
+                            ->options(fn (Producto $record): array => [
+                                self::CALCULADO => 'Calculado ('.self::porcentaje($record->margenAplicado()).' sobre el costo)',
+                                self::FIJO      => 'Fijo (lo pongo yo)',
+                            ])
+                            ->icons([self::CALCULADO => Heroicon::OutlinedCalculator, self::FIJO => Heroicon::OutlinedLockClosed])
+                            ->grouped()
+                            ->required()
+                            ->live()
+                            ->afterStateUpdated(function (?string $state, Get $get, Set $set, Producto $record): void {
+                                if ($state === self::CALCULADO) {
+                                    self::ponerSugerido($get, $set, $record);
+                                }
+                            }),
                         TextInput::make('precio_venta')
                             ->label(fn (Get $get, Producto $record): string => 'Precio de venta '.self::por($get).($record->gravado ? ' · con ISV' : ''))
                             ->numeric()
@@ -112,8 +137,15 @@ final class ActualizarPrecioAction
                                 if (is_numeric($venta)) {
                                     $set('precio_base', self::base((float) $venta, $record, self::factor($get('costo_por'), $record)));
                                 }
+
+                                // Un precio distinto al calculado lo puso la empresa: queda fijo.
+                                if (self::difiereDelSugerido($get, $record)) {
+                                    $set('modo_precio', self::FIJO);
+                                }
                             })
-                            ->helperText(fn (Producto $record): string => 'Se calcula solo con el '.self::porcentaje($record->margenAplicado()).' de utilidad al cambiar el costo. Puede cambiarlo a mano.')
+                            ->helperText(fn (Get $get, Producto $record): string => $get('modo_precio') === self::FIJO
+                                ? 'Queda fijo: las compras cambian el costo promedio, pero este precio solo cambia cuando usted lo cambie aquí.'
+                                : 'Sale del costo con el '.self::porcentaje($record->margenAplicado()).' de utilidad y se recalcula solo en cada compra. Si escribe otro precio, queda fijo.')
                             ->hintAction(fn (Producto $record): Action => self::usarSugerido($record)),
                         TextInput::make('nota')
                             ->label('Nota (opcional)')
@@ -130,6 +162,12 @@ final class ActualizarPrecioAction
                 /** @var User|null $usuario */
                 $usuario = Auth::user();
                 $ventaAnterior = $record->precioUnidadConIsv();
+                $eraFijo = $record->precio_fijo;
+                $fijo = match ($data['modo_precio'] ?? null) {
+                    self::FIJO      => true,
+                    self::CALCULADO => false,
+                    default         => $eraFijo,
+                };
 
                 try {
                     $valores = self::aGuardar($data, $record);
@@ -141,9 +179,22 @@ final class ActualizarPrecioAction
                         $usuario,
                         $valores['precio'],
                         filled($data['nota'] ?? null) ? (string) $data['nota'] : null,
+                        precioFijo: $fijo,
                     );
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
+
+                    return;
+                }
+
+                if ($cambio === null && $fijo !== $eraFijo) {
+                    Notification::make()
+                        ->title($fijo ? 'Ahora el precio es fijo' : 'Ahora el precio es calculado')
+                        ->body($fijo
+                            ? 'Las compras cambian el costo promedio, pero el precio de venta se queda en '.lempiras($record->precioUnidadConIsv()).' por unidad.'
+                            : 'En cada compra el precio se recalcula con el '.self::porcentaje($record->margenAplicado()).' sobre el costo promedio.')
+                        ->success()
+                        ->send();
 
                     return;
                 }
@@ -160,7 +211,8 @@ final class ActualizarPrecioAction
 
                 Notification::make()
                     ->title('Precio actualizado en todas las bodegas')
-                    ->body($record->codigo.': '.lempiras($ventaAnterior).' → '.lempiras(CalculadoraPrecio::conIsv($cambio->precio_nuevo, $record->gravado)).' por unidad'.($record->gravado ? ' (con ISV)' : ''))
+                    ->body($record->codigo.': '.lempiras($ventaAnterior).' → '.lempiras(CalculadoraPrecio::conIsv($cambio->precio_nuevo, $record->gravado)).' por unidad'.($record->gravado ? ' (con ISV)' : '').'. '
+                        .($fijo ? 'Queda fijo: las compras no lo cambian.' : 'Se recalcula solo en cada compra.'))
                     ->success()
                     ->send();
             });
@@ -206,8 +258,8 @@ final class ActualizarPrecioAction
     }
 
     /**
-     * Se escribió un costo: se guarda su base y el precio de venta se recalcula
-     * con el % de utilidad (después se puede cambiar a mano).
+     * Se escribió un costo: se guarda su base y, si el precio es calculado, el
+     * precio de venta se recalcula con el % de utilidad. Si es fijo, se queda.
      */
     private static function alCambiarCosto(Get $get, Set $set, Producto $producto): void
     {
@@ -217,15 +269,23 @@ final class ActualizarPrecioAction
             return;
         }
 
-        $factor = self::factor($get('costo_por'), $producto);
-        $costoBase = self::base((float) $costo, $producto, $factor);
-        $set('costo_base', $costoBase);
+        $set('costo_base', self::base((float) $costo, $producto, self::factor($get('costo_por'), $producto)));
 
-        $sugerido = self::precioSugerido($costoBase, $producto);
+        if ($get('modo_precio') !== self::FIJO) {
+            self::ponerSugerido($get, $set, $producto);
+        }
+    }
+
+    /**
+     * Pone el precio que da el % de utilidad con el costo escrito.
+     */
+    private static function ponerSugerido(Get $get, Set $set, Producto $producto): void
+    {
+        $sugerido = is_numeric($get('costo_base')) ? self::precioSugerido((float) $get('costo_base'), $producto) : null;
 
         if ($sugerido !== null) {
             $set('precio_base', $sugerido);
-            $set('precio_venta', CalculadoraPrecio::aPantalla($sugerido, $producto->gravado, $factor));
+            $set('precio_venta', CalculadoraPrecio::aPantalla($sugerido, $producto->gravado, self::factor($get('costo_por'), $producto)));
         }
     }
 
@@ -269,6 +329,7 @@ final class ActualizarPrecioAction
             $producto->unidades_por_caja > 1 ? "caja de {$producto->unidades_por_caja}" : null,
             $producto->gravado ? 'gravado (paga ISV)' : 'exento',
             'utilidad actual '.self::porcentaje(CalculadoraPrecio::margenReal($producto->costo_unidad, $producto->precio_unidad)),
+            $producto->precio_fijo ? 'precio fijo' : null,
         ])->filter()->implode(' · ');
     }
 
@@ -306,7 +367,7 @@ final class ActualizarPrecioAction
     }
 
     /**
-     * Enlace arriba del precio cuando se cambió a mano: "Usar 14%: L. 594.49" lo regresa al sugerido.
+     * Enlace arriba del precio cuando se cambió a mano: "Usar 14%: L. 594.49" lo regresa al sugerido (calculado).
      */
     private static function usarSugerido(Producto $producto): Action
     {
@@ -315,12 +376,8 @@ final class ActualizarPrecioAction
             ->icon(Heroicon::OutlinedSparkles)
             ->visible(fn (Get $get): bool => self::difiereDelSugerido($get, $producto))
             ->action(function (Get $get, Set $set) use ($producto): void {
-                $sugerido = is_numeric($get('costo_base')) ? self::precioSugerido((float) $get('costo_base'), $producto) : null;
-
-                if ($sugerido !== null) {
-                    $set('precio_base', $sugerido);
-                    $set('precio_venta', CalculadoraPrecio::aPantalla($sugerido, $producto->gravado, self::factor($get('costo_por'), $producto)));
-                }
+                self::ponerSugerido($get, $set, $producto);
+                $set('modo_precio', self::CALCULADO);
             });
     }
 
@@ -387,6 +444,9 @@ final class ActualizarPrecioAction
             'tono'         => $precioExagerado ? 'alerta' : $tono,
             'cambio'       => $cambio,
             'aviso'        => $avisos === [] ? null : implode(' ', $avisos),
+            'modo'         => $get('modo_precio') === self::FIJO
+                ? 'Precio fijo: las compras cambian el costo promedio, no este precio.'
+                : 'Precio calculado: se recalcula solo en cada compra.',
         ];
     }
 

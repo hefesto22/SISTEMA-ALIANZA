@@ -100,6 +100,6 @@
             <div class="ap-aviso">{{ $aviso }}</div>
         @endif
 
-        <div class="ap-pie">Aplica en todas las bodegas y queda en el historial.</div>
+        <div class="ap-pie">{{ $modo ?? '' }} Aplica en todas las bodegas y queda en el historial.</div>
     @endif
 </div>

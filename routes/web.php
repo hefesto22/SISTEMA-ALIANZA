@@ -21,6 +21,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\ImprimirPedidoController;
 use App\Http\Controllers\ImprimirPedidosController;
+use App\Http\Controllers\ImprimirReporteController;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
@@ -36,4 +37,10 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
     // Uno o varios de un solo (?ids=1,2,3), uno por página.
     Route::get('imprimir/pedidos', ImprimirPedidosController::class)
         ->name('pedidos.imprimir-lote');
+
+    // Reportes para imprimir o guardar como PDF (los mismos datos que en pantalla).
+    Route::get('reportes/ventas/imprimir', [ImprimirReporteController::class, 'ventas'])
+        ->name('reportes.ventas.imprimir');
+    Route::get('reportes/inventario/imprimir', [ImprimirReporteController::class, 'inventario'])
+        ->name('reportes.inventario.imprimir');
 });

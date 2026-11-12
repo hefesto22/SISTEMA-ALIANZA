@@ -256,3 +256,34 @@ test('un usuario desactivado ya no abre las hojas aunque tenga la sesión abiert
 test('el personal entra con su código de usuario', function (): void {
     expect(auth()->attempt(['codigo' => 'HO77', 'password' => 'password']))->toBeTrue();
 });
+
+test('precio de venta: si se escribe otro precio queda fijo; con "Calculado" vuelve a salir del costo con el %', function (): void {
+    $this->actingAs($this->encargado);
+
+    // Costo 50 con 16 % → L 68.45 con ISV; se escribe L 65: queda fijo.
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->mountAction('actualizarPrecio')
+        ->assertSchemaStateSet(['modo_precio' => 'calculado'])
+        ->fillForm(['costo_por' => 'unidad', 'precio_venta' => 65])
+        ->assertSchemaStateSet(['modo_precio' => 'fijo'])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    expect($this->producto->fresh()?->precio_fijo)->toBeTrue()
+        ->and($this->producto->fresh()?->precio_unidad)->toBe(56.5217);
+
+    // Fijo: al cambiar el costo el precio se queda; con "Calculado" se recalcula.
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->mountAction('actualizarPrecio')
+        ->assertSchemaStateSet(['modo_precio' => 'fijo'])
+        ->fillForm(['costo_por' => 'unidad', 'costo' => 69])
+        ->assertSchemaStateSet(['precio_venta' => 65.0])
+        ->fillForm(['modo_precio' => 'calculado'])
+        ->assertSchemaStateSet(['precio_venta' => 82.14])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    expect($this->producto->fresh()?->precio_fijo)->toBeFalse()
+        ->and($this->producto->fresh()?->costo_unidad)->toBe(60.0)
+        ->and($this->producto->fresh()?->precio_unidad)->toBe(71.4286);
+});

@@ -14,8 +14,8 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * Roles de trabajo con sus permisos (formato Shield "Accion:Modelo").
  *
- *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI), compras e inventario de todas las bodegas, y usuarios.
- *  bodega        → actualiza precios, ve historial, arma las rutas y las promociones de su bodega, valida e imprime (factura), registra compras y ajusta la existencia de su bodega.
+ *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI), compras e inventario de todas las bodegas, reportes de todas, y usuarios.
+ *  bodega        → actualiza precios, ve historial, arma las rutas y las promociones de su bodega, valida e imprime (factura), registra compras, ajusta la existencia y saca los reportes de su bodega.
  *  vendedor      → consulta precios y promociones vigentes, maneja los clientes de sus rutas y su preventa.
  *
  * Ojo: al correrlo de nuevo, los permisos de estos tres roles vuelven a
@@ -24,6 +24,9 @@ use Spatie\Permission\PermissionRegistrar;
 class RolesSistemaSeeder extends Seeder
 {
     private const TODO = ['viewAny', 'view', 'create', 'update', 'delete', 'restore', 'forceDelete', 'forceDeleteAny', 'restoreAny', 'replicate', 'reorder'];
+
+    /** Páginas de reportes (Shield: "View:Pagina"). Cada quien ve lo de su alcance. */
+    private const REPORTES = ['View:ReporteVentas', 'View:ReporteInventario'];
 
     public function run(): void
     {
@@ -44,6 +47,7 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('User', ['viewAny', 'view', 'create', 'update']),
                 ...$this->permisos('Cai', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Factura', ['viewAny', 'view']),
+                ...self::REPORTES,
             ],
             Rol::Bodega->value => [
                 ...$this->permisos('Producto', ['viewAny', 'view', 'update', 'ajustarExistencia']),
@@ -57,6 +61,7 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Ruta', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Cai', ['viewAny', 'view']),
                 ...$this->permisos('Factura', ['viewAny', 'view']),
+                ...self::REPORTES,
             ],
             Rol::Vendedor->value => [
                 ...$this->permisos('Producto', ['viewAny', 'view']),

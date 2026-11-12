@@ -33,7 +33,8 @@ use Illuminate\Support\Facades\DB;
  *      - último: el de compra.
  * 3. El precio de venta se recalcula con el margen del producto (o de su
  *    categoría) por ActualizarPrecioProducto, que deja el historial. Así el
- *    precio siempre cubre el costo.
+ *    precio siempre cubre el costo. Si el producto tiene precio fijo (puesto
+ *    a mano), el precio se queda y solo cambia el costo.
  * 4. Suma a la existencia de ESA bodega y deja el renglón en el kárdex.
  *
  * El costo y el precio son uno solo para todas las bodegas; la existencia y

@@ -82,7 +82,7 @@ class CategoriasRelationManager extends RelationManager
             ])
             ->recordActions([
                 EditAction::make()
-                    ->modalDescription('Si cambia el % de utilidad, se recalcula el precio de todos los productos de esta categoría y queda en el historial.')
+                    ->modalDescription('Si cambia el % de utilidad, se recalcula el precio de los productos de esta categoría (menos los de precio fijo o con margen propio) y queda en el historial.')
                     ->using(function (Model $record, array $data): Model {
                         /** @var Categoria $record */
                         $record->nombre = (string) $data['nombre'];

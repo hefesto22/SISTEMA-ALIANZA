@@ -14,6 +14,7 @@ use App\Models\Producto;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -25,6 +26,7 @@ use Illuminate\Database\Eloquent\Builder;
  * de un vistazo. El precio grande es el de venta al cliente (con ISV si es
  * gravado); abajo, chiquito, el precio sin ISV. Administración/bodega ven
  * además el costo (con ISV si es gravado) y la utilidad que de verdad deja.
+ * El precio fijo (puesto a mano, las compras no lo cambian) lleva candado.
  */
 class ProductosTable
 {
@@ -73,7 +75,9 @@ class ProductosTable
                 TextColumn::make('precio_unidad')
                     ->label('Unidad')
                     ->formatStateUsing(fn (Producto $record): string => lempiras($record->precioUnidadConIsv()))
-                    ->description(fn (Producto $record): string => $record->gravado ? 'sin ISV '.lempiras($record->precio_unidad) : 'exento')
+                    ->description(fn (Producto $record): string => ($verCostos && $record->precio_fijo ? 'fijo · ' : '').($record->gravado ? 'sin ISV '.lempiras($record->precio_unidad) : 'exento'))
+                    ->icon(fn (Producto $record): ?Heroicon => $verCostos && $record->precio_fijo ? Heroicon::OutlinedLockClosed : null)
+                    ->tooltip(fn (Producto $record): ?string => $verCostos && $record->precio_fijo ? 'Precio fijo, puesto a mano: las compras cambian el costo, no este precio' : null)
                     ->sortable()
                     ->alignEnd()
                     ->weight('bold')
@@ -115,6 +119,11 @@ class ProductosTable
                     ->label('ISV')
                     ->trueLabel('Gravados (G)')
                     ->falseLabel('Exentos (E)'),
+                TernaryFilter::make('precio_fijo')
+                    ->label('Precio de venta')
+                    ->trueLabel('Fijo (puesto a mano)')
+                    ->falseLabel('Calculado con el %')
+                    ->visible($verCostos),
                 TernaryFilter::make('activo')
                     ->label('Estado')
                     ->trueLabel('Activos')

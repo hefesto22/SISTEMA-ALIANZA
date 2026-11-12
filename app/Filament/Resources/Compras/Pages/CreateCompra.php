@@ -6,10 +6,13 @@ namespace App\Filament\Resources\Compras\Pages;
 
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Inventario\RegistrarCompra;
+use App\Domain\Precios\CalculadoraPrecio;
 use App\Filament\Resources\Compras\CompraResource;
 use App\Filament\Resources\Compras\Schemas\CompraForm;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
+use App\Models\Compra;
+use App\Models\Producto;
 use App\Models\Proveedor;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -67,6 +70,42 @@ class CreateCompra extends CreateRecord
     }
 
     /**
+     * Los de precio fijo no suben con la compra: si el costo promedio ya les
+     * pasó el precio, se avisa para que lo revisen.
+     */
+    protected function afterCreate(): void
+    {
+        $compra = $this->getRecord();
+
+        if (! $compra instanceof Compra) {
+            return;
+        }
+
+        $bajoCosto = Producto::query()
+            ->whereIn('id', $compra->items()->pluck('producto_id'))
+            ->where('precio_fijo', true)
+            ->whereColumn('precio_unidad', '<', 'costo_unidad')
+            ->orderBy('descripcion')
+            ->get();
+
+        if ($bajoCosto->isEmpty()) {
+            return;
+        }
+
+        Notification::make()
+            ->title('Hay precios fijos por debajo del costo')
+            ->body($bajoCosto->map(fn (Producto $producto): string => sprintf(
+                '%s: vende a %s y ya cuesta %s.',
+                $producto->descripcion,
+                lempiras($producto->precioUnidadConIsv()),
+                lempiras(CalculadoraPrecio::conIsv($producto->costo_unidad, $producto->gravado)),
+            ))->push('Cámbielos en Productos → Actualizar precio.')->implode(' '))
+            ->warning()
+            ->persistent()
+            ->send();
+    }
+
+    /**
      * "Registrar compra" va en la barra de abajo con el total (LineasCompra);
      * aquí queda Cancelar.
      *
@@ -94,7 +133,7 @@ class CreateCompra extends CreateRecord
 
     protected function getCreatedNotificationTitle(): ?string
     {
-        return 'Compra registrada: subió la existencia y se actualizaron costos y precios';
+        return 'Compra registrada: subió la existencia y se actualizaron costos y precios (los de precio fijo se quedan)';
     }
 
     protected function getRedirectUrl(): string

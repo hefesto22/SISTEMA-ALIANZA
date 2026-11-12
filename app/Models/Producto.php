@@ -25,6 +25,11 @@ use Illuminate\Support\Carbon;
  * Para cambiar costo/precio usar App\Domain\Precios\ActualizarPrecioProducto:
  * es lo que deja el registro en el historial.
  *
+ * El costo es el promedio ponderado de lo comprado (Configuración). El
+ * precio de venta sale de ese costo con el % de utilidad, salvo que sea
+ * precio fijo: ahí lo pone la empresa a mano y las compras o los cambios
+ * de margen no lo tocan.
+ *
  * @property int $id
  * @property int $proveedor_id
  * @property int $categoria_id
@@ -33,6 +38,7 @@ use Illuminate\Support\Carbon;
  * @property int $unidades_por_caja
  * @property bool $gravado
  * @property float|null $margen
+ * @property bool $precio_fijo
  * @property float $costo_unidad
  * @property float $precio_unidad
  * @property Carbon|null $precio_actualizado_at
@@ -51,6 +57,11 @@ class Producto extends Model
     use HasFactory;
 
     protected $table = 'productos';
+
+    /** @var array<string, mixed> */
+    protected $attributes = [
+        'precio_fijo' => false,
+    ];
 
     /** @var list<string> */
     protected $fillable = [
@@ -73,6 +84,7 @@ class Producto extends Model
             'unidades_por_caja'     => 'integer',
             'gravado'               => 'boolean',
             'margen'                => 'float',
+            'precio_fijo'           => 'boolean',
             'costo_unidad'          => 'float',
             'precio_unidad'         => 'float',
             'precio_actualizado_at' => 'datetime',

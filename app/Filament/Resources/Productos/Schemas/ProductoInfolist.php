@@ -44,7 +44,9 @@ class ProductoInfolist
                         TextEntry::make('margen_real')
                             ->label('Utilidad')
                             ->state(fn (Producto $record): string => self::porcentaje(CalculadoraPrecio::margenReal($record->costo_unidad, $record->precio_unidad)))
-                            ->helperText(fn (Producto $record): string => 'La categoría sugiere '.self::porcentaje($record->margenAplicado()))
+                            ->helperText(fn (Producto $record): string => $record->precio_fijo
+                                ? 'Precio fijo, puesto a mano (con el costo de hoy, el '.self::porcentaje($record->margenAplicado()).' daría otro precio)'
+                                : 'Calculado con el '.self::porcentaje($record->margenAplicado()).' sobre el costo promedio')
                             ->visible($verCostos),
                         TextEntry::make('activo')
                             ->label('Estado')

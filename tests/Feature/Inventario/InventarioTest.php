@@ -500,3 +500,35 @@ test('el vendedor ve lo disponible (lo de la bodega menos lo apartado en pedidos
     // Al corregirlo, lo que ya salió (1 caja) es lo que regresaría.
     expect(LineasPedido::datos($validado)['items'][0]['salio_unidades'])->toBe(12);
 });
+
+test('con precio fijo la compra mueve el costo promedio pero no el precio; si el costo lo pasa, avisa', function (): void {
+    $this->producto->forceFill(['precio_fijo' => true, 'precio_unidad' => 95.0])->save();
+    app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 24, $this->admin, 'conteo inicial');
+
+    $this->actingAs($this->encargado);
+
+    $comprar = fn (int $cajas, float $costoCaja) => Livewire::test(CreateCompra::class)
+        ->fillForm([
+            'proveedor_id' => $this->proveedor->id,
+            'fecha'        => now()->toDateString(),
+            'lineas'       => [
+                ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => $cajas, 'costo' => $costoCaja],
+            ],
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    // 2 cajas a L 1,380 con ISV = L 100 la unidad: (24 × 80 + 24 × 100) ÷ 48 = 90. Se sigue vendiendo a 95.
+    $comprar(2, 1380.0)->assertNotNotified('Hay precios fijos por debajo del costo');
+
+    expect($this->producto->fresh()?->costo_unidad)->toBe(90.0)
+        ->and($this->producto->fresh()?->precio_unidad)->toBe(95.0)
+        ->and(Compra::query()->latest('id')->firstOrFail()->items()->sole()->precio_nuevo)->toBe(95.0);
+
+    // 4 cajas a L 1,794 con ISV = L 130 la unidad: (48 × 90 + 48 × 130) ÷ 96 = 110, más que los 95 del precio.
+    $comprar(4, 1794.0)->assertNotified('Hay precios fijos por debajo del costo');
+
+    expect($this->producto->fresh()?->costo_unidad)->toBe(110.0)
+        ->and($this->producto->fresh()?->precio_unidad)->toBe(95.0)
+        ->and($this->producto->fresh()?->precio_fijo)->toBeTrue();
+});

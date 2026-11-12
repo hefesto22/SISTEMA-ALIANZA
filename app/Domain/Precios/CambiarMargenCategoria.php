@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\DB;
  * Cambia el % de utilidad de una categoría y recalcula el precio de todos
  * sus productos (con su costo actual), dejando cada cambio en el historial.
  *
- * Los productos con margen propio no se tocan: su margen manda.
+ * Los productos con margen propio no se tocan: su margen manda. Tampoco los
+ * de precio fijo: su precio lo puso la empresa a mano.
  */
 final class CambiarMargenCategoria
 {
@@ -43,6 +44,7 @@ final class CambiarMargenCategoria
 
             $categoria->productos()
                 ->whereNull('margen')
+                ->where('precio_fijo', false)
                 ->with('categoria')
                 ->lazyById()
                 ->each(function (Producto $producto) use ($usuario, $nota, &$cambiados): void {

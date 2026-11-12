@@ -70,3 +70,49 @@ test('cambiar el margen de la categoría recalcula sus productos, menos los de m
         ->and($conMargenPropio->fresh()?->precio_unidad)->toBe(55.5556)
         ->and(CambioPrecio::query()->where('producto_id', $normal->id)->first()?->motivo)->toBe(MotivoCambioPrecio::Margen);
 });
+
+test('con precio fijo, el costo nuevo se guarda pero el precio se queda', function (): void {
+    $producto = Producto::factory()->create(['precio_fijo' => true]);
+
+    $cambio = app(ActualizarPrecioProducto::class)->ejecutar($producto, 60.0, MotivoCambioPrecio::Compra, nota: 'COMPRA COM-000001');
+
+    // Cuesta 60 y se sigue vendiendo a 59.5238: deja −0.8 %.
+    expect($producto->fresh()?->costo_unidad)->toBe(60.0)
+        ->and($producto->fresh()?->precio_unidad)->toBe(59.5238)
+        ->and($producto->fresh()?->precio_fijo)->toBeTrue()
+        ->and($cambio?->precio_nuevo)->toBe(59.5238)
+        ->and($cambio?->margen)->toBe(-0.008)
+        ->and($cambio?->nota)->toBe('COMPRA COM-000001 · PRECIO FIJO');
+});
+
+test('marcar el precio como fijo sin cambiar montos lo guarda sin historial', function (): void {
+    $producto = Producto::factory()->create();
+
+    $cambio = app(ActualizarPrecioProducto::class)->ejecutar($producto, 50.0, MotivoCambioPrecio::Manual, precioUnidad: 59.5238, precioFijo: true);
+
+    expect($cambio)->toBeNull()
+        ->and($producto->fresh()?->precio_fijo)->toBeTrue()
+        ->and(CambioPrecio::query()->count())->toBe(0);
+});
+
+test('al quitar el precio fijo vuelve a salir del costo con el margen', function (): void {
+    $producto = Producto::factory()->precio(50.0, 70.0)->create(['precio_fijo' => true]);
+
+    app(ActualizarPrecioProducto::class)->ejecutar($producto, 50.0, MotivoCambioPrecio::Manual, precioFijo: false);
+
+    expect($producto->fresh()?->precio_unidad)->toBe(59.5238)
+        ->and($producto->fresh()?->precio_fijo)->toBeFalse();
+});
+
+test('cambiar el margen de la categoría no toca los de precio fijo', function (): void {
+    $categoria = Categoria::factory()->create(['margen' => 0.16]);
+    $normal = Producto::factory()->for($categoria)->create();
+    $fijo = Producto::factory()->for($categoria)->precio(50.0, 57.0)->create(['precio_fijo' => true]);
+
+    $cambiados = app(CambiarMargenCategoria::class)->ejecutar($categoria, 0.20);
+
+    expect($cambiados)->toBe(1)
+        ->and($normal->fresh()?->precio_unidad)->toBe(62.5)
+        ->and($fijo->fresh()?->precio_unidad)->toBe(57.0)
+        ->and(CambioPrecio::query()->where('producto_id', $fijo->id)->exists())->toBeFalse();
+});
