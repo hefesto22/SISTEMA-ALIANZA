@@ -19,6 +19,10 @@ use Illuminate\Http\Response;
  * que en pantalla. El encargado siempre recibe el de su bodega aunque pida
  * otra en el enlace.
  *
+ * Con embebido=1 es la vista de impresión del modal del panel
+ * (App\Filament\Support\VistaImpresion): sin la barra de arriba y sin abrir
+ * sola la ventana de imprimir.
+ *
  * Uso: /reportes/ventas/imprimir?desde=2026-11-01&hasta=2026-11-30&bodega=2&ver=vendedores
  *      /reportes/inventario/imprimir?bodega=2&proveedor=5&buscar=aceite&todos=1
  */
@@ -41,6 +45,7 @@ class ImprimirReporteController extends Controller
             'usuario'   => $usuario->name,
             'parte'     => 'reportes.partes.ventas',
             'd'         => $reporte->datos($ver),
+            'embebido'  => $request->boolean('embebido'),
         ]);
     }
 
@@ -63,6 +68,7 @@ class ImprimirReporteController extends Controller
             'usuario'   => $usuario->name,
             'parte'     => 'reportes.partes.inventario',
             'd'         => $reporte->datos(),
+            'embebido'  => $request->boolean('embebido'),
         ]);
     }
 

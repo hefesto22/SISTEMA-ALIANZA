@@ -9,6 +9,7 @@ use App\Domain\Reportes\Periodo;
 use App\Domain\Reportes\VentasDelPeriodo;
 use App\Exports\ReporteVentasExcel;
 use App\Filament\Support\Acceso;
+use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -26,7 +27,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 /**
  * Reporte de ventas: totales y ganancia (con el detalle por día y por
  * bodega), por vendedor, por producto y por cliente. Se ve todo junto o cada
- * parte, y sale igual en Excel y en PDF (hoja para imprimir o guardar).
+ * parte, y sale igual en Excel y en PDF (vista de impresión en un modal,
+ * desde donde se imprime o se guarda el PDF).
  *
  * Administración saca el de todas las bodegas o el de una; el encargado,
  * solo el de su bodega. Las cuentas: App\Domain\Reportes\VentasDelPeriodo.
@@ -134,11 +136,7 @@ class ReporteVentas extends Page
 
                     return Excel::download(new ReporteVentasExcel($reporte, $ver), $reporte->nombreArchivo($ver).'.xlsx');
                 }),
-            Action::make('pdf')
-                ->label('PDF / Imprimir')
-                ->icon(Heroicon::OutlinedPrinter)
-                ->url(fn (): string => route('reportes.ventas.imprimir', $this->parametros()))
-                ->openUrlInNewTab(),
+            VistaImpresion::accion('Reporte de ventas', fn (): string => route('reportes.ventas.imprimir', [...$this->parametros(), 'embebido' => 1])),
         ];
     }
 

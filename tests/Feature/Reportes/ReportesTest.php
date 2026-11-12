@@ -18,6 +18,7 @@ use App\Exports\InventarioValorizadoExcel;
 use App\Exports\ReporteVentasExcel;
 use App\Filament\Pages\ReporteInventario;
 use App\Filament\Pages\ReporteVentas;
+use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\MovimientoInventario;
@@ -328,4 +329,32 @@ test('inventario en pantalla, Excel y PDF: el encargado solo ve el de su bodega'
         ->assertSee('BODEGA COPÁN')
         ->assertSee('L. 2,320.00')
         ->assertDontSee('L. 960.00');
+});
+
+test('PDF / Imprimir abre la vista de impresión en un modal; la hoja de adentro no trae la barra ni abre sola la ventana de imprimir', function (): void {
+    ventasDeReporte($this);
+    $this->actingAs($this->admin);
+
+    Livewire::test(ReporteVentas::class)
+        ->mountAction('pdf')
+        ->assertActionMounted('pdf')
+        ->assertSeeHtml('id="'.VistaImpresion::MARCO.'"')
+        ->assertSeeHtml('embebido=1')
+        ->assertSee('Imprimir o guardar PDF');
+
+    Livewire::test(ReporteInventario::class)
+        ->mountAction('pdf')
+        ->assertActionMounted('pdf')
+        ->assertSeeHtml('reportes/inventario/imprimir');
+
+    $hoy = ['desde' => now()->toDateString(), 'hasta' => now()->toDateString()];
+
+    $this->get(route('reportes.ventas.imprimir', [...$hoy, 'embebido' => 1]))
+        ->assertOk()
+        ->assertSee('L. 1,600.00')
+        ->assertDontSee('window.print');
+
+    $this->get(route('reportes.ventas.imprimir', $hoy))
+        ->assertOk()
+        ->assertSee('window.print');
 });

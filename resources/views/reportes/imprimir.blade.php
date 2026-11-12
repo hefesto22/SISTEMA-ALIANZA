@@ -2,7 +2,9 @@
     Hoja para imprimir o guardar como PDF un reporte (ventas o inventario
     valorizado). Abre la ventana de imprimir sola; ahí se escoge la impresora
     o "Guardar como PDF".
-    Datos: $titulo, $subtitulo, $empresa, $usuario, $parte (vista del cuerpo) y $d (sus datos).
+    Datos: $titulo, $subtitulo, $empresa, $usuario, $parte (vista del cuerpo), $d (sus datos)
+    y $embebido: dentro del modal de vista de impresión del panel no lleva la
+    barra de arriba ni abre sola la ventana de imprimir (el botón está en el modal).
     Controlador: App\Http\Controllers\ImprimirReporteController.
 --}}
 <!DOCTYPE html>
@@ -27,6 +29,8 @@
         .cabeza .sub { font-size: 13px; color: #374151; }
         .cabeza .cuando { font-size: 12px; line-height: 1.5; color: #6b7280; text-align: right; }
 
+        .embebido .hoja { margin: 20px auto; box-shadow: 0 1px 3px rgb(0 0 0 / 0.12), 0 8px 24px rgb(0 0 0 / 0.06); }
+
         @media (max-width: 640px) {
             .hoja { margin: 8px 0 16px; padding: 16px; border-radius: 0; }
             .cabeza .cuando { text-align: left; }
@@ -49,12 +53,14 @@
         }
     </style>
 </head>
-<body>
-<div class="barra">
-    <span class="ayuda">Para el PDF: en la ventana de imprimir escoja «Guardar como PDF».</span>
-    <button type="button" onclick="window.close()">Cerrar</button>
-    <button type="button" class="principal" onclick="window.print()">Imprimir o guardar PDF</button>
-</div>
+<body @class(['embebido' => $embebido ?? false])>
+@unless ($embebido ?? false)
+    <div class="barra">
+        <span class="ayuda">Para el PDF: en la ventana de imprimir escoja «Guardar como PDF».</span>
+        <button type="button" onclick="window.close()">Cerrar</button>
+        <button type="button" class="principal" onclick="window.print()">Imprimir o guardar PDF</button>
+    </div>
+@endunless
 
 <div class="hoja">
     <div class="cabeza">
@@ -72,8 +78,10 @@
     @include($parte, ['d' => $d])
 </div>
 
-<script>
-    window.addEventListener('load', () => setTimeout(() => window.print(), 400));
-</script>
+@unless ($embebido ?? false)
+    <script>
+        window.addEventListener('load', () => setTimeout(() => window.print(), 400));
+    </script>
+@endunless
 </body>
 </html>

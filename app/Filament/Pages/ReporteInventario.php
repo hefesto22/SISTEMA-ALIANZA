@@ -8,6 +8,7 @@ use App\Domain\Reportes\AlcanceReporte;
 use App\Domain\Reportes\InventarioValorizado;
 use App\Exports\InventarioValorizadoExcel;
 use App\Filament\Support\Acceso;
+use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
 use App\Models\Proveedor;
 use BackedEnum;
@@ -25,7 +26,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 /**
  * Inventario valorizado: qué hay en la bodega, de qué productos y cuánto
  * dinero hay en ellos (al costo promedio y a precio de venta, con la
- * ganancia que dejaría). Sale igual en Excel y en PDF.
+ * ganancia que dejaría). Sale igual en Excel y en PDF (vista de impresión
+ * en un modal, desde donde se imprime o se guarda el PDF).
  *
  * Administración lo saca de todas las bodegas (con el resumen por bodega) o
  * de una; el encargado, solo de su bodega. Las cuentas:
@@ -124,11 +126,7 @@ class ReporteInventario extends Page
 
                     return Excel::download(new InventarioValorizadoExcel($reporte), $reporte->nombreArchivo().'.xlsx');
                 }),
-            Action::make('pdf')
-                ->label('PDF / Imprimir')
-                ->icon(Heroicon::OutlinedPrinter)
-                ->url(fn (): string => route('reportes.inventario.imprimir', $this->parametros()))
-                ->openUrlInNewTab(),
+            VistaImpresion::accion('Inventario valorizado', fn (): string => route('reportes.inventario.imprimir', [...$this->parametros(), 'embebido' => 1])),
         ];
     }
 
