@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\UnidadVenta;
 use App\Models\Concerns\GuardaEnMayusculas;
 use Carbon\CarbonInterface;
 use Database\Factories\PromocionFactory;
@@ -20,8 +19,10 @@ use Illuminate\Support\Carbon;
 /**
  * Promoción "si compra esto, aquello sale gratis / a mitad / con N% de descuento".
  *
- * La condición puede ser uno o varios productos, cada uno con su cantidad:
- * "2 cajas de BUTTER TOFFEE + 1 caja de NUTRINE → 1 unidad de BABY NUTRINE gratis".
+ * La condición puede ser uno o varios productos, cada uno con su cantidad
+ * en una de sus presentaciones: "2 cajas de 12 de BUTTER TOFFEE + 1 caja de
+ * 24 de NUTRINE → 1 unidad de BABY NUTRINE gratis". Todo se cuenta en
+ * unidades base (una CJ de 12 son 12).
  * Si el regalo es uno de los productos de la condición queda como
  * "compre 2 y lleve 1 más gratis".
  *
@@ -39,7 +40,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $descripcion
  * @property int $producto_beneficio_id
  * @property int $cantidad_beneficio
- * @property UnidadVenta $beneficio_unidad
+ * @property int $beneficio_presentacion_id
  * @property float $descuento_porcentaje
  * @property bool $activa
  * @property Carbon|null $vigente_desde
@@ -50,6 +51,7 @@ use Illuminate\Support\Carbon;
  * @property-read Collection<int, PromocionCondicion> $condiciones
  * @property-read Collection<int, Bodega> $bodegas
  * @property-read Producto $productoBeneficio
+ * @property-read Presentacion $beneficioPresentacion
  * @property-read User|null $creador
  */
 class Promocion extends Model
@@ -59,6 +61,9 @@ class Promocion extends Model
     /** @use HasFactory<PromocionFactory> */
     use HasFactory;
 
+    /** Lo que el motor de promociones necesita cargado. */
+    public const PARA_CALCULAR = ['condiciones.presentacion', 'beneficioPresentacion.unidadMedida', 'productoBeneficio'];
+
     protected $table = 'promociones';
 
     /** @var list<string> */
@@ -67,7 +72,7 @@ class Promocion extends Model
         'descripcion',
         'producto_beneficio_id',
         'cantidad_beneficio',
-        'beneficio_unidad',
+        'beneficio_presentacion_id',
         'descuento_porcentaje',
         'activa',
         'vigente_desde',
@@ -78,7 +83,6 @@ class Promocion extends Model
     /** @var array<string, mixed> */
     protected $attributes = [
         'cantidad_beneficio'   => 1,
-        'beneficio_unidad'     => 'unidad',
         'descuento_porcentaje' => 100,
         'activa'               => true,
     ];
@@ -89,21 +93,28 @@ class Promocion extends Model
     protected function casts(): array
     {
         return [
-            'producto_beneficio_id' => 'integer',
-            'cantidad_beneficio'    => 'integer',
-            'beneficio_unidad'      => UnidadVenta::class,
-            'descuento_porcentaje'  => 'float',
-            'activa'                => 'boolean',
-            'vigente_desde'         => 'date',
-            'vigente_hasta'         => 'date',
+            'producto_beneficio_id'     => 'integer',
+            'cantidad_beneficio'        => 'integer',
+            'beneficio_presentacion_id' => 'integer',
+            'descuento_porcentaje'      => 'float',
+            'activa'                    => 'boolean',
+            'vigente_desde'             => 'date',
+            'vigente_hasta'             => 'date',
         ];
     }
 
     /**
-     * Código propio de la promoción: PROMO-0001.
+     * Código propio de la promoción: PROMO-0001. Sin presentación del
+     * regalo, la base del producto.
      */
     protected static function booted(): void
     {
+        static::saving(function (Promocion $promocion): void {
+            if (empty($promocion->beneficio_presentacion_id)) {
+                $promocion->beneficio_presentacion_id = Presentacion::query()->where('producto_id', $promocion->producto_beneficio_id)->where('es_base', true)->valueOrFail('id');
+            }
+        });
+
         static::created(function (Promocion $promocion): void {
             if ($promocion->codigo !== null) {
                 return;
@@ -130,6 +141,16 @@ class Promocion extends Model
     public function productoBeneficio(): BelongsTo
     {
         return $this->belongsTo(Producto::class, 'producto_beneficio_id');
+    }
+
+    /**
+     * En qué presentación es el regalo (UN, CJ12…).
+     *
+     * @return BelongsTo<Presentacion, $this>
+     */
+    public function beneficioPresentacion(): BelongsTo
+    {
+        return $this->belongsTo(Presentacion::class, 'beneficio_presentacion_id');
     }
 
     /**
@@ -314,7 +335,7 @@ class Promocion extends Model
 
     /**
      * Lo que se le explica al cliente, por ejemplo:
-     * "Compra 2 cajas de BUTTER TOFFEE + 1 caja de NUTRINE → 1 unidad de BABY NUTRINE gratis".
+     * "Compra 2 cajas de 12 de BUTTER TOFFEE + 1 caja de 24 de NUTRINE → 1 unidad de BABY NUTRINE gratis".
      */
     public function resumen(): string
     {
@@ -322,7 +343,7 @@ class Promocion extends Model
             ->map(fn (PromocionCondicion $c): string => $c->texto())
             ->implode(' + ');
 
-        $beneficio = self::cantidadTexto($this->cantidad_beneficio, $this->beneficio_unidad);
+        $beneficio = $this->beneficioPresentacion->enPalabras($this->cantidad_beneficio);
 
         if ($this->regaloEnCondicion()) {
             if ($this->condiciones->count() === 1) {
@@ -333,19 +354,6 @@ class Promocion extends Model
         }
 
         return "Compra {$compra} → {$beneficio} de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}";
-    }
-
-    /**
-     * "1 unidad", "3 unidades", "1 caja", "2 cajas".
-     */
-    public static function cantidadTexto(int $cantidad, UnidadVenta $unidad): string
-    {
-        $palabra = match ($unidad) {
-            UnidadVenta::Unidad => $cantidad === 1 ? 'unidad' : 'unidades',
-            UnidadVenta::Caja   => $cantidad === 1 ? 'caja' : 'cajas',
-        };
-
-        return "{$cantidad} {$palabra}";
     }
 
     public static function porcentajeTexto(float $porcentaje): string

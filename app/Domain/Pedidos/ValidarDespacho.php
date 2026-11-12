@@ -9,7 +9,6 @@ use App\Domain\Inventario\SalidaDePedido;
 use App\Enums\EstadoPedido;
 use App\Enums\PrecioAlDespachar;
 use App\Enums\TipoMovimiento;
-use App\Enums\UnidadVenta;
 use App\Models\Configuracion;
 use App\Models\Pedido;
 use App\Models\User;
@@ -40,7 +39,7 @@ final class ValidarDespacho
 
     /**
      * @param array<int, int|string|null> $despachado [id de línea => cantidad que sale]; si falta una línea sale completa
-     * @param list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en la otra unidad o uno que no venía (ver AjustarLineas)
+     * @param list<array{presentacion_id: int, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en otra presentación o uno que no venía (ver AjustarLineas)
      */
     public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = []): Pedido
     {

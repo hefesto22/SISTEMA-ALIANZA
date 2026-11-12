@@ -20,8 +20,11 @@ class ImprimirPedidoController extends Controller
     /** @var list<string> */
     public const RELACIONES = [
         'items.producto',
+        'items.presentacion.unidadMedida',
         'items.promocion.condiciones.producto',
+        'items.promocion.condiciones.presentacion.unidadMedida',
         'items.promocion.productoBeneficio',
+        'items.promocion.beneficioPresentacion.unidadMedida',
         'cliente.municipio.departamento',
         'vendedor',
         'bodega.municipio.departamento',

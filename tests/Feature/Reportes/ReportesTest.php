@@ -13,7 +13,6 @@ use App\Domain\Reportes\VentasDelPeriodo;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
 use App\Enums\TipoMovimiento;
-use App\Enums\UnidadVenta;
 use App\Exports\InventarioValorizadoExcel;
 use App\Exports\ReporteVentasExcel;
 use App\Filament\Pages\ReporteInventario;
@@ -60,11 +59,11 @@ beforeEach(function (): void {
     $this->vendedorOco = User::factory()->create(['bodega_id' => $this->ocote->id, 'codigo' => 'V02']);
     $this->vendedorOco->assignRole(Rol::Vendedor->value);
 
-    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['margen' => 0.20, 'unidades_por_caja' => 12, 'gravado' => true]);
-    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->create([
-        'categoria_id'      => $this->gravado->categoria_id,
-        'margen'            => 0.20,
-        'unidades_por_caja' => 1,
+    // Gravado: UN a L 100 y CJ12 a L 1,200. Exento: solo UN, a L 50.
+    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['margen' => 0.20, 'gravado' => true]);
+    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->conCaja(1)->create([
+        'categoria_id' => $this->gravado->categoria_id,
+        'margen'       => 0.20,
     ]);
 
     $ajustar = app(AjustarExistencia::class);
@@ -74,9 +73,10 @@ beforeEach(function (): void {
 });
 
 /**
- * Pedido levantado y despachado: [[producto, unidad, cantidad], …].
+ * Pedido levantado y despachado: [[producto, lo que trae la presentación
+ * (1 = UN, 12 = CJ12), cantidad], …].
  *
- * @param list<array{0: Producto, 1: UnidadVenta, 2: int}> $lineas
+ * @param list<array{0: Producto, 1: int, 2: int}> $lineas
  */
 function pedidoDeReporte(Bodega $bodega, User $vendedor, array $lineas, User $despacha, bool $despachar = true): Pedido
 {
@@ -87,8 +87,8 @@ function pedidoDeReporte(Bodega $bodega, User $vendedor, array $lineas, User $de
         'fecha'       => now(),
     ]);
 
-    foreach ($lineas as [$producto, $unidad, $cantidad]) {
-        $pedido->items()->create(['producto_id' => $producto->id, 'unidad' => $unidad, 'cantidad' => $cantidad]);
+    foreach ($lineas as [$producto, $contenido, $cantidad]) {
+        $pedido->items()->create(['producto_id' => $producto->id, 'presentacion_id' => presentacion($producto, $contenido)->id, 'cantidad' => $cantidad]);
     }
 
     app(RecalcularPedido::class)->ejecutar($pedido);
@@ -102,9 +102,9 @@ function pedidoDeReporte(Bodega $bodega, User $vendedor, array $lineas, User $de
  */
 function ventasDeReporte(object $t): void
 {
-    pedidoDeReporte($t->copan, $t->vendedor, [[$t->gravado, UnidadVenta::Caja, 1], [$t->exento, UnidadVenta::Unidad, 2]], $t->admin);
-    pedidoDeReporte($t->ocote, $t->vendedorOco, [[$t->gravado, UnidadVenta::Unidad, 3]], $t->admin);
-    pedidoDeReporte($t->copan, $t->vendedor, [[$t->gravado, UnidadVenta::Caja, 5]], $t->admin, despachar: false);
+    pedidoDeReporte($t->copan, $t->vendedor, [[$t->gravado, 12, 1], [$t->exento, 1, 2]], $t->admin);
+    pedidoDeReporte($t->ocote, $t->vendedorOco, [[$t->gravado, 1, 3]], $t->admin);
+    pedidoDeReporte($t->copan, $t->vendedor, [[$t->gravado, 12, 5]], $t->admin, despachar: false);
 }
 
 test('ventas: totales, costo con el promedio del día que salió y ganancia', function (): void {
@@ -150,7 +150,7 @@ test('ventas por bodega, vendedor, producto, cliente y día', function (): void 
         ->and(array_map(fn ($f) => [$f->codigo, $f->venta, $f->costo], $vendedores))->toBe([['V01', 1300.0, 1040.0], ['V02', 300.0, 240.0]])
         ->and($productos[0]->codigo)->toBe($this->gravado->codigo)
         ->and($productos[0]->unidades)->toBe(15)
-        ->and($productos[0]->cantidad)->toBe('1 CJ + 3 UN')
+        ->and($productos[0]->cantidad)->toBe('1 CJ12 + 3 UN')
         ->and($productos[0]->venta)->toBe(1500.0)
         ->and($productos[0]->costo)->toBe(1200.0)
         ->and($productos[1]->cantidad)->toBe('2 UN')
@@ -277,7 +277,7 @@ test('inventario valorizado: cuánto hay en cada bodega, al costo y a precio de 
     $gravado = collect($copan->productos())->firstWhere('codigo', $this->gravado->codigo);
 
     expect($copan->totales()->invertido)->toBe(2320.0)
-        ->and($gravado?->existencia)->toBe('2 CJ')
+        ->and($gravado?->existencia)->toBe('2 CJ12')
         ->and($gravado?->invertido)->toBe(1920.0)
         ->and($gravado?->valorVenta)->toBe(2400.0)
         ->and($copan->porBodega())->toHaveCount(1);
@@ -360,9 +360,9 @@ test('PDF / Imprimir abre la vista de impresión en un modal; la hoja de adentro
 
 test('ventas de un proveedor: solo cuentan sus productos, en una bodega o en cada una', function (): void {
     // Otro proveedor: 4 unidades a L 25 (costo 20) en Copán. Con lo de siempre, el total del mes es L 1,700.
-    $otro = Producto::factory()->exento()->precio(20.0, 25.0)->create(['unidades_por_caja' => 1]);
+    $otro = Producto::factory()->exento()->precio(20.0, 25.0)->conCaja(1)->create();
     app(AjustarExistencia::class)->ejecutar($this->copan->id, $otro, 10, $this->admin, 'conteo');
-    pedidoDeReporte($this->copan, $this->vendedor, [[$otro, UnidadVenta::Unidad, 4]], $this->admin);
+    pedidoDeReporte($this->copan, $this->vendedor, [[$otro, 1, 4]], $this->admin);
     ventasDeReporte($this);
 
     $deJabon = $this->gravado->proveedor;

@@ -45,8 +45,8 @@ final class MoverExistencia
             throw new ReglaNegocioException(sprintf(
                 'No alcanza %s en la bodega: hay %s y salen %s.',
                 $producto->etiqueta(),
-                Existencia::enCajas($existencia->cantidad, $producto->unidades_por_caja),
-                Existencia::enCajas(-$unidades, $producto->unidades_por_caja),
+                $producto->existenciaEnTexto($existencia->cantidad),
+                $producto->existenciaEnTexto(-$unidades),
             ));
         }
 

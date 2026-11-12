@@ -80,7 +80,7 @@ class ProductoResource extends Resource
         $bodegaId = $usuario?->bodega_id;
 
         return parent::getEloquentQuery()
-            ->with(['proveedor', 'categoria'])
+            ->with(['proveedor', 'categoria', 'presentaciones.unidadMedida', 'unidadMedida'])
             ->withSum(['existencias as existencia' => fn (Builder $query): Builder => $todas
                 ? $query
                 : $query->where('bodega_id', $bodegaId)], 'cantidad');

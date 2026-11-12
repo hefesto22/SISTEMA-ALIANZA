@@ -203,7 +203,7 @@
                             <br><span class="nota-falta">{{ $mas }}</span>
                         @endif
                     </td>
-                    <td>{{ $item->unidad->getLabel() }}</td>
+                    <td>{{ $item->presentacion->sigla() }}</td>
                     <td class="num">{{ $item->cantidad }}</td>
                     <td class="num @if ($item->faltante() > 0) falta @endif">{{ $item->cantidadFacturable() }}</td>
                     <td class="num">{{ lempiras($item->precio) }}</td>

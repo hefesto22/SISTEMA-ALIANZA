@@ -4,21 +4,22 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\UnidadVenta;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Un producto que el cliente tiene que comprar para que aplique la promoción
- * ("2 cajas de BUTTER TOFFEE"). Una promoción puede pedir varios.
+ * ("2 cajas de 12 de BUTTER TOFFEE"), en una de sus presentaciones. Una
+ * promoción puede pedir varios.
  *
  * @property int $id
  * @property int $promocion_id
  * @property int $producto_id
+ * @property int $presentacion_id
  * @property int $cantidad
- * @property UnidadVenta $unidad
  * @property-read Promocion $promocion
  * @property-read Producto $producto
+ * @property-read Presentacion $presentacion
  */
 class PromocionCondicion extends Model
 {
@@ -30,14 +31,13 @@ class PromocionCondicion extends Model
     protected $fillable = [
         'promocion_id',
         'producto_id',
+        'presentacion_id',
         'cantidad',
-        'unidad',
     ];
 
     /** @var array<string, mixed> */
     protected $attributes = [
         'cantidad' => 1,
-        'unidad'   => 'unidad',
     ];
 
     /**
@@ -46,10 +46,22 @@ class PromocionCondicion extends Model
     protected function casts(): array
     {
         return [
-            'producto_id' => 'integer',
-            'cantidad'    => 'integer',
-            'unidad'      => UnidadVenta::class,
+            'producto_id'     => 'integer',
+            'presentacion_id' => 'integer',
+            'cantidad'        => 'integer',
         ];
+    }
+
+    /**
+     * Sin presentación, la base del producto.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (PromocionCondicion $condicion): void {
+            if (empty($condicion->presentacion_id)) {
+                $condicion->presentacion_id = Presentacion::query()->where('producto_id', $condicion->producto_id)->where('es_base', true)->valueOrFail('id');
+            }
+        });
     }
 
     /**
@@ -69,10 +81,18 @@ class PromocionCondicion extends Model
     }
 
     /**
-     * "2 cajas de BUTTER TOFFEE 12X100G".
+     * @return BelongsTo<Presentacion, $this>
+     */
+    public function presentacion(): BelongsTo
+    {
+        return $this->belongsTo(Presentacion::class);
+    }
+
+    /**
+     * "2 cajas de 12 de BUTTER TOFFEE 12X100G".
      */
     public function texto(): string
     {
-        return Promocion::cantidadTexto($this->cantidad, $this->unidad).' de '.$this->producto->descripcion;
+        return $this->presentacion->enPalabras($this->cantidad).' de '.$this->producto->descripcion;
     }
 }

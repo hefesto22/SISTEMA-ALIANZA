@@ -6,7 +6,6 @@ namespace App\Domain\Reportes;
 
 use App\Enums\EstadoPedido;
 use App\Enums\TipoMovimiento;
-use App\Enums\UnidadVenta;
 use App\Models\Bodega;
 use App\Models\Existencia;
 use App\Models\Proveedor;
@@ -49,6 +48,10 @@ final class VentasDelPeriodo
         .'COALESCE(SUM(l.isv), 0) AS isv, COALESCE(SUM(l.total), 0) AS total, COALESCE(SUM(l.costo), 0) AS costo';
 
     private const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+    /** La presentación más grande que se vende de p (para contar en ella: "12 CJ24 + 5 UN"). */
+    public const MAYOR = 'SELECT pz.contenido, um.codigo FROM presentaciones pz JOIN unidades_medida um ON um.id = pz.unidad_medida_id'
+        .' WHERE pz.producto_id = p.id AND pz.activo AND pz.contenido > 1 ORDER BY pz.contenido DESC, pz.id LIMIT 1';
 
     private ?FilaVenta $totales = null;
 
@@ -181,16 +184,18 @@ final class VentasDelPeriodo
     }
 
     /**
-     * Unidades que salieron, también en cajas: "12 CJ + 5 UN".
+     * Unidades que salieron, también en su presentación más grande: "12 CJ24 + 5 UN".
      *
      * @return list<FilaVenta>
      */
     public function porProducto(): array
     {
-        $filas = $this->consultar('SELECT p.codigo, p.descripcion AS nombre, p.unidades_por_caja AS uxc, COALESCE(NULLIF(pv.nombre_corto, \'\'), pv.nombre) AS proveedor, '
+        $filas = $this->consultar('SELECT p.codigo, p.descripcion AS nombre, COALESCE(mx.contenido, 1) AS uxc, mx.codigo AS caja, ub.codigo AS base, COALESCE(NULLIF(pv.nombre_corto, \'\'), pv.nombre) AS proveedor, '
             .'COUNT(DISTINCT l.pedido_id) AS pedidos, COUNT(DISTINCT l.cliente_id) AS clientes, COALESCE(SUM(l.unidades), 0) AS unidades, '.self::SUMAS
             .' FROM lineas l JOIN productos p ON p.id = l.producto_id JOIN proveedores pv ON pv.id = p.proveedor_id'
-            .' GROUP BY p.id, p.codigo, p.descripcion, p.unidades_por_caja, pv.id, pv.nombre, pv.nombre_corto ORDER BY venta DESC, p.descripcion');
+            .' JOIN unidades_medida ub ON ub.id = p.unidad_medida_id'
+            .' LEFT JOIN LATERAL ('.self::MAYOR.') mx ON TRUE'
+            .' GROUP BY p.id, p.codigo, p.descripcion, mx.contenido, mx.codigo, ub.codigo, pv.id, pv.nombre, pv.nombre_corto ORDER BY venta DESC, p.descripcion');
 
         return array_map(function (stdClass $f): FilaVenta {
             $unidades = (int) self::numero($f->unidades);
@@ -200,7 +205,7 @@ final class VentasDelPeriodo
                 self::texto($f->nombre),
                 self::texto($f->codigo),
                 self::texto($f->proveedor),
-                Existencia::enCajas($unidades, (int) self::numero($f->uxc)),
+                Existencia::enCajas($unidades, (int) self::numero($f->uxc), self::texto($f->caja).(int) self::numero($f->uxc), self::texto($f->base)),
             );
         }, $filas);
     }
@@ -315,7 +320,6 @@ final class VentasDelPeriodo
             $valores[] = $this->bodega->id;
         }
 
-        $valores[] = UnidadVenta::Caja->value;
         $deProveedor = '';
 
         if ($this->proveedor !== null) {
@@ -335,7 +339,7 @@ final class VentasDelPeriodo
             it AS (
                 SELECT i.pedido_id, i.producto_id,
                     SUM(i.subtotal) AS bruto, SUM(i.descuento) AS descuento, SUM(i.isv) AS isv, SUM(i.total) AS total,
-                    SUM(COALESCE(i.cantidad_despachada, i.cantidad) * CASE WHEN i.unidad = ? THEN GREATEST(pr.unidades_por_caja, 1) ELSE 1 END) AS unidades
+                    SUM(COALESCE(i.cantidad_despachada, i.cantidad) * GREATEST(i.contenido, 1)) AS unidades
                 FROM pedido_items i
                 JOIN ped ON ped.id = i.pedido_id
                 JOIN productos pr ON pr.id = i.producto_id{$deProveedor}

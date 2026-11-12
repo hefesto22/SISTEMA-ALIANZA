@@ -4,29 +4,27 @@ declare(strict_types=1);
 
 namespace App\Domain\Promociones;
 
-use App\Enums\UnidadVenta;
-
 /**
  * Una línea del pedido tal como la ve el motor de promociones.
- * `precio` es por unidad de venta (unidad o caja) y sin ISV.
+ * `contenido` son las unidades base que trae su presentación (UN = 1,
+ * CJ de 12 = 12) y `precio` es por esa presentación, sin ISV.
  */
 final readonly class LineaPromocion
 {
     public function __construct(
         public int|string $clave,
         public int $productoId,
-        public int $unidadesPorCaja,
-        public UnidadVenta $unidad,
+        public int $contenido,
         public int $cantidad,
         public float $precio,
     ) {}
 
     /**
-     * Cuántas unidades sueltas trae una unidad de venta (1 o las de la caja).
+     * Cuántas unidades base trae una de la línea.
      */
     public function factor(): int
     {
-        return MotorPromociones::factor($this->unidad, $this->unidadesPorCaja);
+        return max(1, $this->contenido);
     }
 
     public function unidades(): int

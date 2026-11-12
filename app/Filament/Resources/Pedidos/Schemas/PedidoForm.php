@@ -9,12 +9,12 @@ use App\Domain\Promociones\LineaPromocion;
 use App\Domain\Promociones\MotorPromociones;
 use App\Domain\Promociones\ResultadoPromociones;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Clientes\Schemas\ClienteForm;
 use App\Filament\Schemas\Components\LineasPedido;
 use App\Filament\Support\Acceso;
 use App\Models\Cliente;
 use App\Models\Pedido;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\User;
@@ -33,7 +33,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Preventa: el vendedor escoge el cliente y agrega productos (unidad o caja).
+ * Preventa: el vendedor escoge el cliente y agrega productos, cada uno en
+ * sus presentaciones (UN, CJ12, FD6…).
  * Los precios que ve son los de hoy; bodega los confirma al despachar.
  *
  * Pensada para el teléfono y para pedidos largos: los productos van en una
@@ -177,7 +178,7 @@ class PedidoForm
      * tocar. "descuentos" es lo que la promoción le quita a cada producto,
      * con ISV, para mostrarlo en su fila.
      *
-     * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
+     * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      *
      * @return array{total: float, ahorro: float, promociones: string, descuentos: array<int, float>}
      */
@@ -192,7 +193,7 @@ class PedidoForm
         // Bruto − descuento = neto, ISV sobre el neto.
         foreach ($conProducto as $clave => $linea) {
             $gravado = $linea['producto']->gravado;
-            $bruto = round($linea['producto']->precioPara($linea['unidad']) * $linea['cantidad'], 2);
+            $bruto = round($linea['presentacion']->precio * $linea['cantidad'], 2);
             $aplicado = $promociones->descuentoDe($clave);
             $descuento = round(min($bruto, $aplicado->monto ?? 0.0), 2);
             $neto = round($bruto - $descuento, 2);
@@ -309,9 +310,9 @@ class PedidoForm
     /**
      * Las líneas con su producto, y lo que dejan las promociones vigentes en la bodega.
      *
-     * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
+     * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      *
-     * @return array{0: array<int, array{producto: Producto, unidad: UnidadVenta, cantidad: int}>, 1: ResultadoPromociones}
+     * @return array{0: array<int, array{producto: Producto, presentacion: Presentacion, cantidad: int}>, 1: ResultadoPromociones}
      */
     private static function calcular(array $lineas, ?int $bodegaId): array
     {
@@ -319,24 +320,24 @@ class PedidoForm
             return [[], new ResultadoPromociones];
         }
 
-        $productos = Producto::query()->whereKey(array_column($lineas, 'producto_id'))->get()->keyBy('id');
+        $presentaciones = Presentacion::query()->with('producto')->whereKey(array_column($lineas, 'presentacion_id'))->get()->keyBy('id');
         $conProducto = [];
         $paraMotor = [];
 
         foreach ($lineas as $clave => $linea) {
-            $producto = $productos->get($linea['producto_id']);
+            $presentacion = $presentaciones->get($linea['presentacion_id']);
 
-            if (! $producto instanceof Producto) {
+            if (! $presentacion instanceof Presentacion || $presentacion->producto_id !== $linea['producto_id']) {
                 continue;
             }
 
-            $unidad = UnidadVenta::from($linea['unidad']);
+            $producto = $presentacion->producto;
 
-            $conProducto[$clave] = ['producto' => $producto, 'unidad' => $unidad, 'cantidad' => $linea['cantidad']];
-            $paraMotor[] = new LineaPromocion($clave, $producto->id, $producto->unidades_por_caja, $unidad, $linea['cantidad'], $producto->precioPara($unidad));
+            $conProducto[$clave] = ['producto' => $producto, 'presentacion' => $presentacion, 'cantidad' => $linea['cantidad']];
+            $paraMotor[] = new LineaPromocion($clave, $producto->id, $presentacion->contenido, $linea['cantidad'], $presentacion->precio);
         }
 
-        $vigentes = Promocion::query()->vigentes()->paraBodega($bodegaId)->with(['condiciones.producto', 'productoBeneficio'])->orderBy('id')->get();
+        $vigentes = Promocion::query()->vigentes()->paraBodega($bodegaId)->with([...Promocion::PARA_CALCULAR, 'condiciones.producto'])->orderBy('id')->get();
 
         return [$conProducto, app(MotorPromociones::class)->calcular($paraMotor, $vigentes)];
     }

@@ -9,6 +9,7 @@ use App\Models\CambioPrecio;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Historial de precios del producto: quién, cuándo, desde qué bodega y de cuánto a cuánto.
@@ -29,6 +30,7 @@ class CambiosPrecioRelationManager extends RelationManager
         $verCostos = ProductoResource::puedeVerCostos();
 
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['presentacion.unidadMedida', 'usuario', 'bodega']))
             ->columns([
                 TextColumn::make('created_at')
                     ->label('Fecha')
@@ -36,12 +38,18 @@ class CambiosPrecioRelationManager extends RelationManager
                     ->sortable(),
                 TextColumn::make('motivo')
                     ->badge(),
+                TextColumn::make('presentacion')
+                    ->label('En')
+                    ->state(fn (CambioPrecio $record): string => $record->presentacion?->sigla() ?? 'UN')
+                    ->tooltip(fn (CambioPrecio $record): ?string => $record->presentacion?->nombre())
+                    ->badge()
+                    ->color('gray'),
                 TextColumn::make('costo')
-                    ->label('Costo unidad')
+                    ->label('Costo')
                     ->state(fn (CambioPrecio $record): string => ($record->costo_anterior === null ? '' : lempiras($record->costo_anterior, 4).' → ').lempiras($record->costo_nuevo, 4))
                     ->visible($verCostos),
                 TextColumn::make('precio')
-                    ->label('Precio unidad')
+                    ->label('Precio')
                     ->state(fn (CambioPrecio $record): string => ($record->precio_anterior === null ? '' : lempiras($record->precio_anterior).' → ').lempiras($record->precio_nuevo))
                     ->weight('bold'),
                 TextColumn::make('variacion')

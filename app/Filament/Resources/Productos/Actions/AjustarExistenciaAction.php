@@ -22,8 +22,9 @@ use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 
 /**
- * Conteo físico de un producto en una bodega: se escribe lo que hay (cajas
- * y sueltas) y la existencia queda en eso. Sirve para cargar el inventario
+ * Conteo físico de un producto en una bodega: se escribe lo que hay (en su
+ * presentación más grande —cajas, sacos…— y sueltas) y la existencia queda
+ * en eso (en unidades base). Sirve para cargar el inventario
  * inicial y para dañados o faltantes. Queda en el kárdex; el costo no cambia.
  *
  * El encargado ajusta su bodega; administración escoge la bodega.
@@ -61,19 +62,19 @@ final class AjustarExistenciaAction
 
                         return $bodegaId === null
                             ? 'Escoja la bodega'
-                            : Existencia::enCajas(Existencia::en($bodegaId, $record->id), $record->unidades_por_caja);
+                            : $record->existenciaEnTexto(Existencia::en($bodegaId, $record->id));
                     }),
                 Grid::make(['default' => 2])
                     ->schema([
                         TextInput::make('cajas')
-                            ->label("Cajas de {$record->unidades_por_caja}")
+                            ->label(mb_ucfirst($record->presentacionMayor()?->palabra(2) ?? 'cajas'))
                             ->numeric()
                             ->integer()
                             ->minValue(0)
                             ->default(0)
-                            ->visible($record->unidades_por_caja > 1),
+                            ->visible(self::porCaja($record) > 1),
                         TextInput::make('unidades')
-                            ->label($record->unidades_por_caja > 1 ? 'Unidades sueltas' : 'Unidades')
+                            ->label(mb_ucfirst($record->presentacionBase()->palabra(2)).(self::porCaja($record) > 1 ? ' sueltas' : ''))
                             ->numeric()
                             ->integer()
                             ->minValue(0)
@@ -99,7 +100,7 @@ final class AjustarExistenciaAction
                     return;
                 }
 
-                $contado = self::entero($data['cajas'] ?? 0) * max(1, $record->unidades_por_caja) + self::entero($data['unidades'] ?? 0);
+                $contado = self::entero($data['cajas'] ?? 0) * self::porCaja($record) + self::entero($data['unidades'] ?? 0);
                 $antes = Existencia::en($bodegaId, $record->id);
 
                 try {
@@ -110,27 +111,33 @@ final class AjustarExistenciaAction
                     return;
                 }
 
-                $porCaja = $record->unidades_por_caja;
-
                 Notification::make()
                     ->title($movimiento === null ? 'No cambió: ya había eso' : 'Existencia ajustada')
                     ->body($movimiento === null
-                        ? Existencia::enCajas($antes, $porCaja)
-                        : Existencia::enCajas($antes, $porCaja).' → '.Existencia::enCajas($contado, $porCaja))
+                        ? $record->existenciaEnTexto($antes)
+                        : $record->existenciaEnTexto($antes).' → '.$record->existenciaEnTexto($contado))
                     ->success()
                     ->send();
             });
     }
 
     /**
-     * Lo que hay hoy en la bodega, en cajas y sueltas, para llenar el conteo.
+     * Cuántas unidades base trae la presentación más grande (1 si solo tiene la base).
+     */
+    private static function porCaja(Producto $producto): int
+    {
+        return max(1, $producto->presentacionMayor()?->contenido ?? 1);
+    }
+
+    /**
+     * Lo que hay hoy en la bodega, en su presentación más grande y sueltas, para llenar el conteo.
      *
      * @return array{bodega_id: int|null, cajas: int, unidades: int, nota: null}
      */
     private static function conteo(Producto $producto, ?int $bodegaId): array
     {
         $hay = $bodegaId === null ? 0 : max(0, Existencia::en($bodegaId, $producto->id));
-        $porCaja = max(1, $producto->unidades_por_caja);
+        $porCaja = self::porCaja($producto);
 
         return [
             'bodega_id' => $bodegaId,

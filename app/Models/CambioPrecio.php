@@ -16,6 +16,7 @@ use Illuminate\Support\Carbon;
  *
  * @property int $id
  * @property int $producto_id
+ * @property int|null $presentacion_id
  * @property int|null $user_id
  * @property int|null $bodega_id
  * @property MotivoCambioPrecio $motivo
@@ -28,6 +29,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Producto $producto
+ * @property-read Presentacion|null $presentacion
  * @property-read User|null $usuario
  * @property-read Bodega|null $bodega
  */
@@ -40,6 +42,7 @@ class CambioPrecio extends Model
     /** @var list<string> */
     protected $fillable = [
         'producto_id',
+        'presentacion_id',
         'user_id',
         'bodega_id',
         'motivo',
@@ -72,6 +75,16 @@ class CambioPrecio extends Model
     public function producto(): BelongsTo
     {
         return $this->belongsTo(Producto::class);
+    }
+
+    /**
+     * De qué presentación es el precio (costo y precio son de ella completa).
+     *
+     * @return BelongsTo<Presentacion, $this>
+     */
+    public function presentacion(): BelongsTo
+    {
+        return $this->belongsTo(Presentacion::class);
     }
 
     /**

@@ -71,8 +71,10 @@ class Existencia extends Model
 
     /**
      * Unidades como se cuentan en bodega: "2 CJ + 5 UN", "3 CJ", "5 UN", "0".
+     * Con la sigla de la presentación: "2 CJ12 + 5 UN", "3 SC10".
+     * (Para un producto: Producto::existenciaEnTexto().)
      */
-    public static function enCajas(int $unidades, int $porCaja): string
+    public static function enCajas(int $unidades, int $porCaja, string $caja = 'CJ', string $base = 'UN'): string
     {
         if ($unidades === 0) {
             return '0';
@@ -82,15 +84,15 @@ class Existencia extends Model
         $resto = abs($unidades);
 
         if ($porCaja <= 1) {
-            return "{$signo}{$resto} UN";
+            return "{$signo}{$resto} {$base}";
         }
 
         $cajas = intdiv($resto, $porCaja);
         $sueltas = $resto % $porCaja;
 
         $partes = array_filter([
-            $cajas > 0 ? "{$cajas} CJ" : null,
-            $sueltas > 0 ? "{$sueltas} UN" : null,
+            $cajas > 0 ? "{$cajas} {$caja}" : null,
+            $sueltas > 0 ? "{$sueltas} {$base}" : null,
         ]);
 
         return $signo.implode(' + ', $partes);

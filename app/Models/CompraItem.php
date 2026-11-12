@@ -4,19 +4,19 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\UnidadVenta;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Una línea de la compra: cuánto entró, a qué costo y cómo quedó el
- * producto (costo y precio nuevos).
+ * Una línea de la compra: en qué presentación entró (CJ de 12, UN…),
+ * cuántas, a qué costo y cómo quedó el producto (costo por unidad y precio
+ * de esa presentación después de la compra).
  *
  * @property int $id
  * @property int $compra_id
  * @property int $producto_id
- * @property UnidadVenta $unidad
+ * @property int $presentacion_id
  * @property int $cantidad
  * @property int $unidades
  * @property float $costo_ingresado
@@ -32,6 +32,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  * @property-read Compra $compra
  * @property-read Producto $producto
+ * @property-read Presentacion $presentacion
  */
 class CompraItem extends Model
 {
@@ -41,7 +42,7 @@ class CompraItem extends Model
     protected $fillable = [
         'compra_id',
         'producto_id',
-        'unidad',
+        'presentacion_id',
         'cantidad',
         'unidades',
         'costo_ingresado',
@@ -61,7 +62,7 @@ class CompraItem extends Model
     protected function casts(): array
     {
         return [
-            'unidad'          => UnidadVenta::class,
+            'presentacion_id' => 'integer',
             'cantidad'        => 'integer',
             'unidades'        => 'integer',
             'costo_ingresado' => 'float',
@@ -90,5 +91,13 @@ class CompraItem extends Model
     public function producto(): BelongsTo
     {
         return $this->belongsTo(Producto::class);
+    }
+
+    /**
+     * @return BelongsTo<Presentacion, $this>
+     */
+    public function presentacion(): BelongsTo
+    {
+        return $this->belongsTo(Presentacion::class);
     }
 }

@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Enums\EstadoPedido;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
 use App\Filament\Resources\Cais\Pages\ManageCais;
 use App\Filament\Resources\CambiosPrecio\Pages\ListCambiosPrecio;
@@ -72,89 +71,114 @@ test('las pantallas de administración abren', function (): void {
     Livewire::test(ListPedidos::class)->assertOk();
 });
 
+// "Actualizar precio" con Repeater::fake(): las filas de presentaciones van
+// de la más grande a la base, así que 0 = CJ12 y 1 = UN. El factory deja
+// costo 50 por unidad, la UN a 59.5238 y la CJ12 a 714.2856 (sin ISV).
+
 test('actualizar precio: se escriben costo y precio con ISV y se guardan sin ISV', function (): void {
     $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
 
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->callAction('actualizarPrecio', data: [
-            'costo_por'    => 'unidad',
-            'costo'        => 69,
-            'precio_venta' => 82.14,
+            'costo_por'      => presentacion($this->producto)->id,
+            'costo'          => 69,
+            'presentaciones' => [['modo' => 'calculado'], ['precio' => 80.50]],
         ])
         ->assertHasNoActionErrors();
 
-    // 69 ÷ 1.15 = 60 de costo; 82.14 ÷ 1.15 = 71.4261 de precio sin ISV (al cliente vuelve a dar 82.14).
-    $producto = $this->producto->fresh();
-    $cambio = $this->producto->cambiosPrecio()->first();
+    $undoRepeaterFake();
 
-    expect($producto?->costo_unidad)->toBe(60.0)
-        ->and($producto?->precio_unidad)->toBe(71.4261)
-        ->and(round((float) $producto?->precioUnidadConIsv(), 2))->toBe(82.14)
+    // 69 ÷ 1.15 = 60 de costo. La UN: 80.50 ÷ 1.15 = 70 sin ISV, distinto al calculado → queda fija.
+    // La CJ12 sigue calculada: 60 × 12 = 720 con 16 % → 857.1429.
+    $un = presentacion($this->producto);
+    $cambio = $this->producto->cambiosPrecio()->where('presentacion_id', $un->id)->first();
+
+    expect($this->producto->fresh()?->costo_unidad)->toBe(60.0)
+        ->and($un->precio)->toBe(70.0)
+        ->and($un->precio_fijo)->toBeTrue()
+        ->and(round($un->precioConIsv(), 2))->toBe(80.5)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(857.1429)
+        ->and(presentacion($this->producto, 12)->precio_fijo)->toBeFalse()
         ->and($cambio?->motivo)->toBe(MotivoCambioPrecio::Compra)
+        ->and($cambio?->margen)->toBe(0.1429)
         ->and($cambio?->user_id)->toBe($this->encargado->id)
         ->and($cambio?->bodega_id)->toBe($this->bodega->id);
 });
 
-test('al cambiar el costo, el precio de venta se recalcula solo con el % de utilidad', function (): void {
+test('al cambiar el costo, el precio de cada presentación se recalcula solo con el % de utilidad', function (): void {
     $this->actingAs($this->encargado);
 
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
-        ->callAction('actualizarPrecio', data: ['costo_por' => 'unidad', 'costo' => 69])
+        ->callAction('actualizarPrecio', data: ['costo_por' => presentacion($this->producto)->id, 'costo' => 69])
         ->assertHasNoActionErrors();
 
-    // Costo 69 con ISV = 60 neto; con 16% → 71.4286 sin ISV = L. 82.14 con ISV.
-    $producto = $this->producto->fresh();
-
-    expect($producto?->costo_unidad)->toBe(60.0)
-        ->and($producto?->precio_unidad)->toBe(71.4286)
-        ->and(round((float) $producto?->precioUnidadConIsv(), 2))->toBe(82.14);
+    // Costo 69 con ISV = 60 neto; con 16% → UN 71.4286 sin ISV = L. 82.14 con ISV; CJ12 857.1429 = L. 985.71.
+    expect($this->producto->fresh()?->costo_unidad)->toBe(60.0)
+        ->and(presentacion($this->producto)->precio)->toBe(71.4286)
+        ->and(round(presentacion($this->producto)->precioConIsv(), 2))->toBe(82.14)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(857.1429)
+        ->and(round(presentacion($this->producto, 12)->precioConIsv(), 2))->toBe(985.71);
 });
 
-test('lo escrito por caja se divide entre la caja al pasar a unidad, sin descuadrarse', function (): void {
+test('el costo escrito por caja se reparte por unidad al cambiar la presentación del costo, sin descuadrarse', function (): void {
     $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
 
-    // Caja de 12: costo L. 600 con ISV → precio sugerido con 16% = L. 714.29 la caja.
-    // Al pasar a unidad: L. 50.00 de costo y L. 59.52 de precio (no 600 × 12).
+    // El modal abre con el costo por CJ12 (la más grande). L. 600 con ISV la caja → L. 714.29 la caja y L. 59.52 la UN.
+    // Al pasar el costo a UN: L. 50.00 (no 600 × 12); al regresar a CJ12, otra vez L. 600.00.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
+        ->assertSchemaStateSet(['costo_por' => presentacion($this->producto, 12)->id, 'costo' => 690.0])
         ->fillForm(['costo' => 600])
-        ->assertSchemaStateSet(['precio_venta' => 714.29])
-        ->fillForm(['costo_por' => 'unidad'])
-        ->assertSchemaStateSet(['costo' => 50.0, 'precio_venta' => 59.52])
-        ->fillForm(['costo_por' => 'caja'])
-        ->assertSchemaStateSet(['costo' => 600.0, 'precio_venta' => 714.29])
+        ->assertSchemaStateSet(['presentaciones.0.precio' => 714.29, 'presentaciones.1.precio' => 59.52])
+        ->fillForm(['costo_por' => presentacion($this->producto)->id])
+        ->assertSchemaStateSet(['costo' => 50.0, 'presentaciones.0.precio' => 714.29, 'presentaciones.1.precio' => 59.52])
+        ->fillForm(['costo_por' => presentacion($this->producto, 12)->id])
+        ->assertSchemaStateSet(['costo' => 600.0])
         ->callMountedAction()
         ->assertHasNoActionErrors();
 
-    $producto = $this->producto->fresh();
+    $undoRepeaterFake();
 
-    expect($producto?->costo_unidad)->toBe(43.4783)
-        ->and($producto?->precio_unidad)->toBe(51.7598);
+    expect($this->producto->fresh()?->costo_unidad)->toBe(43.4783)
+        ->and(presentacion($this->producto)->precio)->toBe(51.7599)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(621.1186);
 });
 
 test('si solo cambia el precio de venta, el costo queda igual', function (): void {
     $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
 
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
-        ->callAction('actualizarPrecio', data: ['costo_por' => 'unidad', 'precio_venta' => 70])
+        ->callAction('actualizarPrecio', data: ['presentaciones' => [['modo' => 'calculado'], ['precio' => 70]]])
         ->assertHasNoActionErrors();
 
-    $producto = $this->producto->fresh();
+    $undoRepeaterFake();
 
-    expect($producto?->costo_unidad)->toBe(50.0)
-        ->and($producto?->precio_unidad)->toBe(60.8696)
-        ->and($this->producto->cambiosPrecio()->first()?->motivo)->toBe(MotivoCambioPrecio::Manual);
+    $un = presentacion($this->producto);
+
+    expect($this->producto->fresh()?->costo_unidad)->toBe(50.0)
+        ->and($un->precio)->toBe(60.8696)
+        ->and($un->precio_fijo)->toBeTrue()
+        ->and(presentacion($this->producto, 12)->precio)->toBe(714.2856)
+        ->and($this->producto->cambiosPrecio()->sole()->motivo)->toBe(MotivoCambioPrecio::Manual);
 });
 
-test('pasar de caja a unidad convierte costo y precio y nada cambia', function (): void {
+test('cambiar la presentación del costo convierte el monto y nada cambia', function (): void {
     $this->actingAs($this->encargado);
 
-    // El modal abre por caja de 12 (costo L. 690.00, precio L. 821.43 con ISV); al pasar a unidad queda L. 57.50 y L. 68.45.
+    // El modal abre por CJ12 (costo L. 690.00); al pasar a UN queda L. 57.50: el mismo costo.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
-        ->callAction('actualizarPrecio', data: ['costo_por' => 'unidad'])
-        ->assertHasNoActionErrors();
+        ->mountAction('actualizarPrecio')
+        ->fillForm(['costo_por' => presentacion($this->producto)->id])
+        ->assertSchemaStateSet(['costo' => 57.5])
+        ->callMountedAction()
+        ->assertHasNoActionErrors()
+        ->assertNotified('Se guardó sin cambios de precio');
 
-    expect($this->producto->fresh()?->precio_unidad)->toBe(59.5238)
+    expect(presentacion($this->producto)->precio)->toBe(59.5238)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(714.2856)
         ->and($this->producto->fresh()?->costo_unidad)->toBe(50.0)
         ->and($this->producto->cambiosPrecio()->count())->toBe(0);
 });
@@ -180,7 +204,7 @@ test('el vendedor levanta la preventa y bodega la despacha', function (): void {
             'cliente_id' => $cliente->id,
             'fecha'      => now()->toDateString(),
             'items'      => [
-                ['producto_id' => $this->producto->id, 'unidad' => UnidadVenta::Unidad->value, 'cantidad' => 5],
+                ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto)->id, 'cantidad' => 5],
             ],
         ])
         ->call('create')
@@ -259,31 +283,36 @@ test('el personal entra con su código de usuario', function (): void {
 
 test('precio de venta: si se escribe otro precio queda fijo; con "Calculado" vuelve a salir del costo con el %', function (): void {
     $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
 
-    // Costo 50 con 16 % → L 68.45 con ISV; se escribe L 65: queda fijo.
+    // Costo 50 con 16 % → la UN a L 68.45 con ISV; se escribe L 65: queda fija. La CJ12 sigue calculada.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
-        ->assertSchemaStateSet(['modo_precio' => 'calculado'])
-        ->fillForm(['costo_por' => 'unidad', 'precio_venta' => 65])
-        ->assertSchemaStateSet(['modo_precio' => 'fijo'])
+        ->assertSchemaStateSet(['presentaciones.1.modo' => 'calculado', 'presentaciones.1.precio' => 68.45])
+        ->fillForm(['presentaciones' => [['modo' => 'calculado'], ['precio' => 65]]])
+        ->assertSchemaStateSet(['presentaciones.1.modo' => 'fijo', 'presentaciones.0.modo' => 'calculado'])
         ->callMountedAction()
         ->assertHasNoActionErrors();
 
-    expect($this->producto->fresh()?->precio_fijo)->toBeTrue()
-        ->and($this->producto->fresh()?->precio_unidad)->toBe(56.5217);
+    expect(presentacion($this->producto)->precio_fijo)->toBeTrue()
+        ->and(presentacion($this->producto)->precio)->toBe(56.5217)
+        ->and(presentacion($this->producto, 12)->precio_fijo)->toBeFalse();
 
-    // Fijo: al cambiar el costo el precio se queda; con "Calculado" se recalcula.
+    // Fija: al cambiar el costo su precio se queda (la CJ12 sí se recalcula); con "Calculado" se recalcula.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
-        ->assertSchemaStateSet(['modo_precio' => 'fijo'])
-        ->fillForm(['costo_por' => 'unidad', 'costo' => 69])
-        ->assertSchemaStateSet(['precio_venta' => 65.0])
-        ->fillForm(['modo_precio' => 'calculado'])
-        ->assertSchemaStateSet(['precio_venta' => 82.14])
+        ->assertSchemaStateSet(['presentaciones.1.modo' => 'fijo'])
+        ->fillForm(['costo_por' => presentacion($this->producto)->id, 'costo' => 69])
+        ->assertSchemaStateSet(['presentaciones.1.precio' => 65.0, 'presentaciones.0.precio' => 985.71])
+        ->fillForm(['presentaciones' => [['modo' => 'calculado'], ['modo' => 'calculado']]])
+        ->assertSchemaStateSet(['presentaciones.1.precio' => 82.14])
         ->callMountedAction()
         ->assertHasNoActionErrors();
 
-    expect($this->producto->fresh()?->precio_fijo)->toBeFalse()
+    $undoRepeaterFake();
+
+    expect(presentacion($this->producto)->precio_fijo)->toBeFalse()
         ->and($this->producto->fresh()?->costo_unidad)->toBe(60.0)
-        ->and($this->producto->fresh()?->precio_unidad)->toBe(71.4286);
+        ->and(presentacion($this->producto)->precio)->toBe(71.4286)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(857.1429);
 });

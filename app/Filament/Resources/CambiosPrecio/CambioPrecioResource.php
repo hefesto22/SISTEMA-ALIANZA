@@ -63,7 +63,7 @@ class CambioPrecioResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with(['producto.proveedor', 'usuario', 'bodega']);
+        return parent::getEloquentQuery()->with(['producto.proveedor', 'presentacion.unidadMedida', 'usuario', 'bodega']);
     }
 
     public static function table(Table $table): Table
@@ -87,13 +87,19 @@ class CambioPrecioResource extends Resource
                     ->url(fn (CambioPrecio $record): string => ProductoResource::getUrl('view', ['record' => $record->producto_id])),
                 TextColumn::make('motivo')
                     ->badge(),
+                TextColumn::make('presentacion')
+                    ->label('En')
+                    ->state(fn (CambioPrecio $record): string => $record->presentacion?->sigla() ?? 'UN')
+                    ->tooltip(fn (CambioPrecio $record): ?string => $record->presentacion?->nombre())
+                    ->badge()
+                    ->color('gray'),
                 TextColumn::make('costo')
-                    ->label('Costo unidad')
+                    ->label('Costo')
                     ->state(fn (CambioPrecio $record): string => ($record->costo_anterior === null ? '' : lempiras($record->costo_anterior, 4).' → ').lempiras($record->costo_nuevo, 4))
                     ->visible($verCostos)
                     ->toggleable(),
                 TextColumn::make('precio')
-                    ->label('Precio unidad')
+                    ->label('Precio')
                     ->state(fn (CambioPrecio $record): string => ($record->precio_anterior === null ? '' : lempiras($record->precio_anterior).' → ').lempiras($record->precio_nuevo))
                     ->weight('bold'),
                 TextColumn::make('variacion')

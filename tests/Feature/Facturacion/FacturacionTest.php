@@ -10,7 +10,6 @@ use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
 use App\Enums\ModoImpresion;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Cais\Pages\ManageCais;
 use App\Filament\Resources\Facturas\Pages\ListFacturas;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
@@ -55,8 +54,8 @@ beforeEach(function (): void {
     }
 
     // Gravado: L 100 la unidad. Exento: caja de 10 a L 50 = L 500.
-    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['unidades_por_caja' => 12]);
-    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->create(['unidades_por_caja' => 10]);
+    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create();
+    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->conCaja(10)->create();
 
     DatosFiscales::actual()->update([
         'razon_social'     => 'Distribuidora Alianza S. de R.L.',
@@ -80,8 +79,8 @@ function pedidoValidado(Bodega $bodega, User $vendedor, Producto $gravado, Produ
         'fecha'       => now(),
     ]);
 
-    $pedido->items()->create(['producto_id' => $gravado->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 2]);
-    $pedido->items()->create(['producto_id' => $exento->id, 'unidad' => UnidadVenta::Caja, 'cantidad' => 1]);
+    $pedido->items()->create(['producto_id' => $gravado->id, 'presentacion_id' => presentacion($gravado)->id, 'cantidad' => 2]);
+    $pedido->items()->create(['producto_id' => $exento->id, 'presentacion_id' => caja($exento)->id, 'cantidad' => 1]);
 
     $pedido = app(RecalcularPedido::class)->ejecutar($pedido);
 

@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
 use App\Filament\Resources\Clientes\Pages\ManageClientes;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
@@ -202,7 +201,7 @@ test('sin marcar fuera de ruta el vendedor no puede escoger un cliente de otra r
             'cliente_id' => $fuera->id,
             'fecha'      => now()->toDateString(),
             'items'      => [
-                ['producto_id' => $this->producto->id, 'unidad' => UnidadVenta::Unidad->value, 'cantidad' => 1],
+                ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto)->id, 'cantidad' => 1],
             ],
         ])
         ->call('create')
@@ -224,7 +223,7 @@ test('fuera de ruta: el pedido sale marcado y con el motivo, que es obligatorio'
         'cliente_id'    => $fuera->id,
         'fecha'         => now()->toDateString(),
         'items'         => [
-            ['producto_id' => $this->producto->id, 'unidad' => UnidadVenta::Unidad->value, 'cantidad' => 1],
+            ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto)->id, 'cantidad' => 1],
         ],
     ];
 
@@ -260,7 +259,7 @@ test('si el cliente sí es de su ruta el pedido no queda fuera de ruta aunque lo
             'motivo_fuera_ruta' => 'Por si acaso',
             'fecha'             => now()->toDateString(),
             'items'             => [
-                ['producto_id' => $this->producto->id, 'unidad' => UnidadVenta::Unidad->value, 'cantidad' => 1],
+                ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto)->id, 'cantidad' => 1],
             ],
         ])
         ->call('create')

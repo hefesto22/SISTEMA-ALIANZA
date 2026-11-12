@@ -8,10 +8,15 @@ use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Precios\ActualizarPrecioProducto;
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Enums\MotivoCambioPrecio;
+use App\Models\CambioPrecio;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\User;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Repeater\TableColumn;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
@@ -25,21 +30,23 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Auth;
 
 /**
- * "Actualizar precio": se escriben el COSTO y el PRECIO DE VENTA tal como se
- * manejan en la calle (con ISV si el producto es gravado), por caja o por
- * unidad. El sistema saca todo lo demás: la utilidad (después del impuesto),
- * la ganancia, el precio de la caja y de la unidad, y lo que se guarda sin ISV.
- * Aplica a TODAS las bodegas y deja historial.
+ * "Actualizar precio": se escriben el COSTO (de la presentación que se
+ * escoja: la caja de 12, la unidad…) y el PRECIO DE VENTA de cada
+ * presentación que se vende, tal como se manejan en la calle (con ISV si el
+ * producto es gravado). El sistema saca lo demás: la utilidad (después del
+ * impuesto), la ganancia y lo que se guarda sin ISV. Aplica a TODAS las
+ * bodegas y deja historial.
  *
- * El precio de venta puede ser calculado (costo promedio + % de utilidad; se
- * recalcula solo en cada compra) o fijo (lo pone la empresa a mano, p. ej.
- * para estar mejor que la competencia; las compras cambian el costo pero no
- * ese precio). Si se escribe un precio distinto al calculado, queda fijo.
+ * El precio de cada presentación puede ser calculado (costo promedio × lo
+ * que trae + % de utilidad; se recalcula solo en cada compra) o fijo (lo
+ * pone la empresa a mano, p. ej. para estar mejor que la competencia; las
+ * compras cambian el costo pero no ese precio). Si se escribe un precio
+ * distinto al calculado, queda fijo.
  *
- * Por dentro se lleva cada monto POR UNIDAD Y SIN ISV (costo_base, precio_base)
- * con 6 decimales; lo que se ve en pantalla sale de ahí según el modo. Así, al
- * cambiar entre caja y unidad nada se descuadra: caja de 48 a L. 594.49 ⇄
- * unidad a L. 12.39, ida y vuelta, sin perder centavos.
+ * Por dentro el costo se lleva POR UNIDAD BASE Y SIN ISV (costo_base) y el
+ * precio de cada presentación SIN ISV (precio_base), con 6 decimales; lo
+ * que se ve en pantalla sale de ahí. Así, al cambiar la presentación del
+ * costo nada se descuadra.
  */
 final class ActualizarPrecioAction
 {
@@ -63,90 +70,105 @@ final class ActualizarPrecioAction
             ->modalIconColor('warning')
             ->modalHeading(fn (Producto $record): string => $record->descripcion)
             ->modalDescription(fn (Producto $record): string => self::ficha($record))
-            ->modalWidth(Width::FourExtraLarge)
-            ->modalSubmitActionLabel('Guardar precio')
+            ->modalWidth(Width::FiveExtraLarge)
+            ->modalSubmitActionLabel('Guardar precios')
             ->fillForm(function (Producto $record): array {
-                $factor = max(1, $record->unidades_por_caja);
+                $record->loadMissing(['categoria', 'presentaciones.unidadMedida']);
+                $costoPor = self::presentaciones($record)[0] ?? $record->presentacionBase();
 
                 return [
-                    'costo_por'    => $factor > 1 ? 'caja' : 'unidad',
-                    'modo_precio'  => $record->precio_fijo ? self::FIJO : self::CALCULADO,
-                    'costo_base'   => $record->costo_unidad,
-                    'precio_base'  => $record->precio_unidad,
-                    'costo'        => CalculadoraPrecio::aPantalla($record->costo_unidad, $record->gravado, $factor),
-                    'precio_venta' => CalculadoraPrecio::aPantalla($record->precio_unidad, $record->gravado, $factor),
+                    'costo_por'      => $costoPor->id,
+                    'costo_base'     => $record->costo_unidad,
+                    'costo'          => CalculadoraPrecio::aPantalla($record->costo_unidad, $record->gravado, $costoPor->contenido),
+                    'presentaciones' => array_map(fn (Presentacion $presentacion): array => [
+                        'id'          => $presentacion->id,
+                        'etiqueta'    => $presentacion->etiqueta(),
+                        'contenido'   => $presentacion->contenido,
+                        'modo'        => $presentacion->precio_fijo ? self::FIJO : self::CALCULADO,
+                        'precio_base' => $presentacion->precio,
+                        'precio'      => $presentacion->precio > 0 ? round(CalculadoraPrecio::conIsv($presentacion->precio, $record->gravado), 2) : null,
+                    ], self::presentaciones($record)),
                 ];
             })
             ->schema([
                 Grid::make(12)->schema([
                     Group::make([
                         Hidden::make('costo_base'),
-                        Hidden::make('precio_base'),
-                        ToggleButtons::make('costo_por')
-                            ->label('Los montos son por')
-                            ->options(fn (Producto $record): array => [
-                                'caja'   => "Caja de {$record->unidades_por_caja}",
-                                'unidad' => 'Unidad',
+                        Grid::make(['default' => 1, 'sm' => 2])->schema([
+                            Select::make('costo_por')
+                                ->label('El costo es por')
+                                ->options(fn (Producto $record): array => collect(self::presentaciones($record))->mapWithKeys(fn (Presentacion $presentacion): array => [$presentacion->id => $presentacion->etiqueta()])->all())
+                                ->selectablePlaceholder(false)
+                                ->required()
+                                ->live()
+                                ->afterStateUpdated(function (Get $get, Set $set, Producto $record): void {
+                                    if (is_numeric($get('costo_base'))) {
+                                        $set('costo', CalculadoraPrecio::aPantalla((float) $get('costo_base'), $record->gravado, self::contenidoDe($get('costo_por'), $record)));
+                                    }
+                                }),
+                            TextInput::make('costo')
+                                ->label(fn (Producto $record): string => 'Costo'.($record->gravado ? ' con ISV' : ''))
+                                ->numeric()
+                                ->minValue(0)
+                                ->prefix('L.')
+                                ->required()
+                                ->autofocus()
+                                ->extraInputAttributes(['style' => self::ESTILO_MONTO])
+                                ->live(debounce: 400)
+                                ->afterStateUpdated(function (Get $get, Set $set, Producto $record): void {
+                                    self::alCambiarCosto($get, $set, $record);
+                                }),
+                        ]),
+                        Repeater::make('presentaciones')
+                            ->label('Precio de venta de cada presentación')
+                            ->addable(false)
+                            ->deletable(false)
+                            ->reorderable(false)
+                            ->table([
+                                TableColumn::make('Presentación'),
+                                TableColumn::make('Precio de venta'),
+                                TableColumn::make('Cómo'),
                             ])
-                            ->icons(['caja' => Heroicon::OutlinedArchiveBox, 'unidad' => Heroicon::OutlinedCube])
-                            ->grouped()
-                            ->required()
-                            ->live()
-                            ->visible(fn (Producto $record): bool => $record->unidades_por_caja > 1)
-                            ->afterStateUpdated(function (?string $state, ?string $old, Get $get, Set $set, Producto $record): void {
-                                self::convertir($state, $old, $get, $set, $record);
-                            }),
-                        TextInput::make('costo')
-                            ->label(fn (Get $get, Producto $record): string => 'Costo '.self::por($get).($record->gravado ? ' · con ISV' : ''))
-                            ->numeric()
-                            ->minValue(0)
-                            ->prefix('L.')
-                            ->required()
-                            ->autofocus()
-                            ->extraInputAttributes(['style' => self::ESTILO_MONTO])
-                            ->live(debounce: 400)
-                            ->afterStateUpdated(function (Get $get, Set $set, Producto $record): void {
-                                self::alCambiarCosto($get, $set, $record);
-                            }),
-                        ToggleButtons::make('modo_precio')
-                            ->label('Precio de venta')
-                            ->options(fn (Producto $record): array => [
-                                self::CALCULADO => 'Calculado ('.self::porcentaje($record->margenAplicado()).' sobre el costo)',
-                                self::FIJO      => 'Fijo (lo pongo yo)',
-                            ])
-                            ->icons([self::CALCULADO => Heroicon::OutlinedCalculator, self::FIJO => Heroicon::OutlinedLockClosed])
-                            ->grouped()
-                            ->required()
-                            ->live()
-                            ->afterStateUpdated(function (?string $state, Get $get, Set $set, Producto $record): void {
-                                if ($state === self::CALCULADO) {
-                                    self::ponerSugerido($get, $set, $record);
-                                }
-                            }),
-                        TextInput::make('precio_venta')
-                            ->label(fn (Get $get, Producto $record): string => 'Precio de venta '.self::por($get).($record->gravado ? ' · con ISV' : ''))
-                            ->numeric()
-                            ->minValue(0.01)
-                            ->prefix('L.')
-                            ->required()
-                            ->extraInputAttributes(['style' => self::ESTILO_MONTO])
-                            ->live(debounce: 400)
-                            ->afterStateUpdated(function (Get $get, Set $set, Producto $record): void {
-                                $venta = $get('precio_venta');
+                            ->schema([
+                                Hidden::make('id'),
+                                Hidden::make('contenido'),
+                                Hidden::make('precio_base'),
+                                TextInput::make('etiqueta')
+                                    ->disabled()
+                                    ->dehydrated(false),
+                                TextInput::make('precio')
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->prefix('L.')
+                                    ->required(fn (Get $get): bool => $get('modo') === self::FIJO)
+                                    ->extraInputAttributes(['style' => self::ESTILO_MONTO])
+                                    ->live(debounce: 400)
+                                    ->afterStateUpdated(function (Get $get, Set $set, Producto $record): void {
+                                        $venta = $get('precio');
 
-                                if (is_numeric($venta)) {
-                                    $set('precio_base', self::base((float) $venta, $record, self::factor($get('costo_por'), $record)));
-                                }
+                                        if (is_numeric($venta)) {
+                                            $set('precio_base', self::sinIsv((float) $venta, $record));
+                                        }
 
-                                // Un precio distinto al calculado lo puso la empresa: queda fijo.
-                                if (self::difiereDelSugerido($get, $record)) {
-                                    $set('modo_precio', self::FIJO);
-                                }
-                            })
-                            ->helperText(fn (Get $get, Producto $record): string => $get('modo_precio') === self::FIJO
-                                ? 'Queda fijo: las compras cambian el costo promedio, pero este precio solo cambia cuando usted lo cambie aquí.'
-                                : 'Sale del costo con el '.self::porcentaje($record->margenAplicado()).' de utilidad y se recalcula solo en cada compra. Si escribe otro precio, queda fijo.')
-                            ->hintAction(fn (Producto $record): Action => self::usarSugerido($record)),
+                                        // Un precio distinto al calculado lo puso la empresa: queda fijo.
+                                        $sugerido = self::sugeridoEnPantalla($get('../../costo_base'), $get('contenido'), $record);
+
+                                        if ($sugerido !== null && (! is_numeric($venta) || abs((float) $venta - $sugerido) >= 0.005)) {
+                                            $set('modo', self::FIJO);
+                                        }
+                                    }),
+                                ToggleButtons::make('modo')
+                                    ->options([self::CALCULADO => 'Calculado', self::FIJO => 'Fijo'])
+                                    ->icons([self::CALCULADO => Heroicon::OutlinedCalculator, self::FIJO => Heroicon::OutlinedLockClosed])
+                                    ->grouped()
+                                    ->required()
+                                    ->live()
+                                    ->afterStateUpdated(function (?string $state, Get $get, Set $set, Producto $record): void {
+                                        if ($state === self::CALCULADO) {
+                                            self::ponerSugerido($get('../../costo_base'), $get, $set, $record);
+                                        }
+                                    }),
+                            ]),
                         TextInput::make('nota')
                             ->label('Nota (opcional)')
                             ->placeholder('Ej: Factura 375448')
@@ -161,25 +183,19 @@ final class ActualizarPrecioAction
             ->action(function (array $data, Producto $record): void {
                 /** @var User|null $usuario */
                 $usuario = Auth::user();
-                $ventaAnterior = $record->precioUnidadConIsv();
-                $eraFijo = $record->precio_fijo;
-                $fijo = match ($data['modo_precio'] ?? null) {
-                    self::FIJO      => true,
-                    self::CALCULADO => false,
-                    default         => $eraFijo,
-                };
+                $record->loadMissing(['categoria', 'presentaciones.unidadMedida']);
+                $antes = collect(self::presentaciones($record))->mapWithKeys(fn (Presentacion $presentacion): array => [$presentacion->id => $presentacion->precioConIsv()])->all();
 
                 try {
-                    $valores = self::aGuardar($data, $record);
+                    $costo = self::costoAGuardar($data, $record);
 
-                    $cambio = app(ActualizarPrecioProducto::class)->ejecutar(
+                    $cambios = app(ActualizarPrecioProducto::class)->ejecutar(
                         $record,
-                        $valores['costo'],
-                        $valores['costo'] !== $record->costo_unidad ? MotivoCambioPrecio::Compra : MotivoCambioPrecio::Manual,
+                        $costo,
+                        abs($costo - $record->costo_unidad) >= 0.00005 ? MotivoCambioPrecio::Compra : MotivoCambioPrecio::Manual,
                         $usuario,
-                        $valores['precio'],
+                        self::preciosAGuardar($data, $record),
                         filled($data['nota'] ?? null) ? (string) $data['nota'] : null,
-                        precioFijo: $fijo,
                     );
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
@@ -187,22 +203,10 @@ final class ActualizarPrecioAction
                     return;
                 }
 
-                if ($cambio === null && $fijo !== $eraFijo) {
+                if ($cambios === []) {
                     Notification::make()
-                        ->title($fijo ? 'Ahora el precio es fijo' : 'Ahora el precio es calculado')
-                        ->body($fijo
-                            ? 'Las compras cambian el costo promedio, pero el precio de venta se queda en '.lempiras($record->precioUnidadConIsv()).' por unidad.'
-                            : 'En cada compra el precio se recalcula con el '.self::porcentaje($record->margenAplicado()).' sobre el costo promedio.')
-                        ->success()
-                        ->send();
-
-                    return;
-                }
-
-                if ($cambio === null) {
-                    Notification::make()
-                        ->title('No se guardó nada')
-                        ->body('El costo y el precio de venta ya estaban así.')
+                        ->title('Se guardó sin cambios de precio')
+                        ->body('El costo y los precios ya estaban así (si cambió algo entre fijo y calculado, ya quedó).')
                         ->info()
                         ->send();
 
@@ -210,56 +214,109 @@ final class ActualizarPrecioAction
                 }
 
                 Notification::make()
-                    ->title('Precio actualizado en todas las bodegas')
-                    ->body($record->codigo.': '.lempiras($ventaAnterior).' → '.lempiras(CalculadoraPrecio::conIsv($cambio->precio_nuevo, $record->gravado)).' por unidad'.($record->gravado ? ' (con ISV)' : '').'. '
-                        .($fijo ? 'Queda fijo: las compras no lo cambian.' : 'Se recalcula solo en cada compra.'))
+                    ->title('Precios actualizados en todas las bodegas')
+                    ->body(collect($cambios)
+                        ->filter(fn (CambioPrecio $cambio): bool => $cambio->presentacion !== null)
+                        ->map(fn (CambioPrecio $cambio): string => $cambio->presentacion?->sigla().': '.lempiras($antes[$cambio->presentacion_id] ?? 0).' → '.lempiras(CalculadoraPrecio::conIsv($cambio->precio_nuevo, $record->gravado)))
+                        ->implode(' · ').($record->gravado ? ' (con ISV).' : '.'))
                     ->success()
                     ->send();
             });
     }
 
     /**
-     * Lo que se guarda: los montos por unidad y sin ISV, a 4 decimales.
-     * Si quedaron igual que lo guardado se deja el guardado tal cual.
+     * Las que se venden, la más grande primero (si ninguna se vende, todas).
      *
-     * @param array<string, mixed> $data costo, precio_venta (en pantalla) y costo_base, precio_base
-     *
-     * @return array{costo: float, precio: float}
+     * @return list<Presentacion>
      */
-    private static function aGuardar(array $data, Producto $producto): array
+    private static function presentaciones(Producto $producto): array
+    {
+        $activas = $producto->presentacionesActivas();
+        $lista = $activas->isEmpty() ? $producto->presentaciones : $activas;
+
+        return array_values($lista->sortByDesc('contenido')->all());
+    }
+
+    private static function contenidoDe(mixed $presentacionId, Producto $producto): int
+    {
+        $presentacion = $producto->presentaciones->first(fn (Presentacion $p): bool => $p->id === (is_numeric($presentacionId) ? (int) $presentacionId : 0));
+
+        return $presentacion instanceof Presentacion ? $presentacion->contenido : 1;
+    }
+
+    /**
+     * El costo por unidad base sin ISV que se guarda; si quedó igual que lo guardado, el guardado.
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function costoAGuardar(array $data, Producto $producto): float
     {
         if (! is_numeric($data['costo'] ?? null) || ! is_numeric($data['costo_base'] ?? null) || (float) $data['costo_base'] < 0) {
             throw new ReglaNegocioException('Escriba el costo.');
         }
 
-        if (! is_numeric($data['precio_venta'] ?? null) || ! is_numeric($data['precio_base'] ?? null) || (float) $data['precio_base'] <= 0) {
-            throw new ReglaNegocioException('Escriba el precio de venta.');
-        }
+        $nuevo = round((float) $data['costo_base'], 4);
 
-        return [
-            'costo'  => self::oGuardado(round((float) $data['costo_base'], 4), $producto->costo_unidad),
-            'precio' => self::oGuardado(round((float) $data['precio_base'], 4), $producto->precio_unidad),
-        ];
-    }
-
-    private static function oGuardado(float $nuevo, float $guardado): float
-    {
-        return abs($nuevo - $guardado) < 0.00005 ? $guardado : $nuevo;
+        return abs($nuevo - $producto->costo_unidad) < 0.00005 ? $producto->costo_unidad : $nuevo;
     }
 
     /**
-     * Monto en pantalla (con ISV si es gravado, por caja o por unidad) → por unidad sin ISV, 6 decimales.
+     * Por presentación: las fijas con su precio (sin ISV) y las calculadas
+     * sin precio (lo saca ActualizarPrecioProducto).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<int, array{precio: float|null, fijo: bool}>
      */
-    private static function base(float $monto, Producto $producto, int $factor): float
+    private static function preciosAGuardar(array $data, Producto $producto): array
+    {
+        $precios = [];
+
+        foreach (array_values((array) ($data['presentaciones'] ?? [])) as $fila) {
+            if (! is_array($fila) || ! is_numeric($fila['id'] ?? null)) {
+                continue;
+            }
+
+            $presentacion = $producto->presentaciones->first(fn (Presentacion $p): bool => $p->id === (int) $fila['id']);
+
+            if (! $presentacion instanceof Presentacion) {
+                continue;
+            }
+
+            if (($fila['modo'] ?? null) !== self::FIJO) {
+                $precios[$presentacion->id] = ['precio' => null, 'fijo' => false];
+
+                continue;
+            }
+
+            if (! is_numeric($fila['precio_base'] ?? null) || (float) $fila['precio_base'] <= 0) {
+                throw new ReglaNegocioException("Escriba el precio de {$presentacion->sigla()}.");
+            }
+
+            $nuevo = round((float) $fila['precio_base'], 4);
+
+            $precios[$presentacion->id] = [
+                'precio' => abs($nuevo - $presentacion->precio) < 0.00005 ? $presentacion->precio : $nuevo,
+                'fijo'   => true,
+            ];
+        }
+
+        return $precios;
+    }
+
+    /**
+     * Monto en pantalla (con ISV si es gravado) → sin ISV, 6 decimales.
+     */
+    private static function sinIsv(float $monto, Producto $producto): float
     {
         $isv = $producto->gravado ? 1 + CalculadoraPrecio::tasaIsv() : 1.0;
 
-        return round($monto / $isv / max(1, $factor), 6);
+        return round($monto / $isv, 6);
     }
 
     /**
-     * Se escribió un costo: se guarda su base y, si el precio es calculado, el
-     * precio de venta se recalcula con el % de utilidad. Si es fijo, se queda.
+     * Se escribió un costo: se guarda por unidad base y las presentaciones
+     * calculadas se recalculan con el % de utilidad. Las fijas se quedan.
      */
     private static function alCambiarCosto(Get $get, Set $set, Producto $producto): void
     {
@@ -269,197 +326,151 @@ final class ActualizarPrecioAction
             return;
         }
 
-        $set('costo_base', self::base((float) $costo, $producto, self::factor($get('costo_por'), $producto)));
+        $base = round(self::sinIsv((float) $costo, $producto) / max(1, self::contenidoDe($get('costo_por'), $producto)), 6);
+        $set('costo_base', $base);
 
-        if ($get('modo_precio') !== self::FIJO) {
-            self::ponerSugerido($get, $set, $producto);
-        }
-    }
+        $filas = $get('presentaciones');
 
-    /**
-     * Pone el precio que da el % de utilidad con el costo escrito.
-     */
-    private static function ponerSugerido(Get $get, Set $set, Producto $producto): void
-    {
-        $sugerido = is_numeric($get('costo_base')) ? self::precioSugerido((float) $get('costo_base'), $producto) : null;
+        foreach (is_array($filas) ? $filas : [] as $clave => $fila) {
+            if (is_array($fila) && ($fila['modo'] ?? null) !== self::FIJO) {
+                $sugerido = self::precioSugerido($base, (int) ($fila['contenido'] ?? 1), $producto);
 
-        if ($sugerido !== null) {
-            $set('precio_base', $sugerido);
-            $set('precio_venta', CalculadoraPrecio::aPantalla($sugerido, $producto->gravado, self::factor($get('costo_por'), $producto)));
-        }
-    }
-
-    /**
-     * Al pasar de caja a unidad (o al revés) los dos montos se vuelven a mostrar
-     * desde su base por unidad: L. 594.49 la caja de 48 ⇄ L. 12.39 la unidad.
-     */
-    private static function convertir(?string $nuevo, ?string $anterior, Get $get, Set $set, Producto $producto): void
-    {
-        if ($producto->unidades_por_caja <= 1 || $nuevo === $anterior) {
-            return;
-        }
-
-        $factor = self::factor($nuevo, $producto);
-
-        foreach (['costo_base' => 'costo', 'precio_base' => 'precio_venta'] as $base => $campo) {
-            if (is_numeric($get($base))) {
-                $set($campo, CalculadoraPrecio::aPantalla((float) $get($base), $producto->gravado, $factor));
+                if ($sugerido !== null) {
+                    $set("presentaciones.{$clave}.precio_base", $sugerido);
+                    $set("presentaciones.{$clave}.precio", round(CalculadoraPrecio::conIsv($sugerido, $producto->gravado), 2));
+                }
             }
         }
     }
 
-    private static function factor(mixed $costoPor, Producto $producto): int
+    /**
+     * Pone en la fila el precio que da el % de utilidad con el costo escrito.
+     */
+    private static function ponerSugerido(mixed $costoBase, Get $get, Set $set, Producto $producto): void
     {
-        return $costoPor === 'caja' ? max(1, $producto->unidades_por_caja) : 1;
-    }
+        $sugerido = is_numeric($costoBase) ? self::precioSugerido((float) $costoBase, (int) $get('contenido'), $producto) : null;
 
-    private static function por(Get $get): string
-    {
-        return $get('costo_por') === 'caja' ? 'por caja' : 'por unidad';
+        if ($sugerido !== null) {
+            $set('precio_base', $sugerido);
+            $set('precio', round(CalculadoraPrecio::conIsv($sugerido, $producto->gravado), 2));
+        }
     }
 
     /**
-     * "MERHONSA · Código 740100167992 · caja de 48 · gravado · utilidad actual 14%".
+     * Precio sin ISV de la presentación que da el % de utilidad con ese costo por unidad.
      */
-    private static function ficha(Producto $producto): string
-    {
-        return collect([
-            $producto->proveedor->etiqueta(),
-            "Código {$producto->codigo}",
-            $producto->unidades_por_caja > 1 ? "caja de {$producto->unidades_por_caja}" : null,
-            $producto->gravado ? 'gravado (paga ISV)' : 'exento',
-            'utilidad actual '.self::porcentaje(CalculadoraPrecio::margenReal($producto->costo_unidad, $producto->precio_unidad)),
-            $producto->precio_fijo ? 'precio fijo' : null,
-        ])->filter()->implode(' · ');
-    }
-
-    /**
-     * Precio por unidad sin ISV que daría el % de utilidad de la categoría con ese costo.
-     */
-    private static function precioSugerido(float $costoBase, Producto $producto): ?float
+    private static function precioSugerido(float $costoBase, int $contenido, Producto $producto): ?float
     {
         if ($costoBase <= 0) {
             return null;
         }
 
         try {
-            return CalculadoraPrecio::precioVenta($costoBase, $producto->margenAplicado());
+            return CalculadoraPrecio::precioVenta(round($costoBase * max(1, $contenido), 4), $producto->margenAplicado());
         } catch (ReglaNegocioException) {
             return null;
         }
     }
 
+    private static function sugeridoEnPantalla(mixed $costoBase, mixed $contenido, Producto $producto): ?float
+    {
+        $sugerido = is_numeric($costoBase) ? self::precioSugerido((float) $costoBase, is_numeric($contenido) ? (int) $contenido : 1, $producto) : null;
+
+        return $sugerido === null ? null : round(CalculadoraPrecio::conIsv($sugerido, $producto->gravado), 2);
+    }
+
     /**
-     * El sugerido como se vería en pantalla (caja o unidad, con ISV si es gravado).
+     * "MERHONSA · Código 740100167992 · se cuenta en UN · gravado · utilidad 14%".
      */
-    private static function sugeridoEnPantalla(Get $get, Producto $producto): ?float
+    private static function ficha(Producto $producto): string
     {
-        $sugerido = is_numeric($get('costo_base')) ? self::precioSugerido((float) $get('costo_base'), $producto) : null;
-
-        return $sugerido === null ? null : CalculadoraPrecio::aPantalla($sugerido, $producto->gravado, self::factor($get('costo_por'), $producto));
-    }
-
-    private static function difiereDelSugerido(Get $get, Producto $producto): bool
-    {
-        $sugerido = self::sugeridoEnPantalla($get, $producto);
-
-        return $sugerido !== null && (! is_numeric($get('precio_venta')) || abs((float) $get('precio_venta') - $sugerido) >= 0.005);
+        return collect([
+            $producto->proveedor->etiqueta(),
+            "Código {$producto->codigo}",
+            'se cuenta en '.$producto->presentacionBase()->sigla(),
+            $producto->gravado ? 'gravado (paga ISV)' : 'exento',
+            'utilidad '.self::porcentaje($producto->margenAplicado()),
+        ])->filter()->implode(' · ');
     }
 
     /**
-     * Enlace arriba del precio cuando se cambió a mano: "Usar 14%: L. 594.49" lo regresa al sugerido (calculado).
-     */
-    private static function usarSugerido(Producto $producto): Action
-    {
-        return Action::make('usarSugerido')
-            ->label(fn (Get $get): string => 'Usar '.self::porcentaje($producto->margenAplicado()).': '.lempiras(self::sugeridoEnPantalla($get, $producto) ?? 0))
-            ->icon(Heroicon::OutlinedSparkles)
-            ->visible(fn (Get $get): bool => self::difiereDelSugerido($get, $producto))
-            ->action(function (Get $get, Set $set) use ($producto): void {
-                self::ponerSugerido($get, $set, $producto);
-                $set('modo_precio', self::CALCULADO);
-            });
-    }
-
-    /**
-     * Datos para la tarjeta de la derecha; todo por unidad y con ISV si es gravado.
+     * Datos para la tarjeta de la derecha: por presentación, precio con ISV,
+     * utilidad, ganancia y cuánto cambia contra hoy.
      *
      * @return array<string, mixed>
      */
     private static function resultado(Get $get, Producto $producto): array
     {
-        try {
-            $valores = self::aGuardar([
-                'costo'        => $get('costo'),
-                'costo_base'   => $get('costo_base'),
-                'precio_venta' => $get('precio_venta'),
-                'precio_base'  => $get('precio_base'),
-            ], $producto);
-        } catch (ReglaNegocioException $e) {
-            return ['mensaje' => $e->getMessage().' La cuenta sale aquí.'];
+        $costoBase = $get('costo_base');
+
+        if (! is_numeric($get('costo')) || ! is_numeric($costoBase)) {
+            return ['mensaje' => 'Escriba el costo. La cuenta sale aquí.'];
         }
 
         $gravado = $producto->gravado;
-        $uxc = max(1, $producto->unidades_por_caja);
-        $venta = CalculadoraPrecio::conIsv($valores['precio'], $gravado);
-        $costoPagado = CalculadoraPrecio::conIsv($valores['costo'], $gravado);
-        $ganancia = $venta - $costoPagado;
-        $margen = CalculadoraPrecio::margenReal($valores['costo'], $valores['precio']);
-
-        $hoy = $producto->precioUnidadConIsv();
-        $diferencia = round($venta - $hoy, 2);
-
-        [$tono, $cambio] = match (true) {
-            abs($diferencia) < 0.005 => ['igual', 'Queda igual que hoy'],
-            $diferencia > 0          => ['sube', 'Sube '.lempiras($diferencia).self::variacion($diferencia, $hoy)],
-            default                  => ['baja', 'Baja '.lempiras(abs($diferencia)).self::variacion($diferencia, $hoy)],
-        };
-
-        // Un cambio de más del 25% (en precio o en costo) casi siempre es un error de dedo o de caja/unidad.
         $costoHoy = CalculadoraPrecio::conIsv($producto->costo_unidad, $gravado);
-        $precioExagerado = $hoy > 0 && abs($diferencia) / $hoy > self::CAMBIO_SOSPECHOSO;
-        $costoExagerado = $costoHoy > 0 && abs($costoPagado - $costoHoy) / $costoHoy > self::CAMBIO_SOSPECHOSO;
+        $costoNuevo = CalculadoraPrecio::conIsv(round((float) $costoBase, 4), $gravado);
+        $costoExagerado = $costoHoy > 0 && abs($costoNuevo - $costoHoy) / $costoHoy > self::CAMBIO_SOSPECHOSO;
+        $filas = [];
+        $bajoCosto = false;
+        $exagerado = false;
+
+        foreach ((array) $get('presentaciones') as $fila) {
+            if (! is_array($fila)) {
+                continue;
+            }
+
+            $presentacion = $producto->presentaciones->first(fn (Presentacion $p): bool => $p->id === (is_numeric($fila['id'] ?? null) ? (int) $fila['id'] : 0));
+
+            if (! $presentacion instanceof Presentacion) {
+                continue;
+            }
+
+            $contenido = $presentacion->contenido;
+            $costo = round((float) $costoBase * $contenido, 4);
+            $precio = is_numeric($fila['precio_base'] ?? null) ? round((float) $fila['precio_base'], 4) : 0.0;
+            $venta = CalculadoraPrecio::conIsv($precio, $gravado);
+            $hoy = $presentacion->precioConIsv();
+            $ganancia = $venta - CalculadoraPrecio::conIsv($costo, $gravado);
+            $diferencia = round($venta - $hoy, 2);
+
+            $bajoCosto = $bajoCosto || ($precio > 0 && $ganancia < 0);
+            $exagerado = $exagerado || ($hoy > 0 && abs($diferencia) / $hoy > self::CAMBIO_SOSPECHOSO);
+
+            $filas[] = [
+                'sigla'    => $presentacion->sigla(),
+                'nombre'   => $presentacion->nombre(),
+                'venta'    => $precio > 0 ? lempiras($venta) : 'Sin precio',
+                'sinIsv'   => lempiras($precio),
+                'margen'   => self::porcentaje(CalculadoraPrecio::margenReal($costo, $precio)),
+                'ganancia' => lempiras($ganancia),
+                'hoy'      => $hoy > 0 ? lempiras($hoy) : '—',
+                'tono'     => match (true) {
+                    abs($diferencia) < 0.005 => 'igual',
+                    $diferencia > 0          => 'sube',
+                    default                  => 'baja',
+                },
+                'cambio' => abs($diferencia) < 0.005 ? 'igual' : ($diferencia > 0 ? '+' : '−').lempiras(abs($diferencia)),
+                'fijo'   => ($fila['modo'] ?? null) === self::FIJO,
+            ];
+        }
 
         $avisos = array_filter([
-            $ganancia < 0 ? 'Está vendiendo por debajo del costo.' : null,
-            $precioExagerado || $costoExagerado
-                ? 'Es un cambio muy grande contra hoy (costo '.lempiras($costoHoy, 2).' por unidad). Revise los montos y si son por caja o por unidad.'
+            $bajoCosto ? 'Hay una presentación por debajo del costo.' : null,
+            $exagerado || $costoExagerado
+                ? 'Es un cambio muy grande contra hoy (costo '.lempiras($costoHoy, 4).' por '.$producto->presentacionBase()->sigla().'). Revise los montos y la presentación del costo.'
                 : null,
         ]);
 
         return [
-            'mensaje'      => null,
-            'gravado'      => $gravado,
-            'venta'        => lempiras($venta),
-            'sinIsv'       => lempiras($valores['precio']),
-            'uxc'          => $uxc > 1 ? $uxc : null,
-            'caja'         => lempiras(CalculadoraPrecio::aPantalla($valores['precio'], $gravado, $uxc)),
-            'cajaSin'      => lempiras($valores['precio'] * $uxc),
-            'costo'        => lempiras($costoPagado, 4),
-            'costoNeto'    => lempiras($valores['costo'], 4),
-            'margen'       => self::porcentaje($margen),
-            'ganancia'     => lempiras($ganancia),
-            'gananciaCaja' => $uxc > 1 ? lempiras($ganancia * $uxc) : null,
-            'hoy'          => lempiras($hoy),
-            'tono'         => $precioExagerado ? 'alerta' : $tono,
-            'cambio'       => $cambio,
-            'aviso'        => $avisos === [] ? null : implode(' ', $avisos),
-            'modo'         => $get('modo_precio') === self::FIJO
-                ? 'Precio fijo: las compras cambian el costo promedio, no este precio.'
-                : 'Precio calculado: se recalcula solo en cada compra.',
+            'mensaje'   => null,
+            'gravado'   => $gravado,
+            'filas'     => $filas,
+            'costo'     => lempiras($costoNuevo, 4),
+            'costoNeto' => lempiras(round((float) $costoBase, 4), 4),
+            'base'      => $producto->presentacionBase()->sigla(),
+            'aviso'     => $avisos === [] ? null : implode(' ', $avisos),
         ];
-    }
-
-    /**
-     * " (+4.64%)" o " (−3.1%)" contra el precio de hoy.
-     */
-    private static function variacion(float $diferencia, float $hoy): string
-    {
-        if ($hoy <= 0) {
-            return '';
-        }
-
-        return ' ('.($diferencia > 0 ? '+' : '−').self::porcentaje(abs($diferencia) / $hoy).')';
     }
 
     /**

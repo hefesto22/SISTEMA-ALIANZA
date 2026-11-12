@@ -38,6 +38,7 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Ruta', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Proveedor', self::TODO),
                 ...$this->permisos('Categoria', ['viewAny', 'view', 'create', 'update', 'delete']),
+                ...$this->permisos('UnidadMedida', ['viewAny', 'view', 'create', 'update']),
                 ...$this->permisos('Producto', [...self::TODO, 'ajustarExistencia']),
                 ...$this->permisos('CambioPrecio', ['viewAny', 'view']),
                 ...$this->permisos('Compra', ['viewAny', 'view', 'create']),

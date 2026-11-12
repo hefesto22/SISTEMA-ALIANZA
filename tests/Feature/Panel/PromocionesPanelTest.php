@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Promociones\Pages\ManagePromociones;
 use App\Filament\Resources\Promociones\PromocionResource;
@@ -33,7 +32,7 @@ beforeEach(function (): void {
     $this->vendedor->assignRole(Rol::Vendedor->value);
 
     $this->toffee = Producto::factory()->precio(20.0, 30.0)->create(['descripcion' => 'BUTTER TOFFEE 12X100G']);
-    $this->nutrine = Producto::factory()->precio(20.0, 25.30)->create(['descripcion' => 'BABY NUTRINE 24X50G']);
+    $this->nutrine = Producto::factory()->precio(20.0, 25.30)->conCaja(24)->create(['descripcion' => 'BABY NUTRINE 24X50G']);
 });
 
 test('administración crea un combo y se le genera el código', function (): void {
@@ -46,15 +45,15 @@ test('administración crea un combo y se le genera el código', function (): voi
         ->callAction('create', data: [
             'nombre'      => 'Toffee + Nutrine',
             'condiciones' => [
-                ['producto_id' => $this->toffee->id, 'cantidad' => 2, 'unidad' => UnidadVenta::Caja->value],
-                ['producto_id' => $this->nutrine->id, 'cantidad' => 1, 'unidad' => UnidadVenta::Caja->value],
+                ['producto_id' => $this->toffee->id, 'cantidad' => 2, 'presentacion_id' => caja($this->toffee)->id],
+                ['producto_id' => $this->nutrine->id, 'cantidad' => 1, 'presentacion_id' => caja($this->nutrine)->id],
             ],
-            'producto_beneficio_id' => $baby->id,
-            'cantidad_beneficio'    => 1,
-            'beneficio_unidad'      => UnidadVenta::Unidad->value,
-            'tipo'                  => 'mitad',
-            'activa'                => true,
-            'bodegas'               => [$this->bodega->id],
+            'producto_beneficio_id'     => $baby->id,
+            'cantidad_beneficio'        => 1,
+            'beneficio_presentacion_id' => presentacion($baby)->id,
+            'tipo'                      => 'mitad',
+            'activa'                    => true,
+            'bodegas'                   => [$this->bodega->id],
         ])
         ->assertHasNoActionErrors();
 
@@ -69,7 +68,9 @@ test('administración crea un combo y se le genera el código', function (): voi
         ->and($promo->created_by)->toBe($this->admin->id)
         ->and($promo->activa)->toBeTrue()
         ->and($promo->condiciones->pluck('producto_id')->all())->toBe([$this->toffee->id, $this->nutrine->id])
-        ->and($promo->resumen())->toBe('Compra 2 cajas de BUTTER TOFFEE 12X100G + 1 caja de BABY NUTRINE 24X50G → 1 unidad de BABY CREMA 12X100ML a mitad de precio');
+        ->and($promo->condiciones->pluck('presentacion_id')->all())->toBe([caja($this->toffee)->id, caja($this->nutrine)->id])
+        ->and($promo->beneficio_presentacion_id)->toBe(presentacion($baby)->id)
+        ->and($promo->resumen())->toBe('Compra 2 cajas de 12 de BUTTER TOFFEE 12X100G + 1 caja de 24 de BABY NUTRINE 24X50G → 1 unidad de BABY CREMA 12X100ML a mitad de precio');
 });
 
 test('el encargado crea promociones solo para su bodega', function (): void {
@@ -86,13 +87,13 @@ test('el encargado crea promociones solo para su bodega', function (): void {
         ->callAction('create', data: [
             'nombre'      => 'Toffee de la bodega',
             'condiciones' => [
-                ['producto_id' => $this->toffee->id, 'cantidad' => 1, 'unidad' => UnidadVenta::Caja->value],
+                ['producto_id' => $this->toffee->id, 'cantidad' => 1, 'presentacion_id' => caja($this->toffee)->id],
             ],
-            'producto_beneficio_id' => $this->nutrine->id,
-            'cantidad_beneficio'    => 1,
-            'beneficio_unidad'      => UnidadVenta::Unidad->value,
-            'tipo'                  => 'gratis',
-            'activa'                => true,
+            'producto_beneficio_id'     => $this->nutrine->id,
+            'cantidad_beneficio'        => 1,
+            'beneficio_presentacion_id' => presentacion($this->nutrine)->id,
+            'tipo'                      => 'gratis',
+            'activa'                    => true,
         ])
         ->assertHasNoActionErrors();
 
@@ -156,8 +157,8 @@ test('la preventa muestra las promociones y el pedido sale con el descuento', fu
             'cliente_id' => $cliente->id,
             'fecha'      => now()->toDateString(),
             'items'      => [
-                ['producto_id' => $this->toffee->id, 'unidad' => UnidadVenta::Unidad->value, 'cantidad' => 1],
-                ['producto_id' => $this->nutrine->id, 'unidad' => UnidadVenta::Unidad->value, 'cantidad' => 1],
+                ['producto_id' => $this->toffee->id, 'presentacion_id' => presentacion($this->toffee)->id, 'cantidad' => 1],
+                ['producto_id' => $this->nutrine->id, 'presentacion_id' => presentacion($this->nutrine)->id, 'cantidad' => 1],
             ],
         ])
         ->call('create')

@@ -9,7 +9,6 @@ use App\Domain\Pedidos\ValidarDespacho;
 use App\Enums\EstadoPedido;
 use App\Enums\ModoImpresion;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Actions\LineasPedido;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Pedidos\Pages\EditPedido;
@@ -46,7 +45,7 @@ beforeEach(function (): void {
     $this->encargadoOtra = User::factory()->create(['bodega_id' => $this->otraBodega->id]);
     $this->encargadoOtra->assignRole(Rol::Bodega->value);
 
-    $this->producto = Producto::factory()->precio(80.0, 100.0)->create(['unidades_por_caja' => 12]);
+    $this->producto = Producto::factory()->precio(80.0, 100.0)->create();
 });
 
 /**
@@ -61,7 +60,7 @@ function pedidoDeAlcance(Bodega $bodega, User $vendedor, Producto $producto): Pe
         'fecha'       => now(),
     ]);
 
-    $pedido->items()->create(['producto_id' => $producto->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 2]);
+    $pedido->items()->create(['producto_id' => $producto->id, 'presentacion_id' => presentacion($producto)->id, 'cantidad' => 2]);
 
     return app(RecalcularPedido::class)->ejecutar($pedido);
 }
@@ -91,7 +90,7 @@ test('el encargado solo escoge vendedores de su bodega', function (): void {
         'vendedor_id' => $vendedor->id,
         'fecha'       => now()->toDateString(),
         'items'       => [
-            ['producto_id' => $this->producto->id, 'unidad' => UnidadVenta::Unidad->value, 'cantidad' => 1],
+            ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto)->id, 'cantidad' => 1],
         ],
     ];
 
@@ -208,8 +207,8 @@ test('el vendedor ve sus pedidos solo mientras están pendientes; ya validados s
 test('el encargado busca y agrega al validar un producto que no venía en el pedido', function (): void {
     $pedido = pedidoDeAlcance($this->bodega, $this->vendedor, $this->producto);
 
-    // Gravado: L 30 la unidad, caja de 6 = L 180. No hay en la bodega: sale 1 caja.
-    $sal = Producto::factory()->precio(20.0, 30.0)->create(['descripcion' => 'ZZSAL DE MESA 6X1KG', 'unidades_por_caja' => 6]);
+    // Gravado: L 30 la unidad, CJ6 = L 180. No hay en la bodega: sale 1 CJ6 (la más grande).
+    $sal = Producto::factory()->precio(20.0, 30.0)->conCaja(6)->create(['descripcion' => 'ZZSAL DE MESA 6X1KG']);
 
     $this->actingAs($this->encargado);
 
@@ -231,7 +230,8 @@ test('el encargado busca y agrega al validar un producto que no venía en el ped
     // 2 × 100 = 200 (+30 ISV) y 1 caja × 180 = 180 (+27 ISV) → 437
     expect($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
         ->and($agregada->cantidad)->toBe(0)
-        ->and($agregada->unidad)->toBe(UnidadVenta::Caja)
+        ->and($agregada->presentacion_id)->toBe(caja($sal)->id)
+        ->and($agregada->contenido)->toBe(6)
         ->and($agregada->cantidad_despachada)->toBe(1)
         ->and($pedido->fresh()?->total)->toBe(437.0);
 });

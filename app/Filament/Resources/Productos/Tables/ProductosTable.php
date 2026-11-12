@@ -9,12 +9,11 @@ use App\Filament\Resources\Productos\Actions\ActualizarPrecioAction;
 use App\Filament\Resources\Productos\Actions\AjustarExistenciaAction;
 use App\Filament\Resources\Productos\ProductoResource;
 use App\Filament\Support\Acceso;
-use App\Models\Existencia;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -23,10 +22,10 @@ use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Lista de precios: una fila por producto con lo que el vendedor necesita
- * de un vistazo. El precio grande es el de venta al cliente (con ISV si es
- * gravado); abajo, chiquito, el precio sin ISV. Administración/bodega ven
- * además el costo (con ISV si es gravado) y la utilidad que de verdad deja.
- * El precio fijo (puesto a mano, las compras no lo cambian) lleva candado.
+ * de un vistazo: el precio de venta al cliente de cada presentación que se
+ * vende (con ISV si es gravado): "UN L 12.39", "CJ12 L 148.68"…; el fijo
+ * (puesto a mano, las compras no lo cambian) lleva "fijo". Administración y
+ * bodega ven además el costo por unidad (con ISV si es gravado).
  */
 class ProductosTable
 {
@@ -53,10 +52,7 @@ class ProductosTable
                     ->badge()
                     ->color('gray')
                     ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('unidades_por_caja')
-                    ->label('UxC')
-                    ->alignCenter()
-                    ->color('gray'),
+
                 TextColumn::make('gravado')
                     ->label('ISV')
                     ->badge()
@@ -67,30 +63,22 @@ class ProductosTable
                 TextColumn::make('costo_unidad')
                     ->label('Costo')
                     ->formatStateUsing(fn (Producto $record): string => lempiras(CalculadoraPrecio::conIsv($record->costo_unidad, $record->gravado), 4))
-                    ->description(fn (Producto $record): string => self::porcentaje(CalculadoraPrecio::margenReal($record->costo_unidad, $record->precio_unidad)).' util.')
-                    ->tooltip(fn (Producto $record): ?string => $record->gravado ? 'Costo por unidad con ISV' : null)
+                    ->description(fn (Producto $record): string => 'por '.$record->presentacionBase()->sigla().' · '.self::porcentaje($record->margenAplicado()).' util.')
+                    ->tooltip(fn (Producto $record): ?string => $record->gravado ? 'Costo por unidad base con ISV' : null)
                     ->alignEnd()
                     ->color('gray')
                     ->visible($verCostos),
-                TextColumn::make('precio_unidad')
-                    ->label('Unidad')
-                    ->formatStateUsing(fn (Producto $record): string => lempiras($record->precioUnidadConIsv()))
-                    ->description(fn (Producto $record): string => ($verCostos && $record->precio_fijo ? 'fijo · ' : '').($record->gravado ? 'sin ISV '.lempiras($record->precio_unidad) : 'exento'))
-                    ->icon(fn (Producto $record): ?Heroicon => $verCostos && $record->precio_fijo ? Heroicon::OutlinedLockClosed : null)
-                    ->tooltip(fn (Producto $record): ?string => $verCostos && $record->precio_fijo ? 'Precio fijo, puesto a mano: las compras cambian el costo, no este precio' : null)
-                    ->sortable()
+                TextColumn::make('precios')
+                    ->label('Precios')
+                    ->state(fn (Producto $record): array => self::precios($record, $verCostos))
+                    ->listWithLineBreaks()
+                    ->html()
                     ->alignEnd()
                     ->weight('bold')
                     ->color('primary'),
-                TextColumn::make('precio_caja')
-                    ->label('Caja')
-                    ->state(fn (Producto $record): string => lempiras($record->precioCajaConIsv()))
-                    ->description(fn (Producto $record): string => $record->gravado ? 'sin ISV '.lempiras($record->precioCaja()) : 'exento')
-                    ->alignEnd()
-                    ->weight('bold'),
                 TextColumn::make('existencia')
                     ->label('Existencia')
-                    ->state(fn (Producto $record): string => Existencia::enCajas(self::existencia($record), $record->unidades_por_caja))
+                    ->state(fn (Producto $record): string => $record->existenciaEnTexto(self::existencia($record)))
                     ->description(fn (): ?string => Acceso::veTodo() ? 'todas las bodegas' : null)
                     ->color(fn (Producto $record): string => self::existencia($record) > 0 ? 'success' : 'danger')
                     ->weight('semibold')
@@ -121,8 +109,12 @@ class ProductosTable
                     ->falseLabel('Exentos (E)'),
                 TernaryFilter::make('precio_fijo')
                     ->label('Precio de venta')
-                    ->trueLabel('Fijo (puesto a mano)')
-                    ->falseLabel('Calculado con el %')
+                    ->trueLabel('Con alguno fijo (puesto a mano)')
+                    ->falseLabel('Todos calculados con el %')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereHas('presentaciones', fn (Builder $q): Builder => $q->where('precio_fijo', true)),
+                        false: fn (Builder $query): Builder => $query->whereDoesntHave('presentaciones', fn (Builder $q): Builder => $q->where('precio_fijo', true)),
+                    )
                     ->visible($verCostos),
                 TernaryFilter::make('activo')
                     ->label('Estado')
@@ -138,6 +130,21 @@ class ProductosTable
                     EditAction::make(),
                 ]),
             ]);
+    }
+
+    /**
+     * "UN · L 12.39", "CJ12 · L 148.68 · fijo" de las que se venden (sin
+     * precio: "CJ12 · sin precio").
+     *
+     * @return list<string>
+     */
+    private static function precios(Producto $producto, bool $verCostos): array
+    {
+        return array_values($producto->presentacionesActivas()
+            ->map(fn (Presentacion $presentacion): string => e($presentacion->sigla()).' · '
+                .($presentacion->precio > 0 ? e(lempiras($presentacion->precioConIsv())) : '<span style="color:var(--danger-600)">sin precio</span>')
+                .($verCostos && $presentacion->precio_fijo ? ' <span style="opacity:.6;font-weight:500">· fijo</span>' : ''))
+            ->all());
     }
 
     /**

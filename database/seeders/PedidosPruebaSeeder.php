@@ -6,10 +6,10 @@ namespace Database\Seeders;
 
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Models\Cliente;
 use App\Models\Factura;
 use App\Models\Pedido;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,7 +18,7 @@ use Illuminate\Database\Seeder;
 
 /**
  * 10 pedidos de PRUEBA, todos pendientes, con distintos productos (por
- * unidad y por caja); uno es fuera de ruta. Los precios salen del
+ * unidad y en su presentación más grande); uno es fuera de ruta. Los precios salen del
  * catálogo, como en la preventa.
  *
  * Necesita clientes (ClientesPruebaSeeder), vendedores con bodega
@@ -57,7 +57,12 @@ class PedidosPruebaSeeder extends Seeder
             return;
         }
 
-        $productos = Producto::query()->activos()->where('precio_unidad', '>', 0)->orderBy('id')->get();
+        $productos = Producto::query()
+            ->activos()
+            ->whereHas('presentaciones', fn (Builder $presentaciones): Builder => $presentaciones->where('es_base', true)->where('activo', true)->where('precio', '>', 0))
+            ->with('presentaciones.unidadMedida')
+            ->orderBy('id')
+            ->get();
 
         if ($productos->count() < 6) {
             $this->command?->warn('Se necesitan al menos 6 productos con precio: corra CatalogoSeeder.');
@@ -100,8 +105,8 @@ class PedidosPruebaSeeder extends Seeder
 
             $pedido->forceFill(['created_at' => $cuando, 'updated_at' => $cuando])->saveQuietly();
 
-            foreach (self::lineas($productos, $n, $lineas) as [$producto, $unidad, $cantidad]) {
-                $pedido->items()->create(['producto_id' => $producto->id, 'unidad' => $unidad, 'cantidad' => $cantidad]);
+            foreach (self::lineas($productos, $n, $lineas) as [$producto, $presentacion, $cantidad]) {
+                $pedido->items()->create(['producto_id' => $producto->id, 'presentacion_id' => $presentacion->id, 'cantidad' => $cantidad]);
             }
 
             app(RecalcularPedido::class)->ejecutar($pedido, preciosVigentes: true);
@@ -137,11 +142,11 @@ class PedidosPruebaSeeder extends Seeder
     }
 
     /**
-     * Productos distintos en cada pedido; algunas líneas por caja.
+     * Productos distintos en cada pedido; algunas líneas en su presentación más grande.
      *
      * @param Collection<int, Producto> $productos
      *
-     * @return list<array{Producto, UnidadVenta, int}>
+     * @return list<array{Producto, Presentacion, int}>
      */
     private static function lineas(Collection $productos, int $n, int $cuantas): array
     {
@@ -155,11 +160,12 @@ class PedidosPruebaSeeder extends Seeder
                 continue;
             }
 
-            $porCaja = ($n + $j) % 3 === 0 && $producto->unidades_por_caja > 1;
+            $caja = $producto->presentacionMayor();
+            $porCaja = ($n + $j) % 3 === 0 && $caja !== null && $caja->precio > 0;
 
             $elegidas[$producto->id] = [
                 $producto,
-                $porCaja ? UnidadVenta::Caja : UnidadVenta::Unidad,
+                $porCaja ? $caja : $producto->presentacionBase(),
                 $porCaja ? 1 + ($n + $j) % 3 : 2 + ($n * 3 + $j * 5) % 11,
             ];
         }

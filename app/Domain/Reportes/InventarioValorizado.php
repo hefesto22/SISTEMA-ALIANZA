@@ -102,7 +102,7 @@ final class InventarioValorizado
                 detalle: self::texto($primera->proveedor),
                 productos: 1,
                 unidades: $unidades,
-                existencia: Existencia::enCajas($unidades, (int) $primera->unidades_por_caja),
+                existencia: Existencia::enCajas($unidades, (int) $primera->uxc, (string) $primera->caja.(int) $primera->uxc, (string) $primera->base),
                 costoUnidad: (float) $primera->costo_unidad,
                 precioUnidad: (float) $primera->precio_unidad,
                 invertido: $suma['invertido'],
@@ -260,10 +260,16 @@ final class InventarioValorizado
 
         /** @var list<stdClass> $filas */
         $filas = DB::select(<<<SQL
-            SELECT p.id, p.codigo, p.descripcion, p.unidades_por_caja, p.gravado, p.costo_unidad, p.precio_unidad, p.precio_fijo, p.activo,
+            SELECT p.id, p.codigo, p.descripcion, p.gravado, p.costo_unidad, p.activo,
+                COALESCE(mx.contenido, 1) AS uxc, mx.codigo AS caja, ub.codigo AS base,
+                COALESCE(NULLIF(pb.precio, 0), ROUND(mx.precio / mx.contenido, 4), 0) AS precio_unidad, pb.precio_fijo,
                 COALESCE(NULLIF(pv.nombre_corto, ''), pv.nombre) AS proveedor, b.nombre AS bodega, e.cantidad
             FROM productos p
             JOIN proveedores pv ON pv.id = p.proveedor_id
+            JOIN presentaciones pb ON pb.producto_id = p.id AND pb.es_base
+            JOIN unidades_medida ub ON ub.id = pb.unidad_medida_id
+            LEFT JOIN LATERAL (SELECT pz.contenido, pz.precio, um.codigo FROM presentaciones pz JOIN unidades_medida um ON um.id = pz.unidad_medida_id
+                WHERE pz.producto_id = p.id AND pz.activo AND pz.contenido > 1 ORDER BY pz.contenido DESC, pz.id LIMIT 1) mx ON TRUE
             LEFT JOIN existencias e ON e.producto_id = p.id{$deBodega}
             LEFT JOIN bodegas b ON b.id = e.bodega_id
             WHERE TRUE{$condiciones}

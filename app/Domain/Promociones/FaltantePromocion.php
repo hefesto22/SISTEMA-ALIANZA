@@ -4,24 +4,25 @@ declare(strict_types=1);
 
 namespace App\Domain\Promociones;
 
-use App\Enums\UnidadVenta;
+use App\Models\Presentacion;
 use App\Models\Promocion;
 
 /**
  * El cliente ya cumple la condición, pero en el pedido falta (todo o parte
- * de) el producto de regalo. Sirve para avisarle al vendedor.
+ * de) el producto de regalo. Sirve para avisarle al vendedor. La cantidad
+ * es en esa presentación (la del regalo, o la base si no da cabal).
  */
 final readonly class FaltantePromocion
 {
     public function __construct(
         public Promocion $promocion,
         public int $cantidad,
-        public UnidadVenta $unidad,
+        public Presentacion $presentacion,
     ) {}
 
     public function texto(): string
     {
-        $cantidad = Promocion::cantidadTexto($this->cantidad, $this->unidad);
+        $cantidad = $this->presentacion->enPalabras($this->cantidad);
         $producto = $this->promocion->productoBeneficio->descripcion;
 
         if ($this->promocion->regaloEnCondicion()) {

@@ -16,7 +16,6 @@ use App\Enums\MotivoCambioPrecio;
 use App\Enums\PrecioAlDespachar;
 use App\Enums\Rol;
 use App\Enums\TipoMovimiento;
-use App\Enums\UnidadVenta;
 use App\Filament\Pages\BrandingSettingsPage;
 use App\Filament\Resources\Compras\Pages\CreateCompra;
 use App\Filament\Resources\Compras\Pages\ListCompras;
@@ -33,6 +32,7 @@ use App\Models\Configuracion;
 use App\Models\Existencia;
 use App\Models\MovimientoInventario;
 use App\Models\Pedido;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils;
@@ -62,15 +62,16 @@ beforeEach(function (): void {
     $this->vendedor = User::factory()->create(['bodega_id' => $this->bodega->id]);
     $this->vendedor->assignRole(Rol::Vendedor->value);
 
-    // L 80 la unidad sin ISV con 20 % de margen → L 100. Caja de 12, gravado.
-    $this->producto = Producto::factory()->precio(80.0, 100.0)->create(['margen' => 0.20, 'unidades_por_caja' => 12, 'gravado' => true]);
+    // L 80 la unidad sin ISV con 20 % de margen → UN a L 100 y CJ12 a L 1,200. Gravado.
+    $this->producto = Producto::factory()->precio(80.0, 100.0)->create(['margen' => 0.20, 'gravado' => true]);
     $this->proveedor = $this->producto->proveedor;
 });
 
 /**
- * Pedido pendiente en la bodega con las líneas dadas: [[producto, unidad, cantidad], …].
+ * Pedido pendiente en la bodega con las líneas dadas: [[producto, lo que
+ * trae la presentación (1 = UN, 12 = CJ12), cantidad], …].
  *
- * @param list<array{0: Producto, 1: UnidadVenta, 2: int}> $lineas
+ * @param list<array{0: Producto, 1: int, 2: int}> $lineas
  */
 function pedidoDeInventario(Bodega $bodega, User $vendedor, array $lineas): Pedido
 {
@@ -81,8 +82,8 @@ function pedidoDeInventario(Bodega $bodega, User $vendedor, array $lineas): Pedi
         'fecha'       => now(),
     ]);
 
-    foreach ($lineas as [$producto, $unidad, $cantidad]) {
-        $pedido->items()->create(['producto_id' => $producto->id, 'unidad' => $unidad, 'cantidad' => $cantidad]);
+    foreach ($lineas as [$producto, $contenido, $cantidad]) {
+        $pedido->items()->create(['producto_id' => $producto->id, 'presentacion_id' => presentacion($producto, $contenido)->id, 'cantidad' => $cantidad]);
     }
 
     return app(RecalcularPedido::class)->ejecutar($pedido);
@@ -110,35 +111,40 @@ test('las unidades se muestran en cajas y sueltas', function (): void {
         ->and(Existencia::enCajas(5, 12))->toBe('5 UN')
         ->and(Existencia::enCajas(7, 1))->toBe('7 UN')
         ->and(Existencia::enCajas(-15, 12))->toBe('-1 CJ + 3 UN')
-        ->and(Existencia::enCajas(0, 12))->toBe('0');
+        ->and(Existencia::enCajas(0, 12))->toBe('0')
+        ->and(Existencia::enCajas(29, 6, 'FD6', 'UN'))->toBe('4 FD6 + 5 UN')
+        ->and($this->producto->existenciaEnTexto(29))->toBe('2 CJ12 + 5 UN');
 });
 
 test('costo promedio: mezcla lo que hay en todas las bodegas con lo que entra, y el precio sube con el margen', function (): void {
     // Ya hay 24 a L 80 en Santa Rosa; entran 24 a L 100 en Ocotepeque.
     app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 24, $this->admin, 'conteo inicial');
 
-    // 2 cajas a L 1,380 c/u con ISV = 1,380 ÷ 1.15 ÷ 12 = L 100 la unidad sin ISV.
+    // 2 CJ12 a L 1,380 c/u con ISV = 1,380 ÷ 1.15 ÷ 12 = L 100 la unidad sin ISV.
     $compra = app(RegistrarCompra::class)->ejecutar($this->otra, $this->proveedor, [
-        ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2, 'costo' => 1380.0],
+        ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 2, 'costo' => 1380.0],
     ], $this->admin, 'A-0001');
 
     $producto = $this->producto->fresh();
     $item = $compra->items()->sole();
 
-    // (24 × 80 + 24 × 100) ÷ 48 = 90 → 90 ÷ (1 − 20 %) = 112.50
+    // (24 × 80 + 24 × 100) ÷ 48 = 90 → UN: 90 ÷ (1 − 20 %) = 112.50; CJ12: 1,080 ÷ 0.8 = 1,350.
     expect($producto?->costo_unidad)->toBe(90.0)
-        ->and($producto?->precio_unidad)->toBe(112.5)
+        ->and(presentacion($this->producto)->precio)->toBe(112.5)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(1350.0)
         ->and(Existencia::en($this->bodega->id, $this->producto->id))->toBe(24)
         ->and(Existencia::en($this->otra->id, $this->producto->id))->toBe(24)
         ->and($compra->numero)->toBe('COM-'.str_pad((string) $compra->id, 6, '0', STR_PAD_LEFT))
         ->and($compra->total)->toBe(2760.0)
         ->and($compra->subtotal)->toBe(2400.0)
         ->and($compra->isv)->toBe(360.0)
+        ->and($item->presentacion_id)->toBe(presentacion($this->producto, 12)->id)
+        ->and($item->cantidad)->toBe(2)
         ->and($item->unidades)->toBe(24)
         ->and($item->costo_unidad)->toBe(100.0)
         ->and($item->costo_anterior)->toBe(80.0)
         ->and($item->costo_nuevo)->toBe(90.0)
-        ->and($item->precio_nuevo)->toBe(112.5);
+        ->and($item->precio_nuevo)->toBe(1350.0);
 
     $cambio = CambioPrecio::query()->latest('id')->firstOrFail();
     $entrada = MovimientoInventario::query()->where('compra_id', $compra->id)->sole();
@@ -156,42 +162,99 @@ test('último costo: toma el costo de la compra', function (): void {
     app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 24, $this->admin);
 
     app(RegistrarCompra::class)->ejecutar($this->bodega, $this->proveedor, [
-        ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 1, 'costo' => 1380.0],
+        ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 1, 'costo' => 1380.0],
     ], $this->admin);
 
     expect($this->producto->fresh()?->costo_unidad)->toBe(100.0)
-        ->and($this->producto->fresh()?->precio_unidad)->toBe(125.0)
+        ->and(presentacion($this->producto)->precio)->toBe(125.0)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(1500.0)
         ->and(Existencia::en($this->bodega->id, $this->producto->id))->toBe(36);
 });
 
 test('con promedio y sin existencia, el costo es el de la compra; lo exento entra sin ISV', function (): void {
-    $exento = Producto::factory()->precio(40.0, 50.0)->create([
-        'categoria_id'      => $this->producto->categoria_id,
-        'margen'            => 0.20,
-        'unidades_por_caja' => 1,
-        'gravado'           => false,
+    $exento = Producto::factory()->precio(40.0, 50.0)->conCaja(1)->create([
+        'categoria_id' => $this->producto->categoria_id,
+        'margen'       => 0.20,
+        'gravado'      => false,
     ]);
 
     $compra = app(RegistrarCompra::class)->ejecutar($this->bodega, $this->proveedor, [
-        ['producto_id' => $this->producto->id, 'unidad' => 'unidad', 'cantidad' => 10, 'costo' => 115.0],
-        ['producto_id' => $exento->id, 'unidad' => 'unidad', 'cantidad' => 10, 'costo' => 48.0],
+        ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto)->id, 'cantidad' => 10, 'costo' => 115.0],
+        ['producto_id' => $exento->id, 'presentacion_id' => presentacion($exento)->id, 'cantidad' => 10, 'costo' => 48.0],
     ], $this->admin);
 
     // 115 con ISV = 100 sin ISV; el exento queda en 48.
     expect($this->producto->fresh()?->costo_unidad)->toBe(100.0)
         ->and($exento->fresh()?->costo_unidad)->toBe(48.0)
-        ->and($exento->fresh()?->precio_unidad)->toBe(60.0)
+        ->and(presentacion($exento)->precio)->toBe(60.0)
         ->and($compra->subtotal)->toBe(1480.0)
         ->and($compra->isv)->toBe(150.0)
         ->and($compra->total)->toBe(1630.0);
+});
+
+test('se compra en la presentación que viene: el costo se lleva por unidad y cada presentación queda con su precio', function (): void {
+    // El mismo jabón (mismo código) también viene en caja de 8.
+    $caja8 = Presentacion::query()->create(['producto_id' => $this->producto->id, 'unidad_medida_id' => caja($this->producto)->unidad_medida_id, 'contenido' => 8, 'precio' => 800.0]);
+
+    // CJ12 a L 1,380 con ISV = L 100 la unidad; CJ8 a L 828 con ISV = L 90 la unidad.
+    $compra = app(RegistrarCompra::class)->ejecutar($this->bodega, $this->proveedor, [
+        ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 1, 'costo' => 1380.0],
+        ['producto_id' => $this->producto->id, 'presentacion_id' => $caja8->id, 'cantidad' => 1, 'costo' => 828.0],
+    ], $this->admin);
+
+    // Sin existencia, la CJ12 deja el costo en 100; la CJ8 lo promedia: (12 × 100 + 8 × 90) ÷ 20 = 96.
+    // Con 20 %: UN 120, CJ8 768 ÷ 0.8 = 960, CJ12 1,152 ÷ 0.8 = 1,440.
+    expect($this->producto->fresh()?->costo_unidad)->toBe(96.0)
+        ->and(Existencia::en($this->bodega->id, $this->producto->id))->toBe(20)
+        ->and(presentacion($this->producto)->precio)->toBe(120.0)
+        ->and($caja8->fresh()?->precio)->toBe(960.0)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(1440.0)
+        ->and($compra->items()->orderBy('id')->pluck('unidades')->all())->toBe([12, 8])
+        ->and($compra->items()->orderBy('id')->pluck('costo_unidad')->all())->toBe([100.0, 90.0])
+        ->and($compra->total)->toBe(2208.0);
+});
+
+test('no se compra en una presentación desactivada ni en la de otro producto', function (): void {
+    $otro = Producto::factory()->create(['proveedor_id' => $this->proveedor->id, 'categoria_id' => $this->producto->categoria_id]);
+    caja($this->producto)->forceFill(['activo' => false])->save();
+
+    foreach ([caja($this->producto)->id, caja($otro)->id] as $presentacionId) {
+        expect(fn () => app(RegistrarCompra::class)->ejecutar($this->bodega, $this->proveedor, [
+            ['producto_id' => $this->producto->id, 'presentacion_id' => $presentacionId, 'cantidad' => 1, 'costo' => 1380.0],
+        ], $this->admin))->toThrow(ReglaNegocioException::class, 'Escoja en qué presentación viene');
+    }
+
+    expect(Compra::query()->count())->toBe(0);
+});
+
+test('el buscador de compras trae las presentaciones que se compran, con el costo y el precio de hoy de cada una', function (): void {
+    Presentacion::query()->create(['producto_id' => $this->producto->id, 'unidad_medida_id' => caja($this->producto)->unidad_medida_id, 'contenido' => 6, 'activo' => false]);
+    app(AjustarExistencia::class)->ejecutar($this->otra->id, $this->producto, 30, $this->admin);
+
+    $this->actingAs($this->admin);
+
+    /** @var list<array<string, mixed>> $resultados */
+    $resultados = Livewire::test(CreateCompra::class)
+        ->fillForm(['bodega_id' => $this->bodega->id, 'proveedor_id' => $this->proveedor->id])
+        ->instance()
+        ->callSchemaComponentMethod('form.lineas', 'buscarProductos', ['buscar' => $this->producto->codigo]);
+
+    // Costo 80 por unidad: CJ12 = 960 + ISV = 1,104; precio CJ12 1,200 + ISV = 1,380. La CJ6 desactivada no sale.
+    $presentaciones = $resultados[0]['presentaciones'];
+
+    expect(array_column($presentaciones, 'sigla'))->toBe(['CJ12', 'UN'])
+        ->and(array_column($presentaciones, 'costoHoy'))->toBe([1104.0, 92.0])
+        ->and(array_column($presentaciones, 'precioHoy'))->toBe([1380.0, 115.0])
+        ->and($resultados[0]['costoUnidad'])->toBe(80.0)
+        ->and($resultados[0]['existencia'])->toBe(30);
 });
 
 test('no entra un producto de otro proveedor: no se guarda nada', function (): void {
     $ajeno = Producto::factory()->create();
 
     expect(fn () => app(RegistrarCompra::class)->ejecutar($this->bodega, $this->proveedor, [
-        ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 1, 'costo' => 1380.0],
-        ['producto_id' => $ajeno->id, 'unidad' => 'caja', 'cantidad' => 1, 'costo' => 100.0],
+        ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 1, 'costo' => 1380.0],
+        ['producto_id' => $ajeno->id, 'presentacion_id' => presentacion($ajeno, 12)->id, 'cantidad' => 1, 'costo' => 100.0],
     ], $this->admin))->toThrow(ReglaNegocioException::class);
 
     expect(Compra::query()->count())->toBe(0)
@@ -201,8 +264,8 @@ test('no entra un producto de otro proveedor: no se guarda nada', function (): v
 
 test('el despacho saca de la bodega del pedido; sin controlar la existencia puede quedar en negativo', function (): void {
     $pedido = pedidoDeInventario($this->bodega, $this->vendedor, [
-        [$this->producto, UnidadVenta::Caja, 1],
-        [$this->producto, UnidadVenta::Unidad, 3],
+        [$this->producto, 12, 1],
+        [$this->producto, 1, 3],
     ]);
 
     app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
@@ -220,8 +283,8 @@ test('controlando la existencia no se despacha más de lo que hay; con lo que al
     app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 15, $this->admin);
 
     $pedido = pedidoDeInventario($this->bodega, $this->vendedor, [
-        [$this->producto, UnidadVenta::Caja, 2],
-        [$this->producto, UnidadVenta::Unidad, 5],
+        [$this->producto, 12, 2],
+        [$this->producto, 1, 5],
     ]);
     [$caja, $sueltas] = $pedido->items()->orderBy('id')->get()->all();
 
@@ -240,7 +303,8 @@ test('controlando la existencia no se despacha más de lo que hay; con lo que al
     $filas = LineasPedido::datos($pedido, segunExistencia: true)['items'];
 
     expect($filas[0]['sale'])->toBe(1)
-        ->and($filas[0]['hay'])->toBe('1 CJ + 3 UN')
+        ->and($filas[0]['hay'])->toBe('1 CJ12 + 3 UN')
+        ->and($filas[0]['sigla'])->toBe('CJ12')
         ->and($filas[1]['sale'])->toBe(3);
 
     app(ValidarDespacho::class)->ejecutar($pedido, [$caja->id => 1, $sueltas->id => 3], $this->encargado);
@@ -252,7 +316,7 @@ test('controlando la existencia no se despacha más de lo que hay; con lo que al
 test('al corregir un pedido despachado regresa a la bodega lo que ya no sale', function (): void {
     app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 100, $this->admin);
 
-    $pedido = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Caja, 2]]);
+    $pedido = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, 12, 2]]);
     $linea = $pedido->items()->sole();
 
     app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
@@ -270,7 +334,7 @@ test('precio del pedido: se respeta lo que se le dijo al cliente, salvo que qued
     $cambiar = fn (float $costo) => app(ActualizarPrecioProducto::class)->ejecutar($this->producto->fresh() ?? $this->producto, $costo, MotivoCambioPrecio::Manual);
 
     // Por defecto se cobra el precio del día que se despacha.
-    $hoy = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Unidad, 1]]);
+    $hoy = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, 1, 1]]);
     $cambiar(90.0); // precio 112.50
     app(ValidarDespacho::class)->ejecutar($hoy, [], $this->encargado);
     expect($hoy->items()->sole()->precio)->toBe(112.5);
@@ -278,13 +342,13 @@ test('precio del pedido: se respeta lo que se le dijo al cliente, salvo que qued
     Configuracion::actual()->update(['precio_al_despachar' => PrecioAlDespachar::Pedido]);
 
     // Pedido a L 112.50; el costo sube a 100 (precio 125): se respeta 112.50.
-    $respetado = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Unidad, 1]]);
+    $respetado = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, 1, 1]]);
     $cambiar(100.0);
     app(ValidarDespacho::class)->ejecutar($respetado, [], $this->encargado);
     expect($respetado->items()->sole()->precio)->toBe(112.5);
 
     // Pedido a L 125; el costo sube a 130 (precio 162.50): 125 ya es pérdida, se cobra 162.50.
-    $subio = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Unidad, 1]]);
+    $subio = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, 1, 1]]);
     $cambiar(130.0);
     app(ValidarDespacho::class)->ejecutar($subio, [], $this->encargado);
     expect($subio->items()->sole()->precio)->toBe(162.5);
@@ -300,7 +364,7 @@ test('el encargado registra una compra para su bodega desde el panel', function 
             'factura_proveedor' => '000-001-01-00000077',
             'fecha'             => now()->toDateString(),
             'lineas'            => [
-                ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2, 'costo' => 1380],
+                ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 2, 'costo' => 1380],
             ],
         ])
         ->call('create')
@@ -331,7 +395,7 @@ test('la compra pide al menos un producto y el costo de cada uno', function (): 
             'proveedor_id' => $this->proveedor->id,
             'fecha'        => now()->toDateString(),
             'lineas'       => [
-                ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 2, 'costo' => ''],
+                ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 2, 'costo' => ''],
             ],
         ])
         ->call('create')
@@ -344,10 +408,10 @@ test('la compra pide al menos un producto y el costo de cada uno', function (): 
 
 test('cada bodega ve sus compras; el vendedor no entra a compras', function (): void {
     $deOtra = app(RegistrarCompra::class)->ejecutar($this->otra, $this->proveedor, [
-        ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 1, 'costo' => 1380.0],
+        ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 1, 'costo' => 1380.0],
     ], $this->admin);
     $mia = app(RegistrarCompra::class)->ejecutar($this->bodega, $this->proveedor, [
-        ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 1, 'costo' => 1380.0],
+        ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 1, 'costo' => 1380.0],
     ], $this->admin);
 
     expect($this->encargado->can('view', $mia))->toBeTrue()
@@ -452,7 +516,7 @@ test('el vendedor ve lo disponible (lo de la bodega menos lo apartado en pedidos
     app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 29, $this->admin);
 
     // Un pedido pendiente ya aparta 2 cajas (24 unidades): quedan 5 disponibles.
-    $apartado = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, UnidadVenta::Caja, 2]]);
+    $apartado = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, 12, 2]]);
 
     expect(Disponible::en($this->bodega->id, [$this->producto->id]))->toBe([$this->producto->id => 5])
         ->and(Disponible::en($this->bodega->id, [$this->producto->id], sinPedido: $apartado->id))->toBe([$this->producto->id => 29])
@@ -474,7 +538,7 @@ test('el vendedor ve lo disponible (lo de la bodega menos lo apartado en pedidos
             'cliente_id'  => Cliente::factory()->create(['bodega_id' => $this->bodega->id])->id,
             'vendedor_id' => $this->vendedor->id,
             'fecha'       => now()->toDateString(),
-            'items'       => [['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => 1]],
+            'items'       => [['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 1]],
         ])
         ->call('create')
         ->assertHasFormErrors(['items']);
@@ -485,16 +549,17 @@ test('el vendedor ve lo disponible (lo de la bodega menos lo apartado en pedidos
     $fila = LineasPedido::datos($apartado)['items'][0];
 
     expect($fila['hay_unidades'])->toBe(29)
-        ->and($fila['es_caja'])->toBeTrue()
-        ->and($fila['por_unidad'])->toBe(12)
+        ->and($fila['es_base'])->toBeFalse()
+        ->and($fila['contenido'])->toBe(12)
+        ->and($fila['sigla'])->toBe('CJ12')
         ->and($fila['mueve'])->toBeTrue()
         ->and($fila['salio_unidades'])->toBe(0);
 
     // Bodega manda 1 de las 2 cajas: queda dicho que fue la caja la que no va completa.
     $validado = app(ValidarDespacho::class)->ejecutar($apartado, [$apartado->items()->sole()->id => 1], $this->encargado);
 
-    expect($validado->items()->sole()->faltaEnPalabras())->toBe('No va completo: falta 1 caja de 2')
-        ->and(LineasPedido::incompletas($validado))->toBe('No va completo: JABON A TOCADOR 12X100G (falta 1 caja de 2).')
+    expect($validado->items()->sole()->faltaEnPalabras())->toBe('No va completo: falta 1 caja de 12 (pidió 2)')
+        ->and(LineasPedido::incompletas($validado))->toBe('No va completo: JABON A TOCADOR 12X100G (falta 1 caja de 12, pidió 2).')
         ->and(Disponible::en($this->bodega->id, [$this->producto->id]))->toBe([$this->producto->id => 17]);
 
     // Al corregirlo, lo que ya salió (1 caja) es lo que regresaría.
@@ -502,7 +567,8 @@ test('el vendedor ve lo disponible (lo de la bodega menos lo apartado en pedidos
 });
 
 test('con precio fijo la compra mueve el costo promedio pero no el precio; si el costo lo pasa, avisa', function (): void {
-    $this->producto->forceFill(['precio_fijo' => true, 'precio_unidad' => 95.0])->save();
+    // La UN fija a L 95; la CJ12 sigue con el % de utilidad.
+    presentacion($this->producto)->forceFill(['precio_fijo' => true, 'precio' => 95.0])->save();
     app(AjustarExistencia::class)->ejecutar($this->bodega->id, $this->producto, 24, $this->admin, 'conteo inicial');
 
     $this->actingAs($this->encargado);
@@ -512,7 +578,7 @@ test('con precio fijo la compra mueve el costo promedio pero no el precio; si el
             'proveedor_id' => $this->proveedor->id,
             'fecha'        => now()->toDateString(),
             'lineas'       => [
-                ['producto_id' => $this->producto->id, 'unidad' => 'caja', 'cantidad' => $cajas, 'costo' => $costoCaja],
+                ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => $cajas, 'costo' => $costoCaja],
             ],
         ])
         ->call('create')
@@ -522,13 +588,15 @@ test('con precio fijo la compra mueve el costo promedio pero no el precio; si el
     $comprar(2, 1380.0)->assertNotNotified('Hay precios fijos por debajo del costo');
 
     expect($this->producto->fresh()?->costo_unidad)->toBe(90.0)
-        ->and($this->producto->fresh()?->precio_unidad)->toBe(95.0)
-        ->and(Compra::query()->latest('id')->firstOrFail()->items()->sole()->precio_nuevo)->toBe(95.0);
+        ->and(presentacion($this->producto)->precio)->toBe(95.0)
+        ->and(presentacion($this->producto, 12)->precio)->toBe(1350.0)
+        ->and(Compra::query()->latest('id')->firstOrFail()->items()->sole()->precio_nuevo)->toBe(1350.0);
 
     // 4 cajas a L 1,794 con ISV = L 130 la unidad: (48 × 90 + 48 × 130) ÷ 96 = 110, más que los 95 del precio.
     $comprar(4, 1794.0)->assertNotified('Hay precios fijos por debajo del costo');
 
     expect($this->producto->fresh()?->costo_unidad)->toBe(110.0)
-        ->and($this->producto->fresh()?->precio_unidad)->toBe(95.0)
-        ->and($this->producto->fresh()?->precio_fijo)->toBeTrue();
+        ->and(presentacion($this->producto)->precio)->toBe(95.0)
+        ->and(presentacion($this->producto)->precio_fijo)->toBeTrue()
+        ->and(presentacion($this->producto, 12)->precio)->toBe(1650.0);
 });

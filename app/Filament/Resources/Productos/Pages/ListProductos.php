@@ -27,7 +27,7 @@ class ListProductos extends ListRecords
 
     public function getSubheading(): string
     {
-        return 'Precios sin ISV por unidad y por caja. Son los mismos en todas las bodegas.';
+        return 'Precio de venta de cada presentación (con ISV si paga ISV). Son los mismos en todas las bodegas.';
     }
 
     /**

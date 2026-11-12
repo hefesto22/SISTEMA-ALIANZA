@@ -3,10 +3,14 @@
     y, abajo, la barra con el total y "Registrar compra".
 
     Arriba el buscador con los productos del proveedor escogido (al tocarlo
-    sin escribir salen los primeros). Al tocar un producto entra con el
-    costo de hoy ya puesto, en caja si trae más de 1. Cada fila: caja o
-    unidad, cantidad con − y +, costo como viene en la factura (con ISV si
-    es gravado) y el total; si el costo se aleja mucho del de hoy, avisa.
+    sin escribir salen los primeros). Al tocar un producto entra en su
+    presentación más grande y con el costo vacío: se escribe el de la
+    factura. Cada fila: en qué presentación viene (CJ12, CJ8, UN…), cantidad
+    con − y +, costo como viene en la factura (con ISV si es gravado) y el
+    total. Abajo, cómo queda con la compra: "Costo CJ12: está a L X →
+    quedará a L Y" y el precio de venta igual (el fijo se queda), con la
+    misma cuenta que RegistrarCompra (todas las líneas del producto, en
+    orden). Si el costo se aleja mucho del de hoy, avisa.
 
     Si se cambia el proveedor, se quitan los productos que eran de otro.
     Todo pasa en el teléfono; al servidor solo van la búsqueda y Registrar.
@@ -23,6 +27,7 @@
         'tasa'      => CalculadoraPrecio::tasaIsv(),
         'simbolo'   => (string) config('honduras.moneda.simbolo', 'L.'),
         'maximo'    => LineasCompra::MAXIMO_CANTIDAD,
+        'metodo'    => LineasCompra::metodoCosto(),
         'proveedor' => $field->resolveRelativeStatePath('proveedor_id'),
     ];
 @endphp
@@ -69,8 +74,8 @@
             .lc-campo { display: grid; gap: 0.25rem; }
             .lc-etiqueta { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--lc-tenue); }
 
-            /* Caja | Unidad */
-            .lc-segmento { display: inline-flex; padding: 0.2rem; border-radius: 0.5rem; background: var(--gray-100); }
+            /* CJ12 | CJ8 | UN */
+            .lc-segmento { display: inline-flex; flex-wrap: wrap; padding: 0.2rem; border-radius: 0.5rem; background: var(--gray-100); }
             .dark .lc-segmento { background: rgb(255 255 255 / 0.06); }
             .lc-segmento button { padding: 0.45rem 0.75rem; border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; color: var(--gray-600); }
             .dark .lc-segmento button { color: var(--gray-300); }
@@ -99,6 +104,19 @@
             .lc-total strong { font-size: 1rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 2.4rem; }
             .lc-aviso-costo { font-size: 0.78rem; font-weight: 600; color: var(--warning-600); }
             .dark .lc-aviso-costo { color: var(--warning-400); }
+
+            /* Está a → quedará a */
+            .lc-queda { display: grid; gap: 0.2rem; padding: 0.5rem 0.65rem; border-radius: 0.5rem; font-size: 0.78rem; color: var(--lc-tenue); background: var(--gray-50); font-variant-numeric: tabular-nums; }
+            .dark .lc-queda { background: rgb(255 255 255 / 0.03); }
+            .lc-queda div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.4rem; }
+            .lc-queda b { font-weight: 700; color: var(--gray-700); }
+            .dark .lc-queda b { color: var(--gray-200); }
+            .lc-queda strong { font-weight: 800; color: var(--gray-950); }
+            .dark .lc-queda strong { color: #fff; }
+            .lc-queda .lc-sube { color: var(--danger-600); }
+            .lc-queda .lc-baja { color: var(--success-600); }
+            .dark .lc-queda .lc-sube { color: var(--danger-400); }
+            .dark .lc-queda .lc-baja { color: var(--success-400); }
 
             .lc-vacio { padding: 1.5rem 1rem; text-align: center; font-size: 0.875rem; color: var(--lc-tenue); border-radius: 0.75rem; outline: 1px dashed rgb(3 7 18 / 0.15); }
             .dark .lc-vacio { outline-color: rgb(255 255 255 / 0.15); }
@@ -247,26 +265,38 @@
             },
 
             {{-- ── Líneas ── --}}
-            hoy(linea) {
-                const p = this.productos[linea.producto_id]
-
-                return Number(linea.unidad === 'caja' ? p?.costoCaja : p?.costoUnidad) || 0
+            presentacion(linea) {
+                return (this.productos[linea.producto_id]?.presentaciones ?? []).find((pr) => Number(pr.id) === Number(linea.presentacion_id)) ?? null
             },
 
-            {{-- Tocar un producto: entra con el costo de hoy (en caja si trae más de 1). Si ya estaba en esa unidad, le suma 1. --}}
+            {{-- Costo de hoy de la presentación de la línea, con ISV si es gravado. --}}
+            hoy(linea) {
+                return Number(this.presentacion(linea)?.costoHoy) || 0
+            },
+
+            {{-- "Cajas de 12", "Unidades". --}}
+            titulo(pr) {
+                const plural = String(pr?.plural ?? 'unidades')
+
+                return plural.charAt(0).toUpperCase() + plural.slice(1)
+            },
+
+            {{-- Tocar un producto: entra en su presentación más grande con el costo vacío (se escribe el de la factura). Si ya estaba en esa presentación, le suma 1. --}}
             agregar(p) {
+                const pr = (p.presentaciones ?? [])[0]
+
+                if (! pr) {
+                    return
+                }
+
                 this.productos[p.id] = p
 
-                const unidad = Number(p.caja) > 1 ? 'caja' : 'unidad'
-                let i = this.lineas.findIndex((linea) => Number(linea.producto_id) === Number(p.id) && linea.unidad === unidad)
+                let i = this.lineas.findIndex((linea) => Number(linea.producto_id) === Number(p.id) && Number(linea.presentacion_id) === Number(pr.id))
 
                 if (i >= 0) {
                     this.lineas[i].cantidad = Math.min(this.n(this.lineas[i].cantidad) + 1, @js($config['maximo']))
                 } else {
-                    const linea = { producto_id: Number(p.id), unidad, cantidad: 1, costo: '' }
-                    const costo = this.hoy(linea)
-                    linea.costo = costo > 0 ? costo : ''
-                    this.lineas.push(linea)
+                    this.lineas.push({ producto_id: Number(p.id), presentacion_id: Number(pr.id), cantidad: 1, costo: '' })
                     i = this.lineas.length - 1
                 }
 
@@ -289,20 +319,14 @@
                 this.lineas.splice(i, 1)
             },
 
-            {{-- Al pasar de caja a unidad (o al revés), si el costo era el de hoy se cambia al de hoy de la otra. --}}
-            cambiarUnidad(linea, unidad) {
-                if (linea.unidad === unidad) {
+            {{-- Otra presentación: el costo escrito era de la otra, así que se vuelve a escribir. --}}
+            cambiarPresentacion(linea, pr) {
+                if (Number(linea.presentacion_id) === Number(pr.id)) {
                     return
                 }
 
-                const antes = this.hoy(linea)
-                const igual = linea.costo === '' || Math.abs(this.decimal(linea.costo) - antes) < 0.005
-                linea.unidad = unidad
-
-                if (igual) {
-                    const ahora = this.hoy(linea)
-                    linea.costo = ahora > 0 ? ahora : ''
-                }
+                linea.presentacion_id = Number(pr.id)
+                linea.costo = ''
             },
 
             fijarCantidad(linea, valor) {
@@ -346,6 +370,88 @@
                     .reduce((suma, linea) => suma + this.totalLinea(linea) - this.redondear(this.totalLinea(linea) / (1 + tasa)), 0))
             },
 
+            r4(numero) {
+                return Math.round((numero + Number.EPSILON) * 10000) / 10000
+            },
+
+            conIsv(monto, gravado) {
+                return this.r4(gravado ? monto * (1 + @js($config['tasa'])) : monto)
+            },
+
+            {{-- Costo por unidad sin ISV con que queda el producto después de TODAS sus líneas de esta compra, en orden, como RegistrarCompra (promedio con lo que hay en todas las bodegas, o el último). null si todavía no hay costo escrito. --}}
+            costoFinal(id) {
+                const p = this.productos[id]
+
+                if (! p) {
+                    return null
+                }
+
+                let existencia = Number(p.existencia) || 0
+                let costo = Number(p.costoUnidad) || 0
+                let alguna = false
+
+                for (const linea of this.lineas.filter((l) => Number(l.producto_id) === Number(id))) {
+                    const pr = this.presentacion(linea)
+                    const cantidad = this.n(linea.cantidad)
+                    const pagado = this.decimal(linea.costo)
+
+                    if (! pr || cantidad < 1 || pagado <= 0) {
+                        continue
+                    }
+
+                    const contenido = Math.max(1, Number(pr.contenido))
+                    const unidades = cantidad * contenido
+                    const deCompra = this.r4(pagado / (p.gravado ? 1 + @js($config['tasa']) : 1) / contenido)
+
+                    costo = @js($config['metodo']) === 'ultimo' || existencia <= 0
+                        ? deCompra
+                        : this.r4((existencia * costo + unidades * deCompra) / (existencia + unidades))
+                    existencia += unidades
+                    alguna = true
+                }
+
+                return alguna ? costo : null
+            },
+
+            {{-- Cómo quedan el costo y el precio de la presentación de la línea con la compra (con ISV si es gravado). --}}
+            queda(linea) {
+                const p = this.productos[linea.producto_id]
+                const pr = this.presentacion(linea)
+                const final = this.costoFinal(linea.producto_id)
+
+                if (! p || ! pr || final === null) {
+                    return null
+                }
+
+                const contenido = Math.max(1, Number(pr.contenido))
+                const costo = this.redondear(this.conIsv(final * contenido, p.gravado))
+                const fijo = pr.fijo && Number(pr.precioHoy) > 0
+                const precio = fijo
+                    ? Number(pr.precioHoy)
+                    : this.redondear(this.conIsv(this.r4(this.r4(final * contenido) / (1 - Number(p.margen))), p.gravado))
+
+                return { costo, precio, fijo }
+            },
+
+            {{-- "está a L 867.10 → quedará a L 880.00"; sin costo escrito, solo "está a". --}}
+            cambioTexto(antes, despues, sinAntes) {
+                const desde = antes > 0 ? 'está a ' + this.dinero(antes) : sinAntes
+
+                if (despues === null) {
+                    return desde
+                }
+
+                return desde + ' → quedará a '
+            },
+
+            claseCambio(antes, despues) {
+                if (despues === null || antes <= 0 || Math.abs(despues - antes) < 0.005) {
+                    return ''
+                }
+
+                return despues > antes ? 'lc-sube' : 'lc-baja'
+            },
+
             {{-- Error de dedo: si el costo se aleja 25 % o más del de hoy. --}}
             avisoCosto(linea) {
                 const hoy = this.hoy(linea)
@@ -369,7 +475,7 @@
                     return ''
                 }
 
-                return p.codigo + (Number(p.caja) > 1 ? ' · caja de ' + p.caja : '') + (p.gravado ? '' : ' · exento')
+                return p.codigo + (p.gravado ? '' : ' · exento')
             },
         }"
     >
@@ -408,12 +514,12 @@
                     <button type="button" class="lc-resultado" x-on:click="agregar(p)">
                         <span>
                             <span class="lc-resultado-nombre" x-text="p.descripcion"></span>
-                            <span class="lc-resultado-meta" x-text="p.codigo + (Number(p.caja) > 1 ? ' · caja de ' + p.caja : '') + (p.gravado ? '' : ' · exento')"></span>
+                            <span class="lc-resultado-meta" x-text="p.codigo + ' · ' + (p.presentaciones ?? []).map((pr) => pr.sigla).join(' · ') + (p.gravado ? '' : ' · exento')"></span>
                         </span>
                         <span class="lc-resultado-costo">
                             <span>costo hoy</span>
-                            <strong x-text="Number(p.costoCaja || p.costoUnidad) > 0 ? dinero(Number(p.caja) > 1 ? p.costoCaja : p.costoUnidad) : '—'"></strong>
-                            <span x-text="Number(p.caja) > 1 ? 'la caja' : 'la unidad'"></span>
+                            <strong x-text="Number(p.presentaciones?.[0]?.costoHoy) > 0 ? dinero(p.presentaciones[0].costoHoy) : '—'"></strong>
+                            <span x-text="p.presentaciones?.[0]?.sigla ?? ''"></span>
                         </span>
                     </button>
                 </template>
@@ -428,7 +534,7 @@
         <div class="lc-titulo" x-show="lineas.length > 0" x-text="lineas.length === 1 ? '1 producto en la compra' : lineas.length + ' productos en la compra'"></div>
 
         <div class="lc-lista" x-show="lineas.length > 0">
-            <template x-for="(linea, i) in lineas" x-bind:key="linea.producto_id + '-' + linea.unidad + '-' + i">
+            <template x-for="(linea, i) in lineas" x-bind:key="linea.producto_id + '-' + linea.presentacion_id + '-' + i">
                 <div class="lc-linea" x-bind:class="{ 'lc-resaltada': resaltada === i }" x-effect="if (resaltada === i) $nextTick(() => $el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))">
                     <div class="lc-arriba">
                         <div class="lc-producto">
@@ -441,16 +547,17 @@
                     </div>
 
                     <div class="lc-controles">
-                        <div class="lc-campo" x-show="Number(productos[linea.producto_id]?.caja) > 1 || linea.unidad === 'caja'">
+                        <div class="lc-campo" x-show="(productos[linea.producto_id]?.presentaciones ?? []).length > 1">
                             <span class="lc-etiqueta">Viene en</span>
                             <div class="lc-segmento">
-                                <button type="button" x-bind:class="{ 'lc-activo': linea.unidad === 'caja' }" x-on:click="cambiarUnidad(linea, 'caja')">Caja</button>
-                                <button type="button" x-bind:class="{ 'lc-activo': linea.unidad === 'unidad' }" x-on:click="cambiarUnidad(linea, 'unidad')">Unidad</button>
+                                <template x-for="pr in (productos[linea.producto_id]?.presentaciones ?? [])" x-bind:key="'pres-' + pr.id">
+                                    <button type="button" x-bind:class="{ 'lc-activo': Number(linea.presentacion_id) === Number(pr.id) }" x-bind:title="pr.nombre" x-on:click="cambiarPresentacion(linea, pr)" x-text="pr.sigla"></button>
+                                </template>
                             </div>
                         </div>
 
                         <div class="lc-campo">
-                            <span class="lc-etiqueta" x-text="linea.unidad === 'caja' ? 'Cajas' : 'Unidades'"></span>
+                            <span class="lc-etiqueta" x-text="titulo(presentacion(linea))"></span>
                             <div class="lc-stepper">
                                 <button type="button" class="lc-paso" x-on:click="mover(linea, -1)" x-bind:disabled="n(linea.cantidad) <= 1" aria-label="Uno menos">{{ svg('heroicon-m-minus') }}</button>
                                 <input
@@ -468,7 +575,7 @@
                         </div>
 
                         <div class="lc-campo">
-                            <span class="lc-etiqueta" x-text="'Costo ' + (linea.unidad === 'caja' ? 'caja' : 'unidad') + (productos[linea.producto_id]?.gravado ? ' con ISV' : '')"></span>
+                            <span class="lc-etiqueta" x-text="'Costo ' + (presentacion(linea)?.sigla ?? '') + (productos[linea.producto_id]?.gravado ? ' con ISV' : '')"></span>
                             <div class="lc-costo" x-bind:class="{ 'lc-falta': linea.costo === '' }">
                                 <span>{{ $config['simbolo'] }}</span>
                                 <input
@@ -482,12 +589,27 @@
                                     x-on:keydown.enter.prevent="$event.target.blur()"
                                 >
                             </div>
-                            <span class="lc-hoy" x-text="hoy(linea) > 0 ? 'Hoy ' + dinero(hoy(linea)) : 'Sin costo anterior'"></span>
+                            <span class="lc-hoy" x-show="linea.costo === ''" x-text="'Escriba el de la factura'"></span>
                         </div>
 
                         <div class="lc-campo lc-total">
                             <span class="lc-etiqueta">Total</span>
                             <strong x-text="dinero(totalLinea(linea))"></strong>
+                        </div>
+                    </div>
+
+                    {{-- Cómo queda con la compra --}}
+                    <div class="lc-queda" x-show="presentacion(linea)">
+                        <div>
+                            <b x-text="'Costo ' + (presentacion(linea)?.sigla ?? '') + ':'"></b>
+                            <span x-text="cambioTexto(hoy(linea), queda(linea)?.costo ?? null, 'sin costo todavía')"></span>
+                            <strong x-show="queda(linea)" x-bind:class="claseCambio(hoy(linea), queda(linea)?.costo ?? null)" x-text="dinero(queda(linea)?.costo ?? 0)"></strong>
+                        </div>
+                        <div>
+                            <b x-text="'Precio de venta ' + (presentacion(linea)?.sigla ?? '') + ':'"></b>
+                            <span x-text="cambioTexto(Number(presentacion(linea)?.precioHoy ?? 0), queda(linea)?.precio ?? null, 'sin precio todavía')"></span>
+                            <strong x-show="queda(linea)" x-bind:class="claseCambio(Number(presentacion(linea)?.precioHoy ?? 0), queda(linea)?.precio ?? null)" x-text="dinero(queda(linea)?.precio ?? 0)"></strong>
+                            <span x-show="queda(linea)?.fijo" x-cloak>(fijo, no cambia)</span>
                         </div>
                     </div>
 

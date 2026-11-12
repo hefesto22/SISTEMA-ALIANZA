@@ -7,13 +7,12 @@ namespace App\Filament\Schemas\Components;
 use App\Domain\Inventario\Disponible;
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Enums\EstadoPedido;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
 use App\Filament\Support\Acceso;
 use App\Models\Configuracion;
-use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\Promocion;
 use Closure;
@@ -28,12 +27,12 @@ use Livewire\Attributes\Renderless;
  * teléfono y para pedidos largos (30 productos o más).
  *
  * Arriba un buscador: se toca un producto y entra a la lista (si ya está,
- * le suma uno). Cada línea es una fila corta con unidad o caja, − y +,
- * subtotal y quitar. Todo eso pasa en el teléfono, sin ir al servidor por
+ * le suma uno). Cada producto es una fila corta; al abrirla, un − y + por
+ * cada presentación que se vende (UN, CJ12, FD6…), subtotal y quitar. Todo eso pasa en el teléfono, sin ir al servidor por
  * cada toque; al servidor solo van la búsqueda, el total con promociones
  * (cada que se deja de tocar) y Guardar.
  *
- * Estado: list<array{id?: int, producto_id: int, unidad: string, cantidad: int}>.
+ * Estado: list<array{id?: int, producto_id: int, presentacion_id: int, cantidad: int}>.
  * Se guarda en pedido_items (crea, cambia y quita líneas) y después
  * RecalcularPedido pone los precios.
  *
@@ -75,6 +74,15 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             'max'      => 'Un pedido puede tener hasta '.self::MAXIMO_LINEAS.' productos.',
         ]);
 
+        // Cada línea en una presentación que se vende (activa y con precio).
+        $this->rule(fn (LineasPedido $component): Closure => function (string $attribute, mixed $value, Closure $fail) use ($component): void {
+            $aviso = $component->presentacionQueNoSeVende(self::normalizar($value));
+
+            if ($aviso !== null) {
+                $fail($aviso);
+            }
+        });
+
         // Controlando la existencia, no se pide más de lo disponible.
         $this->rule(fn (LineasPedido $component): Closure => function (string $attribute, mixed $value, Closure $fail) use ($component): void {
             $aviso = $component->pasaDeLoDisponible(self::normalizar($value));
@@ -90,10 +98,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $this->loadStateFromRelationshipsUsing(function (LineasPedido $component, Pedido $record): void {
             $component->state($record->items()->orderBy('id')->get()
                 ->map(fn (PedidoItem $item): array => [
-                    'id'          => $item->id,
-                    'producto_id' => $item->producto_id,
-                    'unidad'      => $item->unidad->value,
-                    'cantidad'    => $item->cantidad,
+                    'id'              => $item->id,
+                    'producto_id'     => $item->producto_id,
+                    'presentacion_id' => $item->presentacion_id,
+                    'cantidad'        => $item->cantidad,
                 ])
                 ->values()
                 ->all());
@@ -105,7 +113,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     }
 
     /**
-     * Cada línea: producto que existe, unidad o caja, cantidad entera de 1 en adelante.
+     * Cada línea: producto que existe, una de sus presentaciones, cantidad entera de 1 en adelante.
      *
      * @return array<mixed>
      */
@@ -125,7 +133,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
         $rules["{$statePath}.*.id"] = ['nullable', 'integer'];
         $rules["{$statePath}.*.producto_id"] = ['required', 'integer', Rule::exists('productos', 'id')];
-        $rules["{$statePath}.*.unidad"] = ['required', Rule::enum(UnidadVenta::class)];
+        $rules["{$statePath}.*.presentacion_id"] = ['required', 'integer', Rule::exists('presentaciones', 'id')];
         $rules["{$statePath}.*.cantidad"] = ['required', 'integer', 'min:1', 'max:'.self::MAXIMO_CANTIDAD];
     }
 
@@ -162,6 +170,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             ->orderByRaw('CASE WHEN UPPER(codigo) = ? THEN 0 ELSE 1 END', [mb_strtoupper($buscar)])
             ->orderBy('descripcion')
             ->limit(25)
+            ->with('presentaciones.unidadMedida')
             ->get();
 
         return array_values($productos
@@ -207,7 +216,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     /**
      * Promociones vigentes hoy en la bodega del pedido, como las usa el
      * teléfono: qué hay que agregar para llevarla ("lineas": lo que pide la
-     * promoción más el regalo, en su unidad), qué productos la activan
+     * promoción más el regalo, en su presentación), qué productos la activan
      * ("compra") y cuál es el regalo; y los datos de esos productos, con lo
      * disponible.
      *
@@ -219,7 +228,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $promociones = Promocion::query()
             ->vigentes()
             ->paraBodega($bodega)
-            ->with(['condiciones.producto', 'productoBeneficio'])
+            ->with(['condiciones.producto.presentaciones.unidadMedida', 'productoBeneficio.presentaciones.unidadMedida', ...Promocion::PARA_CALCULAR])
             ->orderBy('id')
             ->get();
 
@@ -252,10 +261,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             $lineas = [];
 
             foreach ($promocion->condiciones as $condicion) {
-                self::sumarLinea($lineas, $condicion->producto_id, $condicion->unidad, $condicion->cantidad);
+                self::sumarLinea($lineas, $condicion->producto_id, $condicion->presentacion_id, $condicion->cantidad);
             }
 
-            self::sumarLinea($lineas, $promocion->producto_beneficio_id, $promocion->beneficio_unidad, $promocion->cantidad_beneficio);
+            self::sumarLinea($lineas, $promocion->producto_beneficio_id, $promocion->beneficio_presentacion_id, $promocion->cantidad_beneficio);
 
             $promos[] = [
                 'id'      => $promocion->id,
@@ -276,10 +285,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      * El último pedido de este cliente que le toca a quien levanta la
      * preventa (el vendedor: uno suyo, aunque ya esté validado), para agregar
      * los mismos productos de un toque (las rutas se repiten cada semana).
-     * Con los precios de hoy; los productos que ya no están activos no se
-     * agregan.
+     * Con los precios de hoy; los productos que ya no están activos (o que ya
+     * no se venden en esa presentación) no se agregan.
      *
-     * @return array{numero: string, fecha: string, lineas: list<array{producto_id: int, unidad: string, cantidad: int}>, productos: array<int, array<string, mixed>>, fuera: int}|null
+     * @return array{numero: string, fecha: string, lineas: list<array{producto_id: int, presentacion_id: int, cantidad: int}>, productos: array<int, array<string, mixed>>, fuera: int}|null
      */
     #[ExposedLivewireMethod]
     #[Renderless]
@@ -297,7 +306,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             ->where('cliente_id', $clienteId)
             ->where('estado', '!=', EstadoPedido::Anulado)
             ->whereHas('items')
-            ->with('items.producto')
+            ->with(['items.producto.presentaciones.unidadMedida', 'items.presentacion'])
             ->latest('id')
             ->first();
 
@@ -323,14 +332,14 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
                 continue;
             }
 
-            // No se vende o (si se controla la existencia) ya no hay disponible.
-            if (! $item->producto->activo || ($controlar && $disponible < 1)) {
+            // No se vende (o ya no en esa presentación, o sin precio) o, si se controla la existencia, ya no hay disponible.
+            if (! $item->producto->activo || ! self::seVende($item->presentacion) || ($controlar && $disponible < 1)) {
                 $fuera++;
 
                 continue;
             }
 
-            $lineas[] = ['producto_id' => $item->producto_id, 'unidad' => $item->unidad->value, 'cantidad' => $item->cantidad];
+            $lineas[] = ['producto_id' => $item->producto_id, 'presentacion_id' => $item->presentacion_id, 'cantidad' => $item->cantidad];
             $productos[$item->producto_id] = self::datosDe($item->producto, $enBodega, $apartado[$item->producto_id] ?? 0);
         }
 
@@ -361,10 +370,8 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      */
     public function getProductosDeLineas(): array
     {
-        $ids = array_values(array_unique(array_map(
-            fn (array $linea): int => $linea['producto_id'],
-            self::normalizar($this->getState()),
-        )));
+        $lineas = self::normalizar($this->getState());
+        $ids = array_values(array_unique(array_column($lineas, 'producto_id')));
 
         if ($ids === []) {
             return [];
@@ -375,8 +382,11 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $hay = Disponible::existencia($bodega, $ids);
         $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
 
-        foreach (Producto::query()->whereKey($ids)->get() as $producto) {
-            $productos[$producto->id] = self::datosDe($producto, $hay[$producto->id] ?? 0, $apartado[$producto->id] ?? 0);
+        // Las que ya lleva el pedido salen aunque ya no se vendan, para poder verlas y quitarlas.
+        $enLineas = array_column($lineas, 'presentacion_id');
+
+        foreach (Producto::query()->whereKey($ids)->with('presentaciones.unidadMedida')->get() as $producto) {
+            $productos[$producto->id] = self::datosDe($producto, $hay[$producto->id] ?? 0, $apartado[$producto->id] ?? 0, $enLineas);
         }
 
         return $productos;
@@ -384,33 +394,61 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
     /**
      * Lo que el teléfono necesita de un producto para mostrarlo y sacar su
-     * subtotal igual que el servidor (precio sin ISV × cantidad, más ISV).
-     * "hay" es lo disponible: lo de la bodega menos lo apartado en otros
+     * subtotal igual que el servidor (precio sin ISV × cantidad, más ISV),
+     * con sus presentaciones que se venden (la más grande primero) y cuál
+     * usar para contar la existencia ("2 CJ12 + 5 UN"). "hay" es lo
+     * disponible en unidades base: lo de la bodega menos lo apartado en otros
      * pedidos pendientes.
+     *
+     * @param list<int> $incluir presentaciones que salen aunque ya no se vendan (las que ya lleva el pedido)
      *
      * @return array<string, mixed>
      */
-    public static function datosDe(Producto $producto, ?int $enBodega = null, int $apartado = 0): array
+    public static function datosDe(Producto $producto, ?int $enBodega = null, int $apartado = 0, array $incluir = []): array
     {
-        $unidad = $producto->precioPara(UnidadVenta::Unidad);
-        $caja = $producto->precioPara(UnidadVenta::Caja);
+        $mayor = $producto->presentacionMayor();
+        $presentaciones = [];
+
+        foreach ($producto->presentaciones->sortByDesc('contenido') as $presentacion) {
+            if (! self::seVende($presentacion) && ! in_array($presentacion->id, $incluir, true)) {
+                continue;
+            }
+
+            $presentaciones[] = [
+                'id'        => $presentacion->id,
+                'sigla'     => $presentacion->sigla(),
+                'nombre'    => $presentacion->nombre(),
+                'plural'    => $presentacion->palabra(2),
+                'contenido' => $presentacion->contenido,
+                'es_base'   => $presentacion->es_base,
+                'precio'    => $presentacion->precio,
+                'precioIsv' => self::comoEnElPedido($presentacion->precio, $producto->gravado),
+            ];
+        }
 
         return [
             'id'              => $producto->id,
             'codigo'          => $producto->codigo,
             'descripcion'     => $producto->descripcion,
-            'caja'            => $producto->unidades_por_caja,
             'gravado'         => $producto->gravado,
             'activo'          => $producto->activo,
-            'precioUnidad'    => $unidad,
-            'precioCaja'      => $caja,
-            'precioUnidadIsv' => self::comoEnElPedido($unidad, $producto->gravado),
-            'precioCajaIsv'   => self::comoEnElPedido($caja, $producto->gravado),
-            // En unidades, en la bodega del pedido (o en todas, sin bodega escogida).
+            'presentaciones'  => $presentaciones,
+            'base_sigla'      => $producto->presentacionBase()->sigla(),
+            'mayor_sigla'     => $mayor?->sigla(),
+            'mayor_contenido' => $mayor === null ? 1 : $mayor->contenido,
+            // En unidades base, en la bodega del pedido (o en todas, sin bodega escogida).
             'hay'       => $enBodega === null ? null : $enBodega - $apartado,
             'en_bodega' => $enBodega,
             'apartado'  => $apartado,
         ];
+    }
+
+    /**
+     * Se puede vender en esa presentación: activa y con precio.
+     */
+    public static function seVende(Presentacion $presentacion): bool
+    {
+        return $presentacion->activo && $presentacion->precio > 0;
     }
 
     /**
@@ -443,10 +481,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
     /**
      * Con "controlar existencias": el aviso del primer producto que pasa de
-     * lo disponible en la bodega ("No alcanza ACEITE…: disponible 1 CJ + 3
+     * lo disponible en la bodega ("No alcanza ACEITE…: disponible 1 CJ12 + 3
      * UN."); null si alcanza todo o no se controla.
      *
-     * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
+     * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      */
     public function pasaDeLoDisponible(array $lineas): ?string
     {
@@ -456,26 +494,26 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             return null;
         }
 
-        $productos = Producto::query()->whereKey(array_column($lineas, 'producto_id'))->get()->keyBy('id');
+        $presentaciones = Presentacion::query()->whereKey(array_column($lineas, 'presentacion_id'))->get()->keyBy('id');
         $pide = [];
 
         foreach ($lineas as $linea) {
-            $producto = $productos->get($linea['producto_id']);
-            $unidad = UnidadVenta::tryFrom($linea['unidad']);
+            $presentacion = $presentaciones->get($linea['presentacion_id']);
 
-            if ($producto instanceof Producto && $unidad !== null) {
-                $pide[$producto->id] = ($pide[$producto->id] ?? 0) + $linea['cantidad'] * $producto->unidadesEn($unidad);
+            if ($presentacion instanceof Presentacion) {
+                $pide[$presentacion->producto_id] = ($pide[$presentacion->producto_id] ?? 0) + $linea['cantidad'] * $presentacion->contenido;
             }
         }
 
         $disponible = Disponible::en($bodega, array_keys($pide), $this->pedidoQueSeEdita());
+        $productos = Producto::query()->whereKey(array_keys($pide))->with('presentaciones.unidadMedida')->get()->keyBy('id');
 
         foreach ($pide as $id => $unidades) {
             $producto = $productos->get($id);
             $hay = $disponible[$id] ?? 0;
 
             if ($producto instanceof Producto && $unidades > $hay) {
-                return "No alcanza {$producto->descripcion}: disponible ".Existencia::enCajas(max(0, $hay), $producto->unidades_por_caja).'.';
+                return "No alcanza {$producto->descripcion}: disponible ".$producto->existenciaEnTexto(max(0, $hay)).'.';
             }
         }
 
@@ -483,15 +521,55 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     }
 
     /**
-     * Suma una línea de la promoción (el mismo producto en la misma unidad va
-     * junto: "compre 2 y lleve 1 más" son 3).
+     * La primera línea en una presentación que ya no se vende (o sin precio,
+     * o que no es de su producto): "ACEITE… ya no se vende en CJ12."; null si
+     * todas se pueden vender. Las que ya traía el pedido así como estaban no
+     * se revisan (al editar no se obliga a cambiarlas).
      *
-     * @param array<string, array{producto_id: int, unidad: string, cantidad: int}> $lineas
+     * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      */
-    private static function sumarLinea(array &$lineas, int $productoId, UnidadVenta $unidad, int $cantidad): void
+    public function presentacionQueNoSeVende(array $lineas): ?string
     {
-        $clave = $productoId.'-'.$unidad->value;
-        $lineas[$clave] ??= ['producto_id' => $productoId, 'unidad' => $unidad->value, 'cantidad' => 0];
+        $pedido = $this->getRecord();
+        $yaEstaban = $pedido instanceof Pedido && $pedido->exists
+            ? $pedido->items()->get(['id', 'presentacion_id', 'cantidad'])->keyBy('id')
+            : collect();
+
+        $presentaciones = Presentacion::query()->with(['producto', 'unidadMedida'])->whereKey(array_column($lineas, 'presentacion_id'))->get()->keyBy('id');
+
+        foreach ($lineas as $linea) {
+            $presentacion = $presentaciones->get($linea['presentacion_id']);
+
+            if (! $presentacion instanceof Presentacion || $presentacion->producto_id !== $linea['producto_id']) {
+                return 'Hay un producto con una presentación que no es suya: vuelva a agregarlo.';
+            }
+
+            $antes = $linea['id'] !== null ? $yaEstaban->get($linea['id']) : null;
+
+            if ($antes instanceof PedidoItem && $antes->presentacion_id === $presentacion->id && $antes->cantidad === $linea['cantidad']) {
+                continue;
+            }
+
+            if (! self::seVende($presentacion)) {
+                return $presentacion->activo
+                    ? "{$presentacion->producto->descripcion} no tiene precio en {$presentacion->sigla()}."
+                    : "{$presentacion->producto->descripcion} ya no se vende en {$presentacion->sigla()}.";
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Suma una línea de la promoción (el mismo producto en la misma
+     * presentación va junto: "compre 2 y lleve 1 más" son 3).
+     *
+     * @param array<string, array{producto_id: int, presentacion_id: int, cantidad: int}> $lineas
+     */
+    private static function sumarLinea(array &$lineas, int $productoId, int $presentacionId, int $cantidad): void
+    {
+        $clave = $productoId.'-'.$presentacionId;
+        $lineas[$clave] ??= ['producto_id' => $productoId, 'presentacion_id' => $presentacionId, 'cantidad' => 0];
         $lineas[$clave]['cantidad'] += max(1, $cantidad);
     }
 
@@ -501,7 +579,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     }
 
     /**
-     * Lo que cuesta 1 (unidad o caja) con ISV, redondeado igual que la línea
+     * Lo que cuesta 1 (de esa presentación) con ISV, redondeado igual que la línea
      * del pedido (precio a 2 decimales y el ISV sobre eso). Así el precio que
      * se ve y el subtotal de 1 nunca difieren por un centavo.
      */
@@ -513,12 +591,12 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     }
 
     /**
-     * Deja solo líneas bien formadas: producto, unidad válida y cantidad de 1
+     * Deja solo líneas bien formadas: producto, presentación y cantidad de 1
      * en adelante. Lo demás que mande el navegador se ignora. Un producto
-     * lleva a lo más una línea en unidad y otra en caja: si viene repetido, se
-     * suma (y se queda el id de la primera).
+     * lleva a lo más una línea por presentación: si viene repetida, se suma
+     * (y se queda el id de la primera).
      *
-     * @return list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}>
+     * @return list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}>
      */
     public static function normalizar(mixed $estado): array
     {
@@ -529,19 +607,18 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $lineas = [];
 
         foreach ($estado as $linea) {
-            if (! is_array($linea) || ! is_numeric($linea['producto_id'] ?? null)) {
+            if (! is_array($linea) || ! is_numeric($linea['producto_id'] ?? null) || ! is_numeric($linea['presentacion_id'] ?? null)) {
                 continue;
             }
 
-            $unidad = $linea['unidad'] ?? null;
-            $unidad = $unidad instanceof UnidadVenta ? $unidad : UnidadVenta::tryFrom(is_string($unidad) ? $unidad : '');
+            $presentacion = (int) $linea['presentacion_id'];
             $cantidad = is_numeric($linea['cantidad'] ?? null) ? (int) $linea['cantidad'] : 0;
 
-            if ($unidad === null || $cantidad < 1) {
+            if ($cantidad < 1) {
                 continue;
             }
 
-            $clave = ((int) $linea['producto_id']).'-'.$unidad->value;
+            $clave = ((int) $linea['producto_id']).'-'.$presentacion;
 
             if (isset($lineas[$clave])) {
                 $lineas[$clave]['cantidad'] = min($lineas[$clave]['cantidad'] + $cantidad, self::MAXIMO_CANTIDAD);
@@ -550,10 +627,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             }
 
             $lineas[$clave] = [
-                'id'          => is_numeric($linea['id'] ?? null) ? (int) $linea['id'] : null,
-                'producto_id' => (int) $linea['producto_id'],
-                'unidad'      => $unidad->value,
-                'cantidad'    => min($cantidad, self::MAXIMO_CANTIDAD),
+                'id'              => is_numeric($linea['id'] ?? null) ? (int) $linea['id'] : null,
+                'producto_id'     => (int) $linea['producto_id'],
+                'presentacion_id' => $presentacion,
+                'cantidad'        => min($cantidad, self::MAXIMO_CANTIDAD),
             ];
         }
 
@@ -564,7 +641,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      * Pasa las líneas a pedido_items: cambia las que ya estaban (solo las de
      * este pedido), crea las nuevas y quita las que ya no vienen.
      *
-     * @param list<array{id: int|null, producto_id: int, unidad: string, cantidad: int}> $lineas
+     * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      */
     private static function guardar(Pedido $pedido, array $lineas): void
     {
@@ -573,9 +650,9 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
         foreach ($lineas as $linea) {
             $datos = [
-                'producto_id' => $linea['producto_id'],
-                'unidad'      => $linea['unidad'],
-                'cantidad'    => $linea['cantidad'],
+                'producto_id'     => $linea['producto_id'],
+                'presentacion_id' => $linea['presentacion_id'],
+                'cantidad'        => $linea['cantidad'],
             ];
 
             $item = $linea['id'] !== null ? $actuales->get($linea['id']) : null;

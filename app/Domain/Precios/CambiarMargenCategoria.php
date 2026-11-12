@@ -8,14 +8,15 @@ use App\Enums\MotivoCambioPrecio;
 use App\Models\Categoria;
 use App\Models\Producto;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Cambia el % de utilidad de una categoría y recalcula el precio de todos
  * sus productos (con su costo actual), dejando cada cambio en el historial.
  *
- * Los productos con margen propio no se tocan: su margen manda. Tampoco los
- * de precio fijo: su precio lo puso la empresa a mano.
+ * Los productos con margen propio no se tocan: su margen manda. Tampoco las
+ * presentaciones de precio fijo: su precio lo puso la empresa a mano.
  */
 final class CambiarMargenCategoria
 {
@@ -44,11 +45,11 @@ final class CambiarMargenCategoria
 
             $categoria->productos()
                 ->whereNull('margen')
-                ->where('precio_fijo', false)
-                ->with('categoria')
+                ->whereHas('presentaciones', fn (Builder $presentaciones): Builder => $presentaciones->where('precio_fijo', false))
+                ->with(['categoria', 'presentaciones.unidadMedida'])
                 ->lazyById()
                 ->each(function (Producto $producto) use ($usuario, $nota, &$cambiados): void {
-                    $cambio = $this->actualizarPrecio->ejecutar(
+                    $cambios = $this->actualizarPrecio->ejecutar(
                         $producto,
                         $producto->costo_unidad,
                         MotivoCambioPrecio::Margen,
@@ -56,7 +57,7 @@ final class CambiarMargenCategoria
                         nota: $nota,
                     );
 
-                    if ($cambio !== null) {
+                    if ($cambios !== []) {
                         $cambiados++;
                     }
                 });

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Promociones\Schemas;
 
-use App\Enums\UnidadVenta;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Existencia;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\Promocion;
 use App\Support\Texto;
@@ -21,6 +21,7 @@ use Filament\Forms\Components\ToggleButtons;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -88,12 +89,12 @@ class PromocionForm
                                     TableColumn::make('En')->width('115px'),
                                 ])
                                 ->schema([
-                                    self::producto('producto_id', '../../bodegas')
+                                    self::producto('producto_id', '../../bodegas', 'presentacion_id')
                                         ->hiddenLabel()
                                         ->distinct(),
                                     self::cantidad('cantidad')
                                         ->hiddenLabel(),
-                                    self::unidad('unidad')
+                                    self::presentacion('presentacion_id', 'producto_id')
                                         ->hiddenLabel(),
                                 ])
                                 ->minItems(1)
@@ -107,12 +108,12 @@ class PromocionForm
                         ->compact()
                         ->columns(4)
                         ->schema([
-                            self::producto('producto_beneficio_id', 'bodegas')
+                            self::producto('producto_beneficio_id', 'bodegas', 'beneficio_presentacion_id')
                                 ->label('Producto')
                                 ->columnSpanFull(),
                             self::cantidad('cantidad_beneficio')
                                 ->label('Cantidad'),
-                            self::unidad('beneficio_unidad')
+                            self::presentacion('beneficio_presentacion_id', 'producto_beneficio_id')
                                 ->label('En'),
                             ToggleButtons::make('tipo')
                                 ->label('¿Cómo sale?')
@@ -206,11 +207,15 @@ class PromocionForm
 
     /**
      * Buscador de productos con cuánto hay de cada uno en las bodegas de la
-     * promoción ($rutaBodegas: dónde está el campo "bodegas" desde este).
+     * promoción ($rutaBodegas: dónde está el campo "bodegas" desde este). Al
+     * escoger uno, su presentación ($campoPresentacion) pasa a la base.
      */
-    private static function producto(string $campo, string $rutaBodegas): Select
+    private static function producto(string $campo, string $rutaBodegas, string $campoPresentacion): Select
     {
         return Select::make($campo)
+            ->afterStateUpdated(fn (mixed $state, Set $set): mixed => $set($campoPresentacion, is_numeric($state)
+                ? Presentacion::query()->where('producto_id', (int) $state)->where('es_base', true)->value('id')
+                : null))
             ->placeholder('Buscar por código o nombre…')
             ->searchable()
             ->allowHtml()
@@ -244,6 +249,7 @@ class PromocionForm
             ->buscar($buscar)
             ->orderBy('descripcion')
             ->limit(50)
+            ->with('presentaciones.unidadMedida')
             ->get();
 
         $hay = self::existenciaEn($bodegas, $productos->modelKeys());
@@ -263,7 +269,7 @@ class PromocionForm
      */
     private static function etiquetaConExistencia(Producto $producto, int $hay): string
     {
-        $texto = $hay > 0 ? 'Hay '.Existencia::enCajas($hay, $producto->unidades_por_caja) : 'Sin existencia';
+        $texto = $hay > 0 ? 'Hay '.$producto->existenciaEnTexto($hay) : 'Sin existencia';
         $color = $hay > 0 ? 'var(--success-500)' : 'var(--danger-500)';
 
         return '<span style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;width:100%">'
@@ -351,14 +357,53 @@ class PromocionForm
             ->live(debounce: 500);
     }
 
-    private static function unidad(string $campo): Select
+    /**
+     * En qué presentación del producto ($campoProducto): UN, CJ12, FD6…
+     */
+    private static function presentacion(string $campo, string $campoProducto): Select
     {
         return Select::make($campo)
-            ->options(UnidadVenta::class)
-            ->default(UnidadVenta::Unidad->value)
+            ->options(fn (Get $get): array => self::presentacionesDe($get($campoProducto), $get($campo)))
             ->selectablePlaceholder(false)
             ->required()
             ->live();
+    }
+
+    /**
+     * [id => "CJ12"] de las que se venden del producto (y la que ya tenga escogida).
+     *
+     * @return array<int, string>
+     */
+    private static function presentacionesDe(mixed $productoId, mixed $actual): array
+    {
+        if (! is_numeric($productoId)) {
+            return [];
+        }
+
+        /** @var array<int, string> $opciones */
+        $opciones = Presentacion::query()
+            ->with('unidadMedida')
+            ->where('producto_id', (int) $productoId)
+            ->where(fn (Builder $query): Builder => $query->where('activo', true)->orWhere('id', is_numeric($actual) ? (int) $actual : 0))
+            ->enOrden()
+            ->get()
+            ->mapWithKeys(fn (Presentacion $presentacion): array => [$presentacion->id => $presentacion->sigla()])
+            ->all();
+
+        return $opciones;
+    }
+
+    /**
+     * "2 cajas de 12" con lo escrito en el formulario ("1 unidad" si todavía no hay presentación).
+     */
+    private static function cantidadTexto(mixed $cantidad, mixed $presentacionId): string
+    {
+        $cantidad = max(1, is_numeric($cantidad) ? (int) $cantidad : 1);
+        $presentacion = is_numeric($presentacionId) ? Presentacion::query()->with('unidadMedida')->find((int) $presentacionId) : null;
+
+        return $presentacion instanceof Presentacion
+            ? $presentacion->enPalabras($cantidad)
+            : $cantidad.' '.($cantidad === 1 ? 'unidad' : 'unidades');
     }
 
     /**
@@ -385,7 +430,7 @@ class PromocionForm
 
             $idsCompra[] = $producto->id;
             $compra[] = [
-                'cantidad' => Promocion::cantidadTexto(max(1, (int) ($fila['cantidad'] ?? 1)), self::unidadDe($fila['unidad'] ?? null)),
+                'cantidad' => self::cantidadTexto($fila['cantidad'] ?? 1, $fila['presentacion_id'] ?? null),
                 'producto' => $producto->descripcion,
             ];
         }
@@ -402,7 +447,7 @@ class PromocionForm
             'vigencia' => self::vigencia($get('vigente_desde'), $get('vigente_hasta')),
             'compra'   => $compra,
             'regalo'   => $regalo instanceof Producto ? [
-                'cantidad' => Promocion::cantidadTexto(max(1, (int) $get('cantidad_beneficio')), self::unidadDe($get('beneficio_unidad'))),
+                'cantidad' => self::cantidadTexto($get('cantidad_beneficio'), $get('beneficio_presentacion_id')),
                 'producto' => $regalo->descripcion,
                 'mismo'    => in_array($regalo->id, $idsCompra, true),
             ] : null,
@@ -439,14 +484,5 @@ class PromocionForm
         } catch (Throwable) {
             return null;
         }
-    }
-
-    private static function unidadDe(mixed $valor): UnidadVenta
-    {
-        if ($valor instanceof UnidadVenta) {
-            return $valor;
-        }
-
-        return UnidadVenta::tryFrom(is_string($valor) ? $valor : '') ?? UnidadVenta::Unidad;
     }
 }

@@ -14,18 +14,19 @@ use Livewire\Attributes\Renderless;
 
 /**
  * Validar y Corregir: cuánto sale de cada producto del pedido, como en la
- * preventa: un contador de cajas y otro de unidades, con lo que pidió, cuánto
- * hay en la bodega, cuánto saca este pedido y cuánto quedaría. "No hay" lo
- * deja en 0 y "Sí hay" lo regresa a lo pedido. Puede salir menos de lo
- * pedido, más, o en la otra unidad (unidades sueltas si una caja vino
- * dañada); cada cosa se dice en palabras ("falta 1 caja de 3"). Arriba,
+ * preventa: un contador por cada presentación que se vende (CJ12, CJ8,
+ * UN…), con lo que pidió, cuánto hay en la bodega, cuánto saca este pedido y
+ * cuánto quedaría. "No hay" lo deja en 0 y "Sí hay" lo regresa a lo pedido.
+ * Puede salir menos de lo pedido, más, o en otra presentación (unidades
+ * sueltas si una caja vino dañada); cada cosa se dice en palabras ("falta 1
+ * caja de 12 (pidió 3)"). Arriba,
  * "Agregar otro producto" busca uno que no venía en el pedido y lo suma a la
  * lista. Todo pasa en el teléfono; al servidor solo van la búsqueda y
  * confirmar.
  *
- * Estado: list<array{id: int|null, producto_id: int, es_caja: bool, sale: int, ...}>
+ * Estado: list<array{id: int|null, producto_id: int, presentacion_id: int, sale: int, ...}>
  * como lo arma App\Filament\Resources\Pedidos\Actions\LineasPedido::datos(): las
- * líneas del pedido y, sin id, la unidad que cada producto no trae.
+ * líneas del pedido y, sin id, las presentaciones que cada producto no trae.
  *
  * Vista: resources/views/filament/pedidos/salida-pedido.blade.php
  */
@@ -81,6 +82,7 @@ class SalidaDePedido extends Field
 
         $rules["{$statePath}.*.id"] = ['nullable', 'integer'];
         $rules["{$statePath}.*.producto_id"] = ['required', 'integer'];
+        $rules["{$statePath}.*.presentacion_id"] = ['required', 'integer'];
         $rules["{$statePath}.*.sale"] = ['required', 'integer', 'min:0', 'max:'.AjustarLineas::MAXIMO];
     }
 

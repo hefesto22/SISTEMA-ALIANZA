@@ -7,8 +7,10 @@ namespace Database\Seeders;
 use App\Enums\MotivoCambioPrecio;
 use App\Models\CambioPrecio;
 use App\Models\Categoria;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\Proveedor;
+use App\Models\UnidadMedida;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -20,7 +22,11 @@ use Illuminate\Support\Facades\File;
  *
  *  - costo_unidad: costo por unidad sin ISV, ya con descuentos.
  *  - precio_unidad: el precio por unidad sin ISV que mostraba el Excel.
+ *  - unidades_por_caja: cuántas trae la caja.
  *  - margen: solo si en el Excel el % estaba puesto a mano en esa fila.
+ *
+ * Cada producto queda con su UN (a ese precio) y, si la caja trae más de 1,
+ * con su CJ (precio = UN × lo que trae). El historial arranca en la UN.
  *
  * Solo CREA lo que no existe: si se vuelve a correr no pisa precios que
  * ya se cambiaron en el sistema.
@@ -33,8 +39,9 @@ class CatalogoSeeder extends Seeder
         $catalogo = json_decode(File::get(database_path('seeders/data/catalogo.json')), true, flags: JSON_THROW_ON_ERROR);
 
         $creados = 0;
+        $caja = (int) UnidadMedida::query()->where('codigo', 'CJ')->valueOrFail('id');
 
-        DB::transaction(function () use ($catalogo, &$creados): void {
+        DB::transaction(function () use ($catalogo, $caja, &$creados): void {
             foreach ($catalogo as $codigoProveedor => $datos) {
                 $proveedor = Proveedor::query()->where('codigo', (string) $codigoProveedor)->first();
 
@@ -70,23 +77,35 @@ class CatalogoSeeder extends Seeder
                     $categoria = $categorias[$p['categoria']];
 
                     $producto = new Producto([
-                        'proveedor_id'      => $proveedor->id,
-                        'categoria_id'      => $categoria->id,
-                        'codigo'            => $p['codigo'],
-                        'descripcion'       => $p['descripcion'],
-                        'unidades_por_caja' => max(1, $p['unidades_por_caja']),
-                        'gravado'           => $p['gravado'],
-                        'margen'            => $p['margen'],
-                        'activo'            => true,
+                        'proveedor_id' => $proveedor->id,
+                        'categoria_id' => $categoria->id,
+                        'codigo'       => $p['codigo'],
+                        'descripcion'  => $p['descripcion'],
+                        'gravado'      => $p['gravado'],
+                        'margen'       => $p['margen'],
+                        'activo'       => true,
                     ]);
                     $producto->forceFill([
                         'costo_unidad'          => $p['costo_unidad'],
-                        'precio_unidad'         => $p['precio_unidad'],
                         'precio_actualizado_at' => $ahora,
                     ])->save();
 
+                    // La UN nace con el producto; aquí toma su precio y, si hay caja, se agrega.
+                    $base = Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->firstOrFail();
+                    $base->forceFill(['precio' => $p['precio_unidad']])->save();
+
+                    if ($p['unidades_por_caja'] > 1) {
+                        Presentacion::query()->create([
+                            'producto_id'      => $producto->id,
+                            'unidad_medida_id' => $caja,
+                            'contenido'        => $p['unidades_por_caja'],
+                            'precio'           => round($p['precio_unidad'] * $p['unidades_por_caja'], 4),
+                        ]);
+                    }
+
                     $historial[] = [
                         'producto_id'     => $producto->id,
+                        'presentacion_id' => $base->id,
                         'user_id'         => null,
                         'bodega_id'       => null,
                         'motivo'          => MotivoCambioPrecio::CargaInicial->value,

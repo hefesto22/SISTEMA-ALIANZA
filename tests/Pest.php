@@ -8,6 +8,8 @@ use App\Enums\ModoImpresion;
 use App\Models\Cai;
 use App\Models\DatosFiscales;
 use App\Models\Pedido;
+use App\Models\Presentacion;
+use App\Models\Producto;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Pest\Expectation;
@@ -58,6 +60,31 @@ expect()->extend('toBeValidRTN', function (): Expectation {
 | Functions
 |--------------------------------------------------------------------------
 */
+
+/**
+ * La presentación del producto que trae $contenido (1 = la base, UN):
+ * presentacion($jabon, 12)->id es su CJ de 12.
+ */
+function presentacion(Producto $producto, int $contenido = 1): Presentacion
+{
+    return Presentacion::query()
+        ->where('producto_id', $producto->id)
+        ->where('contenido', $contenido)
+        ->orderByDesc('es_base')
+        ->firstOrFail();
+}
+
+/**
+ * La presentación más grande del producto que trae varias (la CJ del factory).
+ */
+function caja(Producto $producto): Presentacion
+{
+    return Presentacion::query()
+        ->where('producto_id', $producto->id)
+        ->where('es_base', false)
+        ->orderByDesc('contenido')
+        ->firstOrFail();
+}
 
 function actingAsAdmin(): User
 {

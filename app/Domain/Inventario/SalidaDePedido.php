@@ -55,7 +55,8 @@ final class SalidaDePedido
     }
 
     /**
-     * Unidades que salen de cada producto (cajas × unidades por caja + sueltas).
+     * Unidades base que salen de cada producto (cada línea: lo que sale × lo
+     * que trae su presentación).
      *
      * @return array<int, int>
      */
@@ -65,8 +66,7 @@ final class SalidaDePedido
 
         /** @var PedidoItem $item */
         foreach ($pedido->items as $item) {
-            $unidades[$item->producto_id] = ($unidades[$item->producto_id] ?? 0)
-                + $item->cantidadFacturable() * $item->producto->unidadesEn($item->unidad);
+            $unidades[$item->producto_id] = ($unidades[$item->producto_id] ?? 0) + $item->unidades();
         }
 
         return $unidades;

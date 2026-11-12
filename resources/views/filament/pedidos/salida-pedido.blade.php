@@ -2,32 +2,32 @@
     Validar y Corregir: cuánto sale de cada producto (App\Filament\Schemas\Components\SalidaDePedido).
 
     Pensado para pedidos largos (30 productos o más): cada producto es una
-    fila corta con lo que sale ("2 CJ", "3 UN"), el nombre, lo que pidió y, a
-    la derecha, si cambió ("−1 CJ", "+3 UN", "No sale") y cuánto queda en la
-    bodega. Al tocarla se abre: cuánto hay en la bodega, cuánto saca este
-    pedido y cuánto quedaría, y los contadores de CAJAS y UNIDADES con − y +
-    (se puede mandar menos, más o en la otra unidad: unidades sueltas si una
-    caja vino dañada). Arriba, filtros: todos, con cambios, no alcanza. Abajo,
+    fila corta con lo que sale ("2 CJ12", "3 UN"), el nombre, lo que pidió y,
+    a la derecha, si cambió ("−1 CJ12", "+3 UN", "No sale") y cuánto queda en
+    la bodega. Al tocarla se abre: cuánto hay en la bodega, cuánto saca este
+    pedido y cuánto quedaría, y un contador con − y + por cada presentación
+    que se vende (CJ12, CJ8, UN…): se puede mandar menos, más o en otra
+    presentación (unidades sueltas si una caja vino dañada). Arriba, filtros: todos, con cambios, no alcanza. Abajo,
     un resumen de lo que no va completo, de lo que va de más y de lo agregado.
 
     "Agregar otro producto" (arriba): un botón que abre el buscador (así al
     abrir el modal no salta el teclado del teléfono). Busca un producto
     activo que no venía en el pedido (SalidaDePedido::buscarProductos), con
     lo que hay en la bodega, y lo suma al final de la lista ya abierto, con 1
-    caja (o 1 unidad si no alcanza para una caja). Si ya está en la lista,
+    en la presentación más grande que alcanza. Si ya está en la lista,
     solo lo abre. Con "controlar existencias" encendido, lo que no tiene
     existencia no entra. Uno agregado se puede quitar; si se deja en 0 no se
     agrega.
 
-    El estado son las líneas del pedido más, sin id, la unidad que cada
-    producto no trae (LineasPedido::datos); aquí se juntan por producto.
+    El estado son las líneas del pedido más, sin id, las presentaciones que
+    cada producto no trae (LineasPedido::datos); aquí se juntan por producto.
     Todo pasa en el teléfono (Alpine); al servidor solo va al confirmar. Los
     estilos van aquí mismo, sin compilar.
 --}}
 @php
     $statePath = $getStatePath();
     $filas = is_array($getState()) ? array_values($getState()) : [];
-    $clave = md5((string) json_encode(array_map(fn (mixed $fila): mixed => is_array($fila) ? [$fila['id'] ?? null, $fila['producto_id'] ?? null, $fila['es_caja'] ?? null] : null, $filas)));
+    $clave = md5((string) json_encode(array_map(fn (mixed $fila): mixed => is_array($fila) ? [$fila['id'] ?? null, $fila['producto_id'] ?? null, $fila['presentacion_id'] ?? null] : null, $filas)));
     $productos = count(array_unique(array_map(fn (mixed $fila): mixed => is_array($fila) ? ($fila['producto_id'] ?? null) : null, $filas)));
     $componente = $getKey();
     $controlar = \App\Models\Configuracion::actual()->controlar_existencias;
@@ -378,7 +378,7 @@
                 this.poner(fila, this.n(fila.sale) + paso)
             },
 
-            {{-- Un producto: su caja y su unidad (la que no venía en el pedido, sin id). --}}
+            {{-- Un producto: sus presentaciones (las que no venían en el pedido, sin id). --}}
             grupos() {
                 const orden = []
                 const porProducto = {}
@@ -387,11 +387,11 @@
                     const id = this.n(fila.producto_id)
 
                     if (! porProducto[id]) {
-                        porProducto[id] = { id, info: fila, caja: null, unidad: null }
+                        porProducto[id] = { id, info: fila, filas: [] }
                         orden.push(porProducto[id])
                     }
 
-                    porProducto[id][fila.es_caja ? 'caja' : 'unidad'] = fila
+                    porProducto[id].filas.push(fila)
                 }
 
                 return orden
@@ -408,14 +408,16 @@
                 this.abierta = this.abierta === grupo.id ? null : grupo.id
             },
 
+            {{-- La más grande primero (CJ12, CJ8, UN). --}}
             filasDe(grupo) {
-                return [grupo.caja, grupo.unidad].filter(Boolean)
+                return [...grupo.filas].sort((a, b) => this.n(b.contenido) - this.n(a.contenido))
             },
 
-            {{-- "2 CJ + 5 UN", igual que Existencia::enCajas. --}}
-            enCajas(unidades, porCaja) {
+            {{-- Unidades base con la presentación más grande del producto: "2 CJ12 + 5 UN", igual que Producto::existenciaEnTexto. --}}
+            enCajas(unidades, info) {
                 unidades = this.n(unidades)
-                porCaja = Math.max(1, this.n(porCaja))
+                const porCaja = Math.max(1, this.n(info.mayor_contenido))
+                const base = info.base_sigla ?? 'UN'
 
                 if (unidades === 0) {
                     return '0'
@@ -425,31 +427,38 @@
                 const resto = Math.abs(unidades)
 
                 if (porCaja <= 1) {
-                    return signo + resto + ' UN'
+                    return signo + resto + ' ' + base
                 }
 
                 const partes = []
                 const cajas = Math.floor(resto / porCaja)
                 const sueltas = resto % porCaja
 
-                if (cajas > 0) partes.push(cajas + ' CJ')
-                if (sueltas > 0) partes.push(sueltas + ' UN')
+                if (cajas > 0) partes.push(cajas + ' ' + info.mayor_sigla)
+                if (sueltas > 0) partes.push(sueltas + ' ' + base)
 
                 return signo + partes.join(' + ')
             },
 
             sigla(fila) {
-                return fila.es_caja ? 'CJ' : 'UN'
+                return fila.sigla
             },
 
-            {{-- "1 caja", "3 cajas", "1 unidad", "5 unidades". --}}
+            {{-- "1 caja de 12", "3 cajas de 12", "1 unidad", "5 unidades". --}}
             palabras(cantidad, fila) {
                 cantidad = this.n(cantidad)
 
-                return cantidad + ' ' + (fila.es_caja ? (cantidad === 1 ? 'caja' : 'cajas') : (cantidad === 1 ? 'unidad' : 'unidades'))
+                return cantidad + ' ' + (cantidad === 1 ? fila.singular : fila.plural)
             },
 
-            {{-- "1 caja y 3 unidades". --}}
+            {{-- "Cajas de 12", "Unidades": encima de cada contador. --}}
+            titulo(fila) {
+                const plural = String(fila.plural ?? '')
+
+                return plural.charAt(0).toUpperCase() + plural.slice(1)
+            },
+
+            {{-- "1 caja de 12 y 3 unidades". --}}
             pidio(grupo) {
                 return this.filasDe(grupo)
                     .filter((fila) => this.n(fila.cantidad) > 0)
@@ -457,7 +466,7 @@
                     .join(' y ')
             },
 
-            {{-- "2 CJ + 3 UN" (en la fila corta). --}}
+            {{-- "2 CJ12 + 3 UN" (en la fila corta). --}}
             pidioCorto(grupo) {
                 return this.filasDe(grupo)
                     .filter((fila) => this.n(fila.cantidad) > 0)
@@ -481,7 +490,7 @@
                 this.filasDe(grupo).forEach((fila) => fila.sale = this.n(fila.cantidad))
             },
 
-            {{-- A la derecha de la fila corta: "−1 CJ", "+3 UN", "No sale", "Agregado"; vacío si sale como se pidió. --}}
+            {{-- A la derecha de la fila corta: "−1 CJ12", "+3 UN", "No sale", "Agregado"; vacío si sale como se pidió. --}}
             cambioCorto(grupo) {
                 if (! this.difiere(grupo)) return ''
                 if (this.total(grupo) === 0) return 'No sale'
@@ -504,9 +513,9 @@
                 return this.filasDe(grupo).some((fila) => this.n(fila.sale) < this.n(fila.cantidad)) ? '' : 'sp-chip-mas'
             },
 
-            {{-- Unidades que saca este pedido del producto (cajas y unidades). --}}
+            {{-- Unidades base que saca este pedido del producto (todas sus presentaciones). --}}
             saleDelProducto(grupo) {
-                return this.filasDe(grupo).reduce((suma, fila) => suma + this.n(fila.sale) * Math.max(1, this.n(fila.por_unidad)), 0)
+                return this.filasDe(grupo).reduce((suma, fila) => suma + this.n(fila.sale) * Math.max(1, this.n(fila.contenido)), 0)
             },
 
             {{-- Lo que cambia en la bodega: al validar sale todo; al corregir, la diferencia con lo que ya salió. --}}
@@ -522,7 +531,7 @@
                 return grupo.info.mueve && this.quedan(grupo) < 0
             },
 
-            {{-- Como PedidoItem: "No sale: pidió 2 cajas", "No va completo: falta 1 caja de 3", "Va de más: …"; vacío si va justo. --}}
+            {{-- Como PedidoItem: "No sale: pidió 2 cajas de 12", "No va completo: falta 1 caja de 12 (pidió 3)", "Va de más: …"; vacío si va justo. --}}
             estado(fila) {
                 const sale = this.n(fila.sale)
                 const pidio = this.n(fila.cantidad)
@@ -532,7 +541,7 @@
                 }
 
                 if (pidio === 0) {
-                    return sale > 0 ? 'Va de más: ' + this.palabras(sale, fila) + ' (no lo pidió en ' + (fila.es_caja ? 'cajas' : 'unidades') + ')' : ''
+                    return sale > 0 ? 'Va de más: ' + this.palabras(sale, fila) + ' (no lo pidió en ' + fila.plural + ')' : ''
                 }
 
                 if (sale === 0) {
@@ -549,7 +558,7 @@
 
                 const falta = pidio - sale
 
-                return 'No va completo: ' + (falta === 1 ? 'falta ' : 'faltan ') + this.palabras(falta, fila) + ' de ' + pidio
+                return 'No va completo: ' + (falta === 1 ? 'falta ' : 'faltan ') + this.palabras(falta, fila) + ' (pidió ' + pidio + ')'
             },
 
             claseEstado(fila) {
@@ -658,12 +667,12 @@
                     >
                         <span class="sp-resultado-texto">
                             <span class="sp-resultado-nombre" x-text="p.descripcion"></span>
-                            <span class="sp-resultado-meta" x-text="p.codigo + (n(p.por_caja) > 1 ? ' · caja de ' + p.por_caja : '')"></span>
+                            <span class="sp-resultado-meta" x-text="p.codigo + ' · ' + p.filas.map((fila) => fila.sigla).join(' · ')"></span>
                             <span class="sp-resultado-ya" x-show="enLista(p)">Ya está en la lista: tocar para verlo</span>
                         </span>
                         <span class="sp-resultado-hay" x-bind:class="{ 'sp-hay-nada': n(p.hay_unidades) <= 0 }">
                             <span x-text="n(p.hay_unidades) <= 0 ? 'Sin' : 'Hay'"></span>
-                            <strong x-text="n(p.hay_unidades) <= 0 ? 'existencia' : enCajas(p.hay_unidades, p.por_caja)"></strong>
+                            <strong x-text="n(p.hay_unidades) <= 0 ? 'existencia' : p.hay"></strong>
                         </span>
                     </button>
                 </template>
@@ -686,8 +695,8 @@
                     {{-- Fila corta --}}
                     <button type="button" class="sp-corta" x-on:click="abrir(grupo)" x-bind:aria-expanded="abierta === grupo.id">
                         <span class="sp-cants">
-                            <template x-for="fila in filasDe(grupo).filter((fila) => n(fila.sale) > 0)" x-bind:key="'cant-' + sigla(fila)">
-                                <span class="sp-cant" x-bind:class="{ 'sp-cant-caja': fila.es_caja }" x-text="n(fila.sale) + ' ' + sigla(fila)"></span>
+                            <template x-for="fila in filasDe(grupo).filter((fila) => n(fila.sale) > 0)" x-bind:key="'cant-' + fila.presentacion_id">
+                                <span class="sp-cant" x-bind:class="{ 'sp-cant-caja': ! fila.es_base }" x-text="n(fila.sale) + ' ' + sigla(fila)"></span>
                             </template>
                             <span class="sp-cant sp-cant-cero" x-show="total(grupo) === 0">0</span>
                         </span>
@@ -703,7 +712,7 @@
                                 class="sp-corta-quedan"
                                 x-show="grupo.info.mueve"
                                 x-bind:class="{ 'sp-neg': noAlcanza(grupo) }"
-                                x-text="noAlcanza(grupo) ? 'no alcanza −' + enCajas(-quedan(grupo), grupo.info.por_caja) : 'quedan ' + enCajas(quedan(grupo), grupo.info.por_caja)"
+                                x-text="noAlcanza(grupo) ? 'no alcanza −' + enCajas(-quedan(grupo), grupo.info) : 'quedan ' + enCajas(quedan(grupo), grupo.info)"
                             ></span>
                         </span>
 
@@ -721,45 +730,45 @@
                         <div class="sp-bodega" x-bind:class="{ 'sp-bodega-sola': ! grupo.info.mueve }">
                             <div class="sp-dato">
                                 <span>En bodega</span>
-                                <strong x-text="enCajas(grupo.info.hay_unidades, grupo.info.por_caja)"></strong>
+                                <strong x-text="enCajas(grupo.info.hay_unidades, grupo.info)"></strong>
                             </div>
                             <div class="sp-dato" x-show="grupo.info.mueve" x-bind:class="cambio(grupo) < 0 ? 'sp-regresa' : 'sp-sale'">
                                 <span x-text="paraValidar ? 'Este pedido' : (cambio(grupo) < 0 ? 'Regresan' : (cambio(grupo) > 0 ? 'Salen más' : 'Sin cambio'))"></span>
-                                <strong x-text="(cambio(grupo) > 0 ? '−' : (cambio(grupo) < 0 ? '+' : '')) + enCajas(Math.abs(cambio(grupo)), grupo.info.por_caja)"></strong>
+                                <strong x-text="(cambio(grupo) > 0 ? '−' : (cambio(grupo) < 0 ? '+' : '')) + enCajas(Math.abs(cambio(grupo)), grupo.info)"></strong>
                             </div>
                             <div class="sp-dato" x-show="grupo.info.mueve" x-bind:class="{ 'sp-negativo': quedan(grupo) < 0, 'sp-justo': quedan(grupo) === 0 }">
                                 <span>Quedan</span>
-                                <strong x-text="enCajas(quedan(grupo), grupo.info.por_caja)"></strong>
+                                <strong x-text="enCajas(quedan(grupo), grupo.info)"></strong>
                             </div>
                         </div>
 
-                        <div class="sp-no-alcanza" x-show="noAlcanza(grupo)" x-text="'No alcanza: faltan ' + enCajas(-quedan(grupo), grupo.info.por_caja) + ' en la bodega'"></div>
+                        <div class="sp-no-alcanza" x-show="noAlcanza(grupo)" x-text="'No alcanza: faltan ' + enCajas(-quedan(grupo), grupo.info) + ' en la bodega'"></div>
 
-                        <template x-for="fila in filasDe(grupo)" x-bind:key="'estado-' + sigla(fila)">
+                        <template x-for="fila in filasDe(grupo)" x-bind:key="'estado-' + fila.presentacion_id">
                             <div class="sp-estado" x-bind:class="claseEstado(fila)" x-show="estado(fila) !== ''" x-text="estado(fila)"></div>
                         </template>
 
                         <div class="sp-controles">
-                            <template x-for="fila in filasDe(grupo)" x-bind:key="'cantidad-' + sigla(fila)">
+                            <template x-for="fila in filasDe(grupo)" x-bind:key="'cantidad-' + fila.presentacion_id">
                                 <div class="sp-cantidad">
                                     <span class="sp-cantidad-etiqueta">
-                                        <span x-text="fila.es_caja ? 'Cajas de ' + fila.por_caja : 'Unidades'"></span>
+                                        <span x-text="titulo(fila)"></span>
                                         <em x-text="n(fila.cantidad) > 0 ? 'pidió ' + n(fila.cantidad) : 'no pidió'"></em>
                                     </span>
-                                    <div class="sp-stepper" x-bind:class="{ 'sp-stepper-caja': fila.es_caja }">
-                                        <button type="button" class="sp-paso" x-bind:aria-label="fila.es_caja ? 'Una caja menos' : 'Una unidad menos'" x-on:click="mover(fila, -1)" x-bind:disabled="n(fila.sale) <= 0">{{ svg('heroicon-m-minus') }}</button>
+                                    <div class="sp-stepper" x-bind:class="{ 'sp-stepper-caja': ! fila.es_base }">
+                                        <button type="button" class="sp-paso" x-bind:aria-label="'Una menos: ' + fila.nombre" x-on:click="mover(fila, -1)" x-bind:disabled="n(fila.sale) <= 0">{{ svg('heroicon-m-minus') }}</button>
                                         <input
                                             type="number"
                                             inputmode="numeric"
                                             min="0"
                                             x-bind:max="maximo"
-                                            x-bind:aria-label="fila.es_caja ? 'Cajas que salen' : 'Unidades que salen'"
+                                            x-bind:aria-label="titulo(fila) + ' que salen'"
                                             x-bind:value="fila.sale"
                                             x-on:focus="$event.target.select()"
                                             x-on:change="poner(fila, $event.target.value); $event.target.value = fila.sale"
                                             x-on:keydown.enter.prevent="poner(fila, $event.target.value); $event.target.value = fila.sale; $event.target.blur()"
                                         >
-                                        <button type="button" class="sp-paso" x-bind:aria-label="fila.es_caja ? 'Una caja más' : 'Una unidad más'" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= maximo">{{ svg('heroicon-m-plus') }}</button>
+                                        <button type="button" class="sp-paso" x-bind:aria-label="'Una más: ' + fila.nombre" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= maximo">{{ svg('heroicon-m-plus') }}</button>
                                     </div>
                                 </div>
                             </template>
@@ -782,8 +791,8 @@
         <div class="sp-incompletas" x-show="incompletas().length > 0" x-cloak>
             <strong>No va completo</strong>
             <ul>
-                <template x-for="fila in incompletas()" x-bind:key="'falta-' + fila.producto_id + '-' + sigla(fila)">
-                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
+                <template x-for="fila in incompletas()" x-bind:key="'falta-' + fila.presentacion_id">
+                    <li><b x-text="sigla(fila) + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
                 </template>
             </ul>
         </div>
@@ -791,8 +800,8 @@
         <div class="sp-incompletas sp-de-mas" x-show="deMas().length > 0" x-cloak>
             <strong>Va de más</strong>
             <ul>
-                <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.producto_id + '-' + sigla(fila)">
-                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
+                <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.presentacion_id">
+                    <li><b x-text="sigla(fila) + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
                 </template>
             </ul>
         </div>
@@ -800,8 +809,8 @@
         <div class="sp-incompletas sp-agregados" x-show="agregados().length > 0" x-cloak>
             <strong>Agregado (no venía en el pedido)</strong>
             <ul>
-                <template x-for="fila in agregados()" x-bind:key="'agregado-' + fila.producto_id + '-' + sigla(fila)">
-                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="palabras(fila.sale, fila)"></span></li>
+                <template x-for="fila in agregados()" x-bind:key="'agregado-' + fila.presentacion_id">
+                    <li><b x-text="sigla(fila) + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="palabras(fila.sale, fila)"></span></li>
                 </template>
             </ul>
         </div>

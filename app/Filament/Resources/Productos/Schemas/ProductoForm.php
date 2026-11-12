@@ -5,10 +5,15 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Productos\Schemas;
 
 use App\Models\Categoria;
+use App\Models\Presentacion;
+use App\Models\Producto;
+use App\Models\UnidadMedida;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Forms\Components\ToggleButtons;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -16,8 +21,20 @@ use Filament\Schemas\Schema;
 use Illuminate\Validation\Rules\Unique;
 
 /**
- * Datos del producto. El costo/precio NO se editan aquí (salvo el inicial
- * al crearlo): se cambian con "Actualizar precio" para que quede historial.
+ * Datos del producto y sus presentaciones.
+ *
+ * Presentaciones: la base (en qué se cuenta la existencia, casi siempre UN;
+ * trae 1) siempre está y se dice si se vende suelta. Abajo se agregan las
+ * que traen varias del MISMO producto (mismo código): CJ de 8, CJ de 10, FD
+ * de 6, SC de 10… Cada una se vende con su precio.
+ *
+ * Al crear, costo y precios son opcionales: el costo lo pone la primera
+ * compra y el precio sale del costo con el % de utilidad; si se escribe un
+ * precio, queda ese (y si se marca fijo, las compras no lo mueven). Después
+ * se cambian con "Actualizar precio" para que quede historial.
+ *
+ * Los campos de presentaciones no son columnas del producto: los guarda
+ * CreateProducto / EditProducto con App\Domain\Productos\GuardarPresentaciones.
  */
 class ProductoForm
 {
@@ -58,13 +75,13 @@ class ProductoForm
                                 ignoreRecord: true,
                                 modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('proveedor_id', $get('proveedor_id')),
                             ),
-                        TextInput::make('unidades_por_caja')
-                            ->label('Unidades por caja (UxC)')
-                            ->numeric()
-                            ->integer()
-                            ->minValue(1)
-                            ->default(1)
-                            ->required(),
+                        Select::make('unidad_medida_id')
+                            ->label('Se cuenta en (unidad base)')
+                            ->options(fn (?Producto $record): array => UnidadMedida::opciones($record?->unidad_medida_id))
+                            ->default(fn (): ?int => UnidadMedida::query()->where('codigo', UnidadMedida::BASE)->value('id'))
+                            ->helperText('La existencia y el costo van en esta unidad; las presentaciones dicen cuántas traen.')
+                            ->required()
+                            ->live(),
                         TextInput::make('descripcion')
                             ->label('Descripción')
                             ->required()
@@ -91,36 +108,183 @@ class ProductoForm
                             ->default(true),
                     ]),
 
-                Section::make('Costo y precio de venta')
-                    ->description('Tal como se manejan: con ISV si el producto paga ISV. Después se cambian con "Actualizar precio".')
-                    ->columns(3)
+                Section::make('Presentaciones')
+                    ->description(fn (string $operation): string => $operation === 'create'
+                        ? 'La base siempre está. Agregue las que traen varias del mismo producto (CJ de 8, CJ de 10, FD de 6, SC de 10…). Costo y precio son opcionales: el costo lo pone la primera compra y el precio sale de él con el % de utilidad; si escribe un precio, queda ese. Montos con ISV si el producto paga ISV.'
+                        : 'La base siempre está. Lo que trae una presentación que ya se usó no se cambia: desactívela (Se vende) y agregue otra. Los precios se cambian con "Actualizar precio"; una nueva sale del costo con el % de utilidad.')
                     ->columnSpanFull()
-                    ->visibleOn('create')
                     ->schema([
-                        ToggleButtons::make('costo_por')
-                            ->label('Los montos son por')
-                            ->options(['caja' => 'Caja', 'unidad' => 'Unidad'])
-                            ->default('caja')
-                            ->grouped()
-                            ->live()
-                            ->dehydrated(false),
-                        TextInput::make('costo_inicial')
-                            ->label(fn (Get $get): string => $get('gravado') ? 'Costo con ISV' : 'Costo')
-                            ->numeric()
-                            ->minValue(0)
-                            ->prefix('L.')
-                            ->suffix(fn (Get $get): string => $get('costo_por') === 'caja' ? 'por caja' : 'por unidad')
-                            ->required()
-                            ->dehydrated(false),
-                        TextInput::make('precio_inicial')
-                            ->label(fn (Get $get): string => $get('gravado') ? 'Precio de venta con ISV' : 'Precio de venta')
-                            ->numeric()
-                            ->minValue(0.01)
-                            ->prefix('L.')
-                            ->suffix(fn (Get $get): string => $get('costo_por') === 'caja' ? 'por caja' : 'por unidad')
-                            ->required()
-                            ->dehydrated(false),
+                        Grid::make(['default' => 1, 'md' => 4])
+                            ->schema([
+                                Toggle::make('base_activa')
+                                    ->label(fn (Get $get): string => 'Se vende suelta ('.self::codigo($get('unidad_medida_id')).')')
+                                    ->helperText('Apagado: solo se vende en las presentaciones de abajo.')
+                                    ->default(true)
+                                    ->dehydrated(false)
+                                    ->columnSpan(['md' => 2]),
+                                TextInput::make('base_costo')
+                                    ->label(fn (Get $get): string => 'Costo '.self::codigo($get('unidad_medida_id')).($get('gravado') ? ' con ISV' : ''))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->prefix('L.')
+                                    ->placeholder('Opcional')
+                                    ->dehydrated(false)
+                                    ->visibleOn('create'),
+                                TextInput::make('base_precio')
+                                    ->label(fn (Get $get): string => 'Precio '.self::codigo($get('unidad_medida_id')).($get('gravado') ? ' con ISV' : ''))
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->prefix('L.')
+                                    ->placeholder('Opcional')
+                                    ->dehydrated(false)
+                                    ->visibleOn('create'),
+                            ]),
+                        Repeater::make('otras')
+                            ->label('Presentaciones que traen varias')
+                            ->addActionLabel('Agregar presentación')
+                            ->defaultItems(0)
+                            ->reorderable(false)
+                            ->dehydrated(false)
+                            ->columns(['default' => 2, 'md' => 6])
+                            ->itemLabel(fn (array $state, Get $get): string => self::etiquetaFila($state, $get('unidad_medida_id')))
+                            ->schema([
+                                Hidden::make('id'),
+                                Select::make('unidad_medida_id')
+                                    ->label('Medida')
+                                    ->options(fn (Get $get): array => UnidadMedida::opciones(is_numeric($get('unidad_medida_id')) ? (int) $get('unidad_medida_id') : null))
+                                    ->default(fn (): ?int => UnidadMedida::query()->where('codigo', 'CJ')->value('id'))
+                                    ->required()
+                                    ->live()
+                                    ->disabled(fn (Get $get): bool => self::enUso($get('id')))
+                                    ->columnSpan(['md' => 2]),
+                                TextInput::make('contenido')
+                                    ->label(fn (Get $get): string => 'Trae ('.self::codigo($get('../../unidad_medida_id')).')')
+                                    ->numeric()
+                                    ->integer()
+                                    ->minValue(2)
+                                    ->maxValue(100000)
+                                    ->required()
+                                    ->live(debounce: 500)
+                                    ->disabled(fn (Get $get): bool => self::enUso($get('id'))),
+                                Toggle::make('activo')
+                                    ->label('Se vende')
+                                    ->default(true)
+                                    ->inline(false),
+                                TextInput::make('costo')
+                                    ->label(fn (Get $get): string => 'Costo'.($get('../../gravado') ? ' con ISV' : ''))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->prefix('L.')
+                                    ->placeholder('Opcional')
+                                    ->visibleOn('create'),
+                                TextInput::make('precio')
+                                    ->label(fn (Get $get): string => 'Precio'.($get('../../gravado') ? ' con ISV' : ''))
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->prefix('L.')
+                                    ->placeholder('Opcional')
+                                    ->visibleOn('create'),
+                            ]),
                     ]),
             ]);
+    }
+
+    /**
+     * Para llenar el formulario al editar: si la base se vende y las demás presentaciones.
+     *
+     * @return array{base_activa: bool, otras: list<array{id: int, unidad_medida_id: int, contenido: int, activo: bool}>}
+     */
+    public static function presentacionesParaEditar(Producto $producto): array
+    {
+        $producto->loadMissing('presentaciones');
+        $otras = [];
+
+        foreach ($producto->presentaciones as $presentacion) {
+            if (! $presentacion->es_base) {
+                $otras[] = [
+                    'id'               => $presentacion->id,
+                    'unidad_medida_id' => $presentacion->unidad_medida_id,
+                    'contenido'        => $presentacion->contenido,
+                    'activo'           => $presentacion->activo,
+                ];
+            }
+        }
+
+        return [
+            'base_activa' => $producto->presentacionBase()->activo,
+            'otras'       => $otras,
+        ];
+    }
+
+    /**
+     * Las filas de "otras" como las recibe GuardarPresentaciones, con el
+     * costo y el precio que se escribieron (solo al crear).
+     *
+     * @param array<string, mixed> $datos el estado del formulario
+     *
+     * @return list<array{id: int|null, unidad_medida_id: int, contenido: int, activo: bool, costo: float|null, precio: float|null}>
+     */
+    public static function otras(array $datos): array
+    {
+        $filas = [];
+
+        foreach (array_values((array) ($datos['otras'] ?? [])) as $fila) {
+            if (! is_array($fila) || ! is_numeric($fila['unidad_medida_id'] ?? null) || ! is_numeric($fila['contenido'] ?? null)) {
+                continue;
+            }
+
+            $filas[] = [
+                'id'               => is_numeric($fila['id'] ?? null) ? (int) $fila['id'] : null,
+                'unidad_medida_id' => (int) $fila['unidad_medida_id'],
+                'contenido'        => (int) $fila['contenido'],
+                'activo'           => (bool) ($fila['activo'] ?? true),
+                'costo'            => self::monto($fila['costo'] ?? null),
+                'precio'           => self::monto($fila['precio'] ?? null),
+            ];
+        }
+
+        return $filas;
+    }
+
+    public static function monto(mixed $valor): ?float
+    {
+        return is_numeric($valor) && (float) $valor > 0 ? (float) $valor : null;
+    }
+
+    private static function codigo(mixed $medidaId): string
+    {
+        if (! is_numeric($medidaId)) {
+            return UnidadMedida::BASE;
+        }
+
+        return (string) (UnidadMedida::query()->whereKey((int) $medidaId)->value('codigo') ?? UnidadMedida::BASE);
+    }
+
+    /**
+     * "CJ12 · trae 12 UN" en el encabezado de cada fila.
+     *
+     * @param array<string, mixed> $estado
+     */
+    private static function etiquetaFila(array $estado, mixed $baseId): string
+    {
+        $codigo = is_numeric($estado['unidad_medida_id'] ?? null) ? self::codigo($estado['unidad_medida_id']) : '';
+        $contenido = is_numeric($estado['contenido'] ?? null) ? (int) $estado['contenido'] : null;
+
+        if ($codigo === '' || $contenido === null) {
+            return 'Presentación nueva';
+        }
+
+        return "{$codigo}{$contenido} · trae {$contenido} ".self::codigo($baseId).(($estado['activo'] ?? true) ? '' : ' · no se vende');
+    }
+
+    private static function enUso(mixed $id): bool
+    {
+        if (! is_numeric($id)) {
+            return false;
+        }
+
+        $presentacion = Presentacion::query()->find((int) $id);
+
+        return $presentacion instanceof Presentacion && $presentacion->enUso();
     }
 }

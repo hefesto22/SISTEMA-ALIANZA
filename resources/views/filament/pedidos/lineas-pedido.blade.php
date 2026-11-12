@@ -2,14 +2,15 @@
     Productos de la preventa como lista tipo carrito (App\Filament\Schemas\Components\LineasPedido)
     y, abajo, la barra con el total y Guardar.
 
-    Todo lo de la lista pasa en el teléfono (Alpine): agregar, unidad o caja,
+    Todo lo de la lista pasa en el teléfono (Alpine): agregar, presentación,
     − y +, quitar. Al servidor solo van la búsqueda, el total con promociones
     (cuando se deja de tocar), el último pedido del cliente y Guardar.
 
-    Cada producto es una sola fila corta (cajas y unidades, nombre, subtotal);
-    al tocarla se abre para poner cajas y unidades. Por dentro son hasta dos
-    líneas (una en caja y otra en unidad), como siempre las ve bodega. El que
-    se acaba de agregar queda abierto.
+    Cada producto es una sola fila corta (lo que lleva en cada presentación,
+    "2 CJ12 + 3 UN", nombre, subtotal); al tocarla se abre con un − y + por
+    cada presentación que se vende. Por dentro es una línea por presentación,
+    como las ve bodega. El que se acaba de agregar queda abierto (con 1 en la
+    presentación más chica).
     El buscador se queda arriba al bajar por la lista. Los estilos van aquí
     mismo, sin compilar.
 
@@ -288,11 +289,11 @@
                     this.lineas = Object.values(this.lineas ?? {})
                 }
 
-                {{-- Un producto = una fila: si venía dos veces en unidad (o dos en caja), se juntan. --}}
+                {{-- Un producto = una fila: si venía dos veces en la misma presentación, se juntan. --}}
                 const unidas = []
 
                 for (const l of this.lineas) {
-                    const j = unidas.findIndex((u) => Number(u.producto_id) === Number(l.producto_id) && this.esCaja(u) === this.esCaja(l))
+                    const j = unidas.findIndex((u) => Number(u.presentacion_id) === Number(l.presentacion_id))
 
                     if (j >= 0) {
                         unidas[j].cantidad = Number(unidas[j].cantidad) + Number(l.cantidad)
@@ -333,24 +334,37 @@
                 return @js($config['simbolo']) + ' ' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
             },
 
-            esCaja(linea) {
-                return linea.unidad === 'caja'
+            {{-- Las presentaciones que se venden del producto, la más grande primero (CJ12, CJ8, UN). --}}
+            presentacionesDe(id) {
+                return this.productos[id]?.presentaciones ?? []
+            },
+
+            presentacion(id, pres) {
+                return this.presentacionesDe(id).find((pr) => Number(pr.id) === Number(pres)) ?? null
             },
 
             {{-- Igual que el servidor: precio sin ISV × cantidad (a 2 decimales), más el 15% si es gravado. --}}
             subtotal(linea) {
                 const p = this.productos[linea.producto_id] ?? null
+                const pr = this.presentacion(linea.producto_id, linea.presentacion_id)
 
-                if (! p) {
+                if (! p || ! pr) {
                     return 0
                 }
 
-                const bruto = this.redondear((this.esCaja(linea) ? p.precioCaja : p.precioUnidad) * Number(linea.cantidad || 0))
+                const bruto = this.redondear(Number(pr.precio) * Number(linea.cantidad || 0))
 
                 return this.redondear(bruto + (p.gravado ? this.redondear(bruto * @js($config['tasa'])) : 0))
             },
 
-            {{-- Cada producto es una fila con sus cajas y sus unidades (por dentro son hasta dos líneas). --}}
+            {{-- "Cajas de 12", "Unidades": encima de cada contador. --}}
+            titulo(pr) {
+                const plural = String(pr?.plural ?? '')
+
+                return plural.charAt(0).toUpperCase() + plural.slice(1)
+            },
+
+            {{-- Cada producto es una fila con lo que lleva en cada presentación (por dentro, una línea por presentación). --}}
             get grupos() {
                 const ids = [...new Set(this.lineas.map((l) => Number(l.producto_id)))]
                 const conocidos = this.ordenProductos.filter((id) => ids.includes(id))
@@ -358,14 +372,21 @@
                 return [...conocidos, ...ids.filter((id) => ! conocidos.includes(id))].reverse()
             },
 
-            indice(id, unidad) {
-                return this.lineas.findIndex((l) => Number(l.producto_id) === Number(id) && this.esCaja(l) === (unidad === 'caja'))
+            indice(id, pres) {
+                return this.lineas.findIndex((l) => Number(l.producto_id) === Number(id) && Number(l.presentacion_id) === Number(pres))
             },
 
-            cant(id, unidad) {
-                const i = this.indice(id, unidad)
+            cant(id, pres) {
+                const i = this.indice(id, pres)
 
                 return i >= 0 ? Number(this.lineas[i].cantidad || 0) : 0
+            },
+
+            {{-- Unidades base que ya lleva del producto (sin contar la presentación que se está cambiando). --}}
+            unidadesDe(id, sin = null) {
+                return this.lineas
+                    .filter((l) => Number(l.producto_id) === Number(id) && Number(l.presentacion_id) !== Number(sin))
+                    .reduce((t, l) => t + Number(l.cantidad || 0) * Math.max(1, Number(this.presentacion(id, l.presentacion_id)?.contenido ?? 1)), 0)
             },
 
             subtotalDe(id) {
@@ -383,32 +404,26 @@
                     return ''
                 }
 
-                return p.codigo + ' · ' + this.dinero(p.precioUnidadIsv) + ' c/u'
-                    + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + this.dinero(p.precioCajaIsv) : '')
+                return p.codigo + ' · ' + this.presentacionesDe(id).map((pr) => pr.sigla + ' ' + this.dinero(pr.precioIsv)).join(' · ')
                     + (p.gravado ? '' : ' · exento')
             },
 
-            {{-- Las cajas solo se ofrecen si la caja trae más de 1 (o si ya llevaba cajas). --}}
-            tieneCajas(id) {
-                return (this.productos[id]?.caja ?? 1) > 1 || this.cant(id, 'caja') > 0
-            },
-
-            {{-- Pone la cantidad de cajas o de unidades. En 0 esa parte se quita, pero el producto siempre queda con algo: para quitarlo está la ✕. --}}
-            fijarCant(id, unidad, valor) {
+            {{-- Pone la cantidad en una presentación. En 0 esa parte se quita, pero el producto siempre queda con algo: para quitarlo está la ✕. --}}
+            fijarCant(id, pres, valor) {
                 const pedido = Math.max(0, parseInt(valor, 10) || 0)
-                const maximo = this.maximoPara(id, unidad)
+                const maximo = this.maximoPara(id, pres)
                 let n = Math.min(pedido, maximo)
-                const otra = this.cant(id, unidad === 'caja' ? 'unidad' : 'caja')
+                const otras = this.lineas.filter((l) => Number(l.producto_id) === Number(id) && Number(l.presentacion_id) !== Number(pres)).length
 
                 if (pedido > maximo && maximo < @js($config['maximo'])) {
                     this.avisarTope(id)
                 }
 
-                if (n === 0 && otra === 0) {
+                if (n === 0 && otras === 0) {
                     n = 1
                 }
 
-                const i = this.indice(id, unidad)
+                const i = this.indice(id, pres)
 
                 if (n === 0) {
                     if (i >= 0) {
@@ -417,17 +432,17 @@
                 } else if (i >= 0) {
                     this.lineas[i].cantidad = n
                 } else {
-                    this.lineas.push({ producto_id: Number(id), unidad: unidad, cantidad: n })
+                    this.lineas.push({ producto_id: Number(id), presentacion_id: Number(pres), cantidad: n })
                 }
             },
 
-            cambiarCant(id, unidad, paso) {
-                this.fijarCant(id, unidad, this.cant(id, unidad) + paso)
+            cambiarCant(id, pres, paso) {
+                this.fijarCant(id, pres, this.cant(id, pres) + paso)
             },
 
-            alEscribirCant(evento, id, unidad) {
-                this.fijarCant(id, unidad, evento.target.value)
-                evento.target.value = this.cant(id, unidad)
+            alEscribirCant(evento, id, pres) {
+                this.fijarCant(id, pres, evento.target.value)
+                evento.target.value = this.cant(id, pres)
             },
 
             quitarProducto(id) {
@@ -438,23 +453,23 @@
                 }
             },
 
-            {{-- En el buscador: lo que ya lleva de ese producto. --}}
+            {{-- Lo que ya lleva de ese producto: "2 CJ12 + 3 UN" (en el buscador y en la fila corta). --}}
             lleva(id) {
-                const partes = []
-
-                if (this.cant(id, 'caja') > 0) {
-                    partes.push(this.cant(id, 'caja') + ' CJ')
-                }
-
-                if (this.cant(id, 'unidad') > 0) {
-                    partes.push(this.cant(id, 'unidad') + ' UN')
-                }
-
-                return partes.join(' + ')
+                return this.presentacionesDe(id)
+                    .filter((pr) => this.cant(id, pr.id) > 0)
+                    .map((pr) => this.cant(id, pr.id) + ' ' + pr.sigla)
+                    .join(' + ')
             },
 
-            {{-- Unidades como se cuentan en bodega: 29 en cajas de 12 = "2 CJ + 5 UN". --}}
-            enCajas(unidades, caja) {
+            {{-- La que entra al tocar el producto: la más chica que se vende (la UN, si se vende suelta). --}}
+            porDefecto(p) {
+                const presentaciones = p?.presentaciones ?? []
+
+                return presentaciones.length > 0 ? presentaciones[presentaciones.length - 1] : null
+            },
+
+            {{-- Unidades base como se cuentan en bodega, con la presentación más grande: 29 en cajas de 12 = "2 CJ12 + 5 UN". --}}
+            enCajas(unidades, p) {
                 const u = Number(unidades) || 0
 
                 if (u === 0) {
@@ -462,11 +477,12 @@
                 }
 
                 const resto = Math.abs(u)
-                const porCaja = Math.max(1, Number(caja) || 1)
+                const porCaja = Math.max(1, Number(p?.mayor_contenido) || 1)
+                const base = p?.base_sigla ?? 'UN'
                 const signo = u < 0 ? '-' : ''
 
                 if (porCaja === 1) {
-                    return signo + resto + ' UN'
+                    return signo + resto + ' ' + base
                 }
 
                 const partes = []
@@ -474,11 +490,11 @@
                 const sueltas = resto % porCaja
 
                 if (cajas > 0) {
-                    partes.push(cajas + ' CJ')
+                    partes.push(cajas + ' ' + p.mayor_sigla)
                 }
 
                 if (sueltas > 0) {
-                    partes.push(sueltas + ' UN')
+                    partes.push(sueltas + ' ' + base)
                 }
 
                 return signo + partes.join(' + ')
@@ -495,13 +511,13 @@
             textoHay(id) {
                 const hay = this.hayDe(id) ?? 0
 
-                return hay > 0 ? 'Disponible ' + this.enCajas(hay, this.productos[id]?.caja) : 'Sin existencia'
+                return hay > 0 ? 'Disponible ' + this.enCajas(hay, this.productos[id]) : 'Sin existencia'
             },
 
             {{-- En el buscador, a la derecha: "disponible / 2 CJ" ("en todas" sin bodega escogida) o "sin / existencia". --}}
             etiquetaHay(p) {
                 if (Number(p?.hay ?? 0) > 0) {
-                    return [this.sinBodegaEscogida() ? 'en todas' : 'disponible', this.enCajas(p.hay, p.caja)]
+                    return [this.sinBodegaEscogida() ? 'en todas' : 'disponible', this.enCajas(p.hay, p)]
                 }
 
                 return ['sin', 'existencia']
@@ -512,23 +528,27 @@
                 return @js($config['controlar']) && ! this.sinBodegaEscogida() && Number(p?.hay ?? 0) <= 0
             },
 
-            {{-- Poco: menos de lo que trae una caja. --}}
+            {{-- Poco: menos de lo que trae la presentación más grande. --}}
             hayPoco(p) {
-                return Number(p?.hay ?? 0) < Math.max(2, Number(p?.caja ?? 1))
+                return Number(p?.hay ?? 0) < Math.max(2, Number(p?.mayor_contenido ?? 1))
             },
 
-            {{-- Lo más que se puede pedir en cajas o en unidades sin pasar de lo que hay. --}}
-            maximoPara(id, unidad) {
+            {{-- Sin presentación con precio no se puede vender. --}}
+            sinPrecio(p) {
+                return (p?.presentaciones ?? []).length === 0
+            },
+
+            {{-- Lo más que se puede pedir en esa presentación sin pasar de lo que hay (con lo que ya lleva en las otras). --}}
+            maximoPara(id, pres) {
                 const hay = this.hayDe(id)
 
                 if (! @js($config['controlar']) || hay === null || this.sinBodegaEscogida()) {
                     return @js($config['maximo'])
                 }
 
-                const caja = Math.max(1, Number(this.productos[id]?.caja ?? 1))
-                const yaVa = unidad === 'caja' ? this.cant(id, 'unidad') : this.cant(id, 'caja') * caja
+                const contenido = Math.max(1, Number(this.presentacion(id, pres)?.contenido ?? 1))
 
-                return Math.max(0, Math.floor((hay - yaVa) / (unidad === 'caja' ? caja : 1)))
+                return Math.max(0, Math.floor((hay - this.unidadesDe(id, pres)) / contenido))
             },
 
             avisarTope(id) {
@@ -612,7 +632,7 @@
 
                 for (const l of this.ultimo.lineas) {
                     this.recordar(l.producto_id)
-                    this.fijarCant(l.producto_id, l.unidad, this.cant(l.producto_id, l.unidad) + Number(l.cantidad))
+                    this.fijarCant(l.producto_id, l.presentacion_id, this.cant(l.producto_id, l.presentacion_id) + Number(l.cantidad))
                 }
 
                 this.ultimo = null
@@ -669,10 +689,18 @@
                 this.buscando = false
             },
 
-            {{-- Tocar un producto: suma 1 unidad y su fila queda abierta para poner cajas o unidades. Sin disponible (controlando la existencia) no entra: avisa. Si está en promoción y todavía no lo lleva, primero pregunta si agrega la promoción. --}}
+            {{-- Tocar un producto: suma 1 en la presentación más chica y su fila queda abierta para poner las demás. Sin precio, o sin disponible (controlando la existencia), no entra: avisa. Si está en promoción y todavía no lo lleva, primero pregunta si agrega la promoción. --}}
             agregar(p) {
+                if (this.sinPrecio(p)) {
+                    this.sinExistencia = p.descripcion + ' no tiene precio de venta: no se puede agregar todavía.'
+                    clearTimeout(this.esperaSinExistencia)
+                    this.esperaSinExistencia = setTimeout(() => this.sinExistencia = '', 3500)
+
+                    return
+                }
+
                 if (this.bloqueado(p)) {
-                    this.sinExistencia = p.descripcion
+                    this.sinExistencia = 'No hay existencia de ' + p.descripcion + ' en la bodega: no se puede agregar.'
                     clearTimeout(this.esperaSinExistencia)
                     this.esperaSinExistencia = setTimeout(() => this.sinExistencia = '', 3500)
 
@@ -698,14 +726,14 @@
                 const id = Number(p.id)
                 this.productos[id] = p
                 this.recordar(id)
-                this.cambiarCant(id, 'unidad', 1)
+                this.cambiarCant(id, this.porDefecto(p).id, 1)
                 this.abierta = id
                 this.resaltar(id)
                 this.cerrarBusqueda()
                 this.$refs.buscador.blur()
             },
 
-            {{-- "No, solo el producto": entra como siempre (1 unidad y la fila abierta). --}}
+            {{-- "No, solo el producto": entra como siempre (1 en la presentación más chica y la fila abierta). --}}
             soloProducto() {
                 const p = this.pregunta?.p
 
@@ -734,16 +762,14 @@
                 const pide = {}
 
                 for (const l of promo.lineas) {
-                    const caja = Math.max(1, Number(this.productos[l.producto_id]?.caja ?? 1))
-                    pide[l.producto_id] = (pide[l.producto_id] ?? 0) + Number(l.cantidad) * (l.unidad === 'caja' ? caja : 1)
+                    const contenido = Math.max(1, Number(this.presentacion(l.producto_id, l.presentacion_id)?.contenido ?? 1))
+                    pide[l.producto_id] = (pide[l.producto_id] ?? 0) + Number(l.cantidad) * contenido
                 }
 
                 for (const id of Object.keys(pide)) {
                     const hay = this.hayDe(id)
-                    const caja = Math.max(1, Number(this.productos[id]?.caja ?? 1))
-                    const yaVa = this.cant(id, 'caja') * caja + this.cant(id, 'unidad')
 
-                    if (hay !== null && yaVa + pide[id] > hay) {
+                    if (hay !== null && this.unidadesDe(id) + pide[id] > hay) {
                         return this.nombreDe(id)
                     }
                 }
@@ -765,7 +791,7 @@
 
                 for (const l of promo.lineas) {
                     this.recordar(l.producto_id)
-                    this.fijarCant(l.producto_id, l.unidad, this.cant(l.producto_id, l.unidad) + Number(l.cantidad))
+                    this.fijarCant(l.producto_id, l.presentacion_id, this.cant(l.producto_id, l.presentacion_id) + Number(l.cantidad))
                 }
 
                 this.pregunta = null
@@ -857,15 +883,15 @@
             <div class="pv-resultados" x-show="buscado || (buscar.trim().length === 1 && ! /^\d+$/.test(buscar.trim()))" x-cloak>
                 <div class="pv-aviso-sin" x-show="sinExistencia !== ''" x-cloak>
                     {{ svg('heroicon-m-no-symbol') }}
-                    <span x-text="'No hay existencia de ' + sinExistencia + ' en la bodega: no se puede agregar.'"></span>
+                    <span x-text="sinExistencia"></span>
                 </div>
 
                 <template x-for="p in resultados" x-bind:key="p.id">
-                    <button type="button" class="pv-resultado" x-bind:class="{ 'pv-agotado': Number(p.hay ?? 0) <= 0, 'pv-bloqueado': bloqueado(p) }" x-bind:aria-disabled="bloqueado(p)" x-on:click="agregar(p)">
+                    <button type="button" class="pv-resultado" x-bind:class="{ 'pv-agotado': Number(p.hay ?? 0) <= 0, 'pv-bloqueado': bloqueado(p) || sinPrecio(p) }" x-bind:aria-disabled="bloqueado(p) || sinPrecio(p)" x-on:click="agregar(p)">
                         <span class="pv-resultado-texto">
                             <span class="pv-resultado-nombre" x-text="p.descripcion"></span>
-                            <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + dinero(p.precioUnidadIsv) + ' c/u' + (p.caja > 1 ? ' · caja de ' + p.caja + ' ' + dinero(p.precioCajaIsv) : '')"></span>
-                            <span class="pv-resultado-lleva" x-show="lleva(p.id) !== ''" x-text="'Ya lleva ' + lleva(p.id) + ' · tocar suma 1 UN'"></span>
+                            <span class="pv-resultado-meta" x-text="p.codigo + ' · ' + (sinPrecio(p) ? 'sin precio' : (p.presentaciones ?? []).map((pr) => pr.sigla + ' ' + dinero(pr.precioIsv)).join(' · '))"></span>
+                            <span class="pv-resultado-lleva" x-show="lleva(p.id) !== ''" x-text="'Ya lleva ' + lleva(p.id) + ' · tocar suma 1 ' + (porDefecto(p)?.sigla ?? '')"></span>
                             <span class="pv-resultado-promo" x-show="enPromo(p.id)" x-cloak>{{ svg('heroicon-m-gift') }} En promoción</span>
                         </span>
                         <span
@@ -946,11 +972,12 @@
         <div class="pv-lista" x-show="lineas.length > 0" @if ($productosIniciales === 0) style="display: none" @endif>
             <template x-for="id in grupos" x-bind:key="id">
                 <div class="pv-linea" x-bind:class="{ 'pv-resaltada': resaltada === id, 'pv-abierta': abierta === id }">
-                    {{-- Corta: cajas y unidades, nombre, subtotal --}}
+                    {{-- Corta: lo que lleva en cada presentación, nombre, subtotal --}}
                     <button type="button" class="pv-corta" x-show="abierta !== id" x-on:click="abrir(id)">
                         <span class="pv-cants">
-                            <span class="pv-cant pv-cant-caja" x-show="cant(id, 'caja') > 0" x-text="cant(id, 'caja') + ' CJ'"></span>
-                            <span class="pv-cant" x-show="cant(id, 'unidad') > 0" x-text="cant(id, 'unidad') + ' UN'"></span>
+                            <template x-for="pr in presentacionesDe(id).filter((pr) => cant(id, pr.id) > 0)" x-bind:key="'cant-' + pr.id">
+                                <span class="pv-cant" x-bind:class="{ 'pv-cant-caja': ! pr.es_base }" x-text="cant(id, pr.id) + ' ' + pr.sigla"></span>
+                            </template>
                         </span>
                         <span class="pv-corta-texto">
                             <span class="pv-corta-nombre" x-text="nombreDe(id)"></span>
@@ -959,7 +986,7 @@
                         <span class="pv-linea-subtotal" x-text="dinero(netoDe(id))"></span>
                     </button>
 
-                    {{-- Abierta: cajas y unidades del mismo producto --}}
+                    {{-- Abierta: un contador por presentación del mismo producto --}}
                     <div class="pv-detalle" x-show="abierta === id">
                         <div class="pv-linea-arriba" x-on:click="abrir(id)">
                             <div class="pv-linea-nombre" x-text="nombreDe(id)"></div>
@@ -972,52 +999,32 @@
                         <div class="pv-linea-precio" x-text="precioDe(id)"></div>
                         <div class="pv-linea-promo" x-show="descuentoDe(id) > 0" x-cloak x-text="textoPromo(id) + ' por promoción'"></div>
                         <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]), 'pv-hay-nada': (hayDe(id) ?? 0) <= 0 }" x-text="textoHay(id)"></div>
-                        <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: disponible ' + enCajas(Math.max(0, hayDe(id) ?? 0), productos[id]?.caja)"></div>
+                        <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: disponible ' + enCajas(Math.max(0, hayDe(id) ?? 0), productos[id])"></div>
 
                         <div class="pv-cantidades">
-                            <div class="pv-cantidad" x-show="tieneCajas(id)">
-                                <span class="pv-cantidad-etiqueta" x-text="'Cajas de ' + (productos[id]?.caja ?? '')">Cajas</span>
-                                <div class="pv-stepper">
-                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'caja', -1)" aria-label="Una caja menos">
-                                        {{ svg('heroicon-m-minus') }}
-                                    </button>
-                                    <input
-                                        type="number"
-                                        inputmode="numeric"
-                                        min="0"
-                                        aria-label="Cajas"
-                                        x-bind:value="cant(id, 'caja')"
-                                        x-on:change="alEscribirCant($event, id, 'caja')"
-                                        x-on:focus="$event.target.select()"
-                                        x-on:keydown.enter.prevent="$event.target.blur()"
-                                    />
-                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'caja', 1)" x-bind:disabled="maximoPara(id, 'caja') <= cant(id, 'caja')" aria-label="Una caja más">
-                                        {{ svg('heroicon-m-plus') }}
-                                    </button>
+                            <template x-for="pr in presentacionesDe(id)" x-bind:key="'pres-' + pr.id">
+                                <div class="pv-cantidad">
+                                    <span class="pv-cantidad-etiqueta" x-text="titulo(pr)"></span>
+                                    <div class="pv-stepper">
+                                        <button type="button" class="pv-paso" x-on:click="cambiarCant(id, pr.id, -1)" x-bind:aria-label="'Una menos: ' + pr.nombre">
+                                            {{ svg('heroicon-m-minus') }}
+                                        </button>
+                                        <input
+                                            type="number"
+                                            inputmode="numeric"
+                                            min="0"
+                                            x-bind:aria-label="titulo(pr)"
+                                            x-bind:value="cant(id, pr.id)"
+                                            x-on:change="alEscribirCant($event, id, pr.id)"
+                                            x-on:focus="$event.target.select()"
+                                            x-on:keydown.enter.prevent="$event.target.blur()"
+                                        />
+                                        <button type="button" class="pv-paso" x-on:click="cambiarCant(id, pr.id, 1)" x-bind:disabled="maximoPara(id, pr.id) <= cant(id, pr.id)" x-bind:aria-label="'Una más: ' + pr.nombre">
+                                            {{ svg('heroicon-m-plus') }}
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-
-                            <div class="pv-cantidad">
-                                <span class="pv-cantidad-etiqueta">Unidades</span>
-                                <div class="pv-stepper">
-                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'unidad', -1)" aria-label="Una unidad menos">
-                                        {{ svg('heroicon-m-minus') }}
-                                    </button>
-                                    <input
-                                        type="number"
-                                        inputmode="numeric"
-                                        min="0"
-                                        aria-label="Unidades"
-                                        x-bind:value="cant(id, 'unidad')"
-                                        x-on:change="alEscribirCant($event, id, 'unidad')"
-                                        x-on:focus="$event.target.select()"
-                                        x-on:keydown.enter.prevent="$event.target.blur()"
-                                    />
-                                    <button type="button" class="pv-paso" x-on:click="cambiarCant(id, 'unidad', 1)" x-bind:disabled="maximoPara(id, 'unidad') <= cant(id, 'unidad')" aria-label="Una unidad más">
-                                        {{ svg('heroicon-m-plus') }}
-                                    </button>
-                                </div>
-                            </div>
+                            </template>
                         </div>
 
                         <div class="pv-linea-controles">

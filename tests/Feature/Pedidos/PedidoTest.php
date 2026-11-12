@@ -10,7 +10,6 @@ use App\Domain\Precios\ActualizarPrecioProducto;
 use App\Enums\EstadoPedido;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Actions\LineasPedido;
 use App\Models\Bodega;
 use App\Models\Cliente;
@@ -27,9 +26,9 @@ beforeEach(function (): void {
     $this->vendedor = User::factory()->create(['bodega_id' => $this->bodega->id]);
     $this->vendedor->assignRole(Rol::Vendedor->value);
 
-    // Gravado: L 100 la unidad. Exento: L 50 la unidad, caja de 10 = L 500.
-    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['unidades_por_caja' => 12]);
-    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->create(['unidades_por_caja' => 10]);
+    // Gravado: L 100 la UN (CJ12 a L 1,200). Exento: L 50 la UN, CJ10 = L 500.
+    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create();
+    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->conCaja(10)->create();
 });
 
 /**
@@ -44,8 +43,8 @@ function crearPedido(Bodega $bodega, User $vendedor, Producto $gravado, Producto
         'fecha'       => now(),
     ]);
 
-    $pedido->items()->create(['producto_id' => $gravado->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 2]);
-    $pedido->items()->create(['producto_id' => $exento->id, 'unidad' => UnidadVenta::Caja, 'cantidad' => 1]);
+    $pedido->items()->create(['producto_id' => $gravado->id, 'presentacion_id' => presentacion($gravado)->id, 'cantidad' => 2]);
+    $pedido->items()->create(['producto_id' => $exento->id, 'presentacion_id' => caja($exento)->id, 'cantidad' => 1]);
 
     return app(RecalcularPedido::class)->ejecutar($pedido);
 }
@@ -67,7 +66,7 @@ test('bodega despacha lo que hay y se cobra con el precio vigente al despachar',
     $encargado->assignRole(Rol::Bodega->value);
 
     // Sube el precio después de la preventa.
-    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precioUnidad: 110.0);
+    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precios: [presentacion($this->gravado)->id => ['precio' => 110.0]]);
 
     [$lineaGravada, $lineaExenta] = $pedido->items->all();
 
@@ -103,64 +102,64 @@ test('bodega puede mandar más de lo pedido: se cobra lo que sale y queda dicho'
         ->and(LineasPedido::incompletas($despachado))->toBe("Va de más: {$this->gravado->descripcion} (+1 unidad, pidió 2).");
 });
 
-test('al validar, cada producto trae su caja y su unidad aunque el pedido traiga una sola', function (): void {
+test('al validar, cada producto trae todas sus presentaciones aunque el pedido traiga una sola', function (): void {
     $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
     $filas = LineasPedido::datos($pedido)['items'];
 
-    // Primero las líneas del pedido; después, sin id, la unidad que no traen.
-    expect(array_map(fn (array $fila): array => [$fila['id'] === null, $fila['producto_id'], $fila['es_caja'], $fila['cantidad']], $filas))->toBe([
-        [false, $this->gravado->id, false, 2],
-        [false, $this->exento->id, true, 1],
-        [true, $this->gravado->id, true, 0],
-        [true, $this->exento->id, false, 0],
+    // Primero las líneas del pedido; después, sin id, las presentaciones que no traen.
+    expect(array_map(fn (array $fila): array => [$fila['id'] === null, $fila['producto_id'], $fila['sigla'], $fila['cantidad']], $filas))->toBe([
+        [false, $this->gravado->id, 'UN', 2],
+        [false, $this->exento->id, 'CJ10', 1],
+        [true, $this->gravado->id, 'CJ12', 0],
+        [true, $this->exento->id, 'UN', 0],
     ]);
 
     // Lo que bodega llena en esas filas entra como línea nueva.
     $filas[3]['sale'] = 7;
 
-    expect(LineasPedido::nuevas(['items' => $filas]))->toBe([['producto_id' => $this->exento->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 7]]);
+    expect(LineasPedido::nuevas(['items' => $filas]))->toBe([['producto_id' => $this->exento->id, 'presentacion_id' => presentacion($this->exento)->id, 'cantidad' => 7]]);
 });
 
-test('bodega puede mandar en la otra unidad: una caja dañada sale en unidades sueltas', function (): void {
+test('bodega puede mandar en otra presentación: una caja dañada sale en unidades sueltas', function (): void {
     $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
     [, $lineaExenta] = $pedido->items->all();
 
     // La caja del exento (10) vino dañada: la caja no sale y salen 7 sueltas.
     $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [$lineaExenta->id => 0], $this->vendedor, [
-        ['producto_id' => $this->exento->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 7],
+        ['producto_id' => $this->exento->id, 'presentacion_id' => presentacion($this->exento)->id, 'cantidad' => 7],
     ]);
 
-    $sueltas = $despachado->items()->where('producto_id', $this->exento->id)->where('unidad', UnidadVenta::Unidad)->sole();
+    $sueltas = $despachado->items()->where('presentacion_id', presentacion($this->exento)->id)->sole();
 
     // 2 × 100 = 200 (+30 ISV) y 7 × 50 = 350 exento → 580
     expect($sueltas->cantidad)->toBe(0)
         ->and($sueltas->cantidad_despachada)->toBe(7)
         ->and($sueltas->deMasEnPalabras())->toBe('Va de más: 7 unidades (no lo pidió en unidades)')
-        ->and($lineaExenta->fresh()?->faltaEnPalabras())->toBe('No sale: pidió 1 caja')
+        ->and($lineaExenta->fresh()?->faltaEnPalabras())->toBe('No sale: pidió 1 caja de 10')
         ->and($despachado->total)->toBe(580.0);
 });
 
 test('bodega puede agregar al validar un producto que no venía en el pedido', function (): void {
     $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
 
-    // Gravado: L 30 la unidad, caja de 6 = L 180.
-    $sal = Producto::factory()->precio(20.0, 30.0)->create(['unidades_por_caja' => 6]);
+    // Gravado: L 30 la UN, CJ6 = L 180.
+    $sal = Producto::factory()->precio(20.0, 30.0)->conCaja(6)->create();
 
     $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [], $this->vendedor, [
-        ['producto_id' => $sal->id, 'unidad' => UnidadVenta::Caja, 'cantidad' => 2],
+        ['producto_id' => $sal->id, 'presentacion_id' => caja($sal)->id, 'cantidad' => 2],
     ]);
 
     $agregada = $despachado->items()->where('producto_id', $sal->id)->sole();
 
     // 2 × 100 = 200 (+30 ISV), 1 caja × 500 = 500 exento y 2 cajas × 180 = 360 (+54 ISV) → 1144
     expect($agregada->cantidad)->toBe(0)
-        ->and($agregada->unidad)->toBe(UnidadVenta::Caja)
+        ->and($agregada->presentacion_id)->toBe(caja($sal)->id)
         ->and($agregada->cantidad_despachada)->toBe(2)
         ->and($agregada->esAgregado())->toBeTrue()
-        ->and($agregada->deMasEnPalabras())->toBe('Agregado: 2 cajas (no venía en el pedido)')
+        ->and($agregada->deMasEnPalabras())->toBe('Agregado: 2 cajas de 6 (no venía en el pedido)')
         ->and($agregada->faltaEnPalabras())->toBeNull()
         ->and($despachado->total)->toBe(1144.0)
-        ->and(LineasPedido::incompletas($despachado))->toBe("Sale completo. Agregado: {$sal->descripcion} (2 cajas).");
+        ->and(LineasPedido::incompletas($despachado))->toBe("Sale completo. Agregado: {$sal->descripcion} (2 cajas de 6).");
 });
 
 test('al validar no se agrega un producto que no está activo', function (): void {
@@ -168,7 +167,7 @@ test('al validar no se agrega un producto que no está activo', function (): voi
     $viejo = Producto::factory()->create(['activo' => false]);
 
     expect(fn (): Pedido => app(ValidarDespacho::class)->ejecutar($pedido, [], $this->vendedor, [
-        ['producto_id' => $viejo->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 1],
+        ['producto_id' => $viejo->id, 'presentacion_id' => presentacion($viejo)->id, 'cantidad' => 1],
     ]))->toThrow(ReglaNegocioException::class, "{$viejo->descripcion} no está activo");
 
     expect($pedido->fresh()?->estado)->toBe(EstadoPedido::Pendiente)
@@ -178,21 +177,22 @@ test('al validar no se agrega un producto que no está activo', function (): voi
 test('el buscador de agregar trae productos activos, primero los que hay en la bodega, con sus filas', function (): void {
     $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
 
-    $gruesa = Producto::factory()->create(['descripcion' => 'ZZSAL GRUESA 12X1KG', 'unidades_por_caja' => 12]);
-    $mesa = Producto::factory()->create(['descripcion' => 'ZZSAL DE MESA 6X1KG', 'unidades_por_caja' => 6]);
+    $gruesa = Producto::factory()->create(['descripcion' => 'ZZSAL GRUESA 12X1KG']);
+    $mesa = Producto::factory()->conCaja(6)->create(['descripcion' => 'ZZSAL DE MESA 6X1KG']);
     Producto::factory()->create(['descripcion' => 'ZZSAL VIEJA 6X1KG', 'activo' => false]);
 
-    // De la de mesa hay 4 unidades (no alcanza para una caja): sale 1 unidad.
-    // De la gruesa no hay nada: sale 1 caja.
+    // De la de mesa hay 4 unidades (no alcanza para una CJ6): sale 1 UN.
+    // De la gruesa no hay nada: sale 1 de la más grande (CJ12).
     Existencia::query()->create(['bodega_id' => $this->bodega->id, 'producto_id' => $mesa->id, 'cantidad' => 4]);
 
     $resultados = LineasPedido::paraAgregar($pedido, 'zzsal');
-    $filas = fn (int $i): array => array_map(fn (array $fila): array => [$fila['id'], $fila['es_caja'], $fila['cantidad'], $fila['sale'], $fila['hay_unidades']], $resultados[$i]['filas']);
+    $filas = fn (int $i): array => array_map(fn (array $fila): array => [$fila['id'], $fila['sigla'], $fila['cantidad'], $fila['sale'], $fila['hay_unidades']], $resultados[$i]['filas']);
 
     expect(array_column($resultados, 'producto_id'))->toBe([$mesa->id, $gruesa->id])
         ->and($resultados[0]['hay_unidades'])->toBe(4)
-        ->and($filas(0))->toBe([[null, true, 0, 0, 4], [null, false, 0, 1, 4]])
-        ->and($filas(1))->toBe([[null, true, 0, 1, 0], [null, false, 0, 0, 0]])
+        ->and($resultados[0]['hay'])->toBe('4 UN')
+        ->and($filas(0))->toBe([[null, 'CJ6', 0, 0, 4], [null, 'UN', 0, 1, 4]])
+        ->and($filas(1))->toBe([[null, 'CJ12', 0, 1, 0], [null, 'UN', 0, 0, 0]])
         ->and(LineasPedido::paraAgregar($pedido, '  '))->toBe([]);
 });
 

@@ -59,12 +59,12 @@ class MovimientosRelationManager extends RelationManager
                     ->badge(),
                 TextColumn::make('cantidad')
                     ->label('Entró / salió')
-                    ->formatStateUsing(fn (int $state): string => ($state > 0 ? '+' : '').Existencia::enCajas($state, $producto->unidades_por_caja))
+                    ->formatStateUsing(fn (int $state): string => ($state > 0 ? '+' : '').$producto->existenciaEnTexto($state))
                     ->color(fn (int $state): string => $state > 0 ? 'success' : 'danger')
                     ->weight('semibold'),
                 TextColumn::make('existencia')
                     ->label('Quedó')
-                    ->formatStateUsing(fn (int $state): string => Existencia::enCajas($state, $producto->unidades_por_caja))
+                    ->formatStateUsing(fn (int $state): string => $producto->existenciaEnTexto($state))
                     ->color(fn (int $state): ?string => $state < 0 ? 'danger' : null),
                 TextColumn::make('costo_unidad')
                     ->label('Costo unidad')
@@ -106,7 +106,7 @@ class MovimientosRelationManager extends RelationManager
         }
 
         $partes = $query->get()
-            ->map(fn (Existencia $existencia): string => $existencia->bodega->nombre.' '.Existencia::enCajas($existencia->cantidad, $producto->unidades_por_caja))
+            ->map(fn (Existencia $existencia): string => $existencia->bodega->nombre.' '.$producto->existenciaEnTexto($existencia->cantidad))
             ->all();
 
         return $partes === [] ? 'Todavía no hay existencia registrada.' : 'Hay: '.implode(' · ', $partes);

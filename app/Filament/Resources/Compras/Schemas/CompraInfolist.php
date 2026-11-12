@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Compras\Schemas;
 
 use App\Domain\Precios\CalculadoraPrecio;
-use App\Enums\UnidadVenta;
 use App\Models\Compra;
 use App\Models\CompraItem;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -16,7 +15,8 @@ use Filament\Schemas\Schema;
 
 /**
  * La compra registrada y cómo quedó cada producto: costo de la factura,
- * costo nuevo y precio de venta nuevo (por unidad, con ISV si es gravado).
+ * costo nuevo por unidad y precio de venta nuevo de esa presentación (con
+ * ISV si es gravado).
  */
 final class CompraInfolist
 {
@@ -60,7 +60,7 @@ final class CompraInfolist
                     ]),
 
                 Section::make('Productos')
-                    ->description('Costo y precio por unidad, con ISV si el producto es gravado. El precio nuevo sale del costo nuevo con el margen del producto.')
+                    ->description('Con ISV si el producto es gravado. El costo nuevo es por unidad; el precio nuevo, de la presentación en que entró (sale del costo nuevo con el margen del producto, salvo precio fijo).')
                     ->columnSpanFull()
                     ->schema([
                         RepeatableEntry::make('items')
@@ -71,17 +71,17 @@ final class CompraInfolist
                                 TableColumn::make('Costo factura'),
                                 TableColumn::make('Total'),
                                 TableColumn::make('Costo unidad'),
-                                TableColumn::make('Precio unidad'),
+                                TableColumn::make('Precio de venta'),
                             ])
                             ->schema([
                                 TextEntry::make('producto.descripcion')
                                     ->helperText(fn (CompraItem $record): string => $record->producto->codigo),
                                 TextEntry::make('cantidad')
-                                    ->formatStateUsing(fn (CompraItem $record): string => $record->cantidad.' '.($record->unidad === UnidadVenta::Caja ? 'CJ' : 'UN'))
-                                    ->helperText(fn (CompraItem $record): ?string => $record->unidad === UnidadVenta::Caja ? "{$record->unidades} unidades" : null),
+                                    ->formatStateUsing(fn (CompraItem $record): string => $record->cantidad.' '.$record->presentacion->sigla())
+                                    ->helperText(fn (CompraItem $record): ?string => $record->presentacion->contenido > 1 ? "{$record->unidades} unidades" : null),
                                 TextEntry::make('costo_ingresado')
                                     ->formatStateUsing(fn (float $state): string => lempiras($state))
-                                    ->helperText(fn (CompraItem $record): string => $record->unidad === UnidadVenta::Caja ? 'la caja' : 'la unidad'),
+                                    ->helperText(fn (CompraItem $record): string => 'por '.$record->presentacion->palabra(1)),
                                 TextEntry::make('total')
                                     ->formatStateUsing(fn (float $state): string => lempiras($state))
                                     ->weight('bold'),
@@ -90,6 +90,7 @@ final class CompraInfolist
                                     ->helperText(fn (CompraItem $record): ?string => $record->costo_anterior === null ? null : 'antes '.lempiras(CalculadoraPrecio::conIsv($record->costo_anterior, $record->gravado), 4)),
                                 TextEntry::make('precio_nuevo')
                                     ->formatStateUsing(fn (CompraItem $record): string => lempiras(CalculadoraPrecio::conIsv($record->precio_nuevo, $record->gravado)))
+                                    ->helperText(fn (CompraItem $record): string => $record->presentacion->sigla())
                                     ->weight('bold')
                                     ->color('primary'),
                             ]),

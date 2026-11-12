@@ -12,7 +12,7 @@ use App\Filament\Resources\Compras\Schemas\CompraForm;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Compra;
-use App\Models\Producto;
+use App\Models\Presentacion;
 use App\Models\Proveedor;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -70,8 +70,8 @@ class CreateCompra extends CreateRecord
     }
 
     /**
-     * Los de precio fijo no suben con la compra: si el costo promedio ya les
-     * pasó el precio, se avisa para que lo revisen.
+     * Las presentaciones de precio fijo no suben con la compra: si el costo
+     * promedio ya les pasó el precio, se avisa para que lo revisen.
      */
     protected function afterCreate(): void
     {
@@ -81,12 +81,14 @@ class CreateCompra extends CreateRecord
             return;
         }
 
-        $bajoCosto = Producto::query()
-            ->whereIn('id', $compra->items()->pluck('producto_id'))
+        $bajoCosto = Presentacion::query()
+            ->with(['producto', 'unidadMedida'])
+            ->whereIn('producto_id', $compra->items()->pluck('producto_id'))
+            ->where('activo', true)
             ->where('precio_fijo', true)
-            ->whereColumn('precio_unidad', '<', 'costo_unidad')
-            ->orderBy('descripcion')
-            ->get();
+            ->get()
+            ->filter(fn (Presentacion $presentacion): bool => $presentacion->precio < $presentacion->costo())
+            ->sortBy(fn (Presentacion $presentacion): string => $presentacion->producto->descripcion);
 
         if ($bajoCosto->isEmpty()) {
             return;
@@ -94,11 +96,12 @@ class CreateCompra extends CreateRecord
 
         Notification::make()
             ->title('Hay precios fijos por debajo del costo')
-            ->body($bajoCosto->map(fn (Producto $producto): string => sprintf(
-                '%s: vende a %s y ya cuesta %s.',
-                $producto->descripcion,
-                lempiras($producto->precioUnidadConIsv()),
-                lempiras(CalculadoraPrecio::conIsv($producto->costo_unidad, $producto->gravado)),
+            ->body($bajoCosto->map(fn (Presentacion $presentacion): string => sprintf(
+                '%s (%s): vende a %s y ya cuesta %s.',
+                $presentacion->producto->descripcion,
+                $presentacion->sigla(),
+                lempiras($presentacion->precioConIsv()),
+                lempiras(CalculadoraPrecio::conIsv($presentacion->costo(), $presentacion->producto->gravado)),
             ))->push('Cámbielos en Productos → Actualizar precio.')->implode(' '))
             ->warning()
             ->persistent()

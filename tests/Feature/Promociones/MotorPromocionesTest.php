@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use App\Domain\Promociones\LineaPromocion;
 use App\Domain\Promociones\MotorPromociones;
-use App\Enums\UnidadVenta;
 use App\Models\Producto;
 use App\Models\Promocion;
 
@@ -13,15 +12,20 @@ use App\Models\Promocion;
  * lleva cuánto de descuento, y qué le falta al pedido para aplicar.
  */
 beforeEach(function (): void {
-    // Toffee: L 30 la unidad, caja de 12. Nutrine: L 25.30 la unidad, caja de 24.
-    $this->toffee = Producto::factory()->precio(20.0, 30.0)->create(['unidades_por_caja' => 12, 'descripcion' => 'BUTTER TOFFEE 12X100G']);
-    $this->nutrine = Producto::factory()->precio(20.0, 25.30)->create(['unidades_por_caja' => 24, 'descripcion' => 'BABY NUTRINE 24X50G']);
+    // Toffee: L 30 la UN, CJ12 a L 360. Nutrine: L 25.30 la UN, CJ24 a L 607.20.
+    $this->toffee = Producto::factory()->precio(20.0, 30.0)->create(['descripcion' => 'BUTTER TOFFEE 12X100G']);
+    $this->nutrine = Producto::factory()->precio(20.0, 25.30)->conCaja(24)->create(['descripcion' => 'BABY NUTRINE 24X50G']);
     $this->motor = new MotorPromociones;
 });
 
-function lineaPromo(int $clave, Producto $producto, int $cantidad, UnidadVenta $unidad = UnidadVenta::Unidad): LineaPromocion
+/**
+ * Línea del pedido en la presentación que trae $contenido (1 = UN, 12 = CJ12…), con su precio.
+ */
+function lineaPromo(int $clave, Producto $producto, int $cantidad, int $contenido = 1): LineaPromocion
 {
-    return new LineaPromocion($clave, $producto->id, $producto->unidades_por_caja, $unidad, $cantidad, $producto->precioPara($unidad));
+    $presentacion = presentacion($producto, $contenido);
+
+    return new LineaPromocion($clave, $producto->id, $presentacion->contenido, $cantidad, $presentacion->precio);
 }
 
 test('mitad de precio: por cada toffee, un nutrine a mitad', function (): void {
@@ -53,7 +57,7 @@ test('gratis deja la línea del regalo en cero', function (): void {
 });
 
 test('la condición por caja cuenta las unidades sueltas', function (): void {
-    $promo = Promocion::factory()->para($this->toffee, $this->nutrine, unidadCondicion: UnidadVenta::Caja)->create();
+    $promo = Promocion::factory()->para($this->toffee, $this->nutrine, enCaja: true)->create();
 
     $completa = $this->motor->calcular([
         lineaPromo(1, $this->toffee, 6),
@@ -76,12 +80,43 @@ test('si el regalo viene dentro de una caja, se descuenta solo la unidad', funct
 
     $resultado = $this->motor->calcular([
         lineaPromo(1, $this->toffee, 1),
-        lineaPromo(2, $this->nutrine, 1, UnidadVenta::Caja),
+        lineaPromo(2, $this->nutrine, 1, 24),
     ], [$promo]);
 
-    // Caja de 24 × 25.30 = 607.20; sale gratis 1 unidad = 25.30
+    // CJ24 × 25.30 = 607.20; sale gratis 1 unidad = 25.30
     expect($resultado->descuentoDe(2)?->monto)->toBe(25.3)
         ->and($resultado->descuentoDe(2)?->unidades)->toBe(1);
+});
+
+test('la condición en una caja se llena con otra presentación del mismo producto', function (): void {
+    // El toffee también viene en fardo de 6: 2 FD6 son las 12 unidades de una CJ12.
+    $toffee = Producto::factory()->precio(20.0, 30.0)->conPresentacion('FD', 6)->create();
+    $promo = Promocion::factory()->para($toffee, $this->nutrine, enCaja: true)->create();
+
+    $resultado = $this->motor->calcular([
+        lineaPromo(1, $toffee, 2, 6),
+        lineaPromo(2, $this->nutrine, 1),
+    ], [$promo]);
+
+    expect($promo->condiciones->sole()->presentacion_id)->toBe(presentacion($toffee, 12)->id)
+        ->and($resultado->descuentoDe(2)?->monto)->toBe(25.3);
+});
+
+test('el regalo en caja: por 2 CJ12 de toffee, una CJ24 de nutrine gratis', function (): void {
+    $promo = Promocion::factory()->para($this->toffee, $this->nutrine, cantidad: 2, enCaja: true, regaloEnCaja: true)->create();
+
+    $completo = $this->motor->calcular([
+        lineaPromo(1, $this->toffee, 2, 12),
+        lineaPromo(2, $this->nutrine, 1, 24),
+    ], [$promo]);
+
+    $sinRegalo = $this->motor->calcular([lineaPromo(1, $this->toffee, 2, 12)], [$promo]);
+
+    // La CJ24 completa: 24 × 25.30 = 607.20.
+    expect($completo->descuentoDe(2)?->monto)->toBe(607.2)
+        ->and($completo->descuentoDe(2)?->unidades)->toBe(24)
+        ->and($sinRegalo->faltantes[0]->texto())->toContain('1 caja de 24 de BABY NUTRINE 24X50G')
+        ->and($promo->resumen())->toBe('Compra 2 cajas de 12 de BUTTER TOFFEE 12X100G → 1 caja de 24 de BABY NUTRINE 24X50G gratis');
 });
 
 test('mismo producto: compre 2 y lleve 1 gratis', function (): void {

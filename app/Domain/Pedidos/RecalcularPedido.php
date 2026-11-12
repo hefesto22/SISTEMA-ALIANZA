@@ -15,9 +15,10 @@ use Illuminate\Database\Eloquent\Collection;
 /**
  * Recalcula líneas y totales de un pedido.
  *
- * Con $preciosVigentes = true toma el precio que tiene HOY cada producto
- * (al levantar la preventa y al validar en bodega). Las cantidades que
- * se cobran son las despachadas si bodega ya validó; si no, las pedidas.
+ * Con $preciosVigentes = true toma el precio que tiene HOY la presentación
+ * de cada línea (al levantar la preventa y al validar en bodega). Las
+ * cantidades que se cobran son las despachadas si bodega ya validó; si no,
+ * las pedidas.
  *
  * Con $sinPerdida (al despachar cobrando el precio del pedido) la línea
  * cuyo precio ya quedó por debajo del costo de hoy pasa al precio de hoy:
@@ -36,16 +37,17 @@ final class RecalcularPedido
     public function ejecutar(Pedido $pedido, bool $preciosVigentes = true, bool $respetarPromocionesDelPedido = false, bool $sinPerdida = false): Pedido
     {
         $tasaIsv = CalculadoraPrecio::tasaIsv();
-        $pedido->load('items.producto');
+        $pedido->load(['items.producto', 'items.presentacion']);
 
         /** @var Collection<int, PedidoItem> $items */
         $items = $pedido->items;
 
         foreach ($items as $item) {
-            $quedaBajoCosto = $sinPerdida && round($item->precio, 4) < $item->producto->costoPara($item->unidad);
+            $costo = round($item->producto->costo_unidad * max(1, $item->contenido), 4);
+            $quedaBajoCosto = $sinPerdida && round($item->precio, 4) < $costo;
 
             if ($preciosVigentes || $quedaBajoCosto) {
-                $item->precio = $item->producto->precioPara($item->unidad);
+                $item->precio = $item->presentacion->precio;
                 $item->gravado = $item->producto->gravado;
             }
         }
@@ -56,8 +58,7 @@ final class RecalcularPedido
             $lineas[] = new LineaPromocion(
                 clave: $item->id,
                 productoId: $item->producto_id,
-                unidadesPorCaja: $item->producto->unidades_por_caja,
-                unidad: $item->unidad,
+                contenido: $item->contenido,
                 cantidad: $item->cantidadFacturable(),
                 precio: $item->precio,
             );
@@ -106,12 +107,12 @@ final class RecalcularPedido
      */
     private function promociones(Pedido $pedido, Collection $items, bool $respetarPromocionesDelPedido): Collection
     {
-        $promociones = Promocion::query()->vigentes()->paraBodega($pedido->bodega_id)->with('condiciones')->get();
+        $promociones = Promocion::query()->vigentes()->paraBodega($pedido->bodega_id)->with(Promocion::PARA_CALCULAR)->get();
 
         $delPedido = $items->pluck('promocion_id')->filter()->unique()->values()->all();
 
         if ($respetarPromocionesDelPedido && $delPedido !== []) {
-            $promociones = $promociones->merge(Promocion::query()->with('condiciones')->whereKey($delPedido)->get());
+            $promociones = $promociones->merge(Promocion::query()->with(Promocion::PARA_CALCULAR)->whereKey($delPedido)->get());
         }
 
         return $promociones->sortBy('id')->values();

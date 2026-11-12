@@ -4,19 +4,22 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\UnidadVenta;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Línea de un pedido. `cantidad` es lo que pidió el cliente;
- * `cantidad_despachada` es lo que bodega confirmó que sale (null = sin validar).
+ * Línea de un pedido: un producto en una de sus presentaciones (UN, CJ12,
+ * FD6…). `cantidad` es lo que pidió el cliente; `cantidad_despachada` es lo
+ * que bodega confirmó que sale (null = sin validar). `contenido` son las
+ * unidades base que trae la presentación (se copia al guardar la línea: si
+ * después cambia la presentación, lo ya pedido no cambia).
  *
  * @property int $id
  * @property int $pedido_id
  * @property int $producto_id
- * @property UnidadVenta $unidad
+ * @property int $presentacion_id
+ * @property int $contenido
  * @property int $cantidad
  * @property int|null $cantidad_despachada
  * @property float $precio
@@ -30,6 +33,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  * @property-read Pedido $pedido
  * @property-read Producto $producto
+ * @property-read Presentacion $presentacion
  * @property-read Promocion|null $promocion
  */
 class PedidoItem extends Model
@@ -40,14 +44,9 @@ class PedidoItem extends Model
     protected $fillable = [
         'pedido_id',
         'producto_id',
-        'unidad',
+        'presentacion_id',
         'cantidad',
         'cantidad_despachada',
-    ];
-
-    /** @var array<string, mixed> */
-    protected $attributes = [
-        'unidad' => 'unidad',
     ];
 
     /**
@@ -56,7 +55,8 @@ class PedidoItem extends Model
     protected function casts(): array
     {
         return [
-            'unidad'              => UnidadVenta::class,
+            'contenido'           => 'integer',
+            'presentacion_id'     => 'integer',
             'cantidad'            => 'integer',
             'cantidad_despachada' => 'integer',
             'precio'              => 'float',
@@ -66,6 +66,26 @@ class PedidoItem extends Model
             'isv'                 => 'float',
             'total'               => 'float',
         ];
+    }
+
+    /**
+     * Al poner (o cambiar) la presentación se copian sus unidades y su
+     * producto. Sin presentación, la base del producto.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (PedidoItem $item): void {
+            if (empty($item->presentacion_id)) {
+                $item->presentacion_id = Presentacion::query()->where('producto_id', $item->producto_id)->where('es_base', true)->valueOrFail('id');
+            }
+
+            if ($item->isDirty('presentacion_id') || ! $item->exists) {
+                $presentacion = Presentacion::query()->findOrFail($item->presentacion_id);
+                $item->contenido = $presentacion->contenido;
+                $item->producto_id = $presentacion->producto_id;
+                $item->setRelation('presentacion', $presentacion);
+            }
+        });
     }
 
     /**
@@ -82,6 +102,14 @@ class PedidoItem extends Model
     public function producto(): BelongsTo
     {
         return $this->belongsTo(Producto::class);
+    }
+
+    /**
+     * @return BelongsTo<Presentacion, $this>
+     */
+    public function presentacion(): BelongsTo
+    {
+        return $this->belongsTo(Presentacion::class);
     }
 
     /**
@@ -102,6 +130,14 @@ class PedidoItem extends Model
         return $this->cantidad_despachada ?? $this->cantidad;
     }
 
+    /**
+     * Unidades base que saca la línea (lo que se cobra × lo que trae).
+     */
+    public function unidades(): int
+    {
+        return $this->cantidadFacturable() * max(1, $this->contenido);
+    }
+
     public function faltante(): int
     {
         return $this->cantidad_despachada === null ? 0 : max(0, $this->cantidad - $this->cantidad_despachada);
@@ -117,7 +153,7 @@ class PedidoItem extends Model
 
     /**
      * Bodega la agregó al validar o al corregir: el cliente no pidió nada de
-     * ese producto (ni en caja ni en unidad).
+     * ese producto (en ninguna presentación).
      */
     public function esAgregado(): bool
     {
@@ -131,10 +167,10 @@ class PedidoItem extends Model
 
     /**
      * "Va de más: 1 unidad más de lo pedido (pidió 2)" (corto: "+1 unidad,
-     * pidió 2"). Si bodega la agregó en la otra unidad (pidió 0): "Va de
+     * pidió 2"). Si bodega la mandó en otra presentación (pidió 0): "Va de
      * más: 45 unidades (no lo pidió en unidades)". Si el producto no venía en
-     * el pedido: "Agregado: 2 cajas (no venía en el pedido)". Null si no
-     * salió de más.
+     * el pedido: "Agregado: 2 cajas de 12 (no venía en el pedido)". Null si
+     * no salió de más.
      */
     public function deMasEnPalabras(bool $corto = false): ?string
     {
@@ -144,30 +180,28 @@ class PedidoItem extends Model
             return null;
         }
 
+        $sale = $this->presentacion->enPalabras($mas);
+
         if ($this->esAgregado()) {
-            return $corto
-                ? '+'.self::enPalabras($mas, $this->unidad).', no venía en el pedido'
-                : 'Agregado: '.self::enPalabras($mas, $this->unidad).' (no venía en el pedido)';
+            return $corto ? "+{$sale}, no venía en el pedido" : "Agregado: {$sale} (no venía en el pedido)";
         }
 
         if ($this->cantidad === 0) {
-            $enOtra = 'no lo pidió en '.($this->unidad === UnidadVenta::Caja ? 'cajas' : 'unidades');
+            $enOtra = 'no lo pidió en '.$this->presentacion->palabra(2);
 
-            return $corto
-                ? '+'.self::enPalabras($mas, $this->unidad).', '.$enOtra
-                : 'Va de más: '.self::enPalabras($mas, $this->unidad).' ('.$enOtra.')';
+            return $corto ? "+{$sale}, {$enOtra}" : "Va de más: {$sale} ({$enOtra})";
         }
 
         return $corto
-            ? '+'.self::enPalabras($mas, $this->unidad).', pidió '.$this->cantidad
-            : 'Va de más: '.self::enPalabras($mas, $this->unidad).' más de lo pedido (pidió '.$this->cantidad.')';
+            ? "+{$sale}, pidió {$this->cantidad}"
+            : "Va de más: {$sale} más de lo pedido (pidió {$this->cantidad})";
     }
 
     /**
-     * Lo que no va completo, en palabras para que se sepa si fue la caja o la
-     * unidad: "No sale: pidió 2 cajas" o "No va completo: falta 1 caja de 3"
-     * (corto: "no sale: pidió 2 cajas", "falta 1 caja de 3"). Null si va
-     * completa o todavía no se valida.
+     * Lo que no va completo, en palabras para que se sepa en qué
+     * presentación: "No sale: pidió 2 cajas de 12" o "No va completo: falta
+     * 1 caja de 12 (pidió 3)" (corto: "no sale: pidió 2 cajas de 12", "falta
+     * 1 caja de 12, pidió 3"). Null si va completa o todavía no se valida.
      */
     public function faltaEnPalabras(bool $corto = false): ?string
     {
@@ -176,7 +210,7 @@ class PedidoItem extends Model
         }
 
         if ($this->cantidad_despachada === 0) {
-            return ($corto ? 'no sale' : 'No sale').': pidió '.self::enPalabras($this->cantidad, $this->unidad);
+            return ($corto ? 'no sale' : 'No sale').': pidió '.$this->presentacion->enPalabras($this->cantidad);
         }
 
         $falta = $this->faltante();
@@ -185,21 +219,8 @@ class PedidoItem extends Model
             return null;
         }
 
-        $texto = ($falta === 1 ? 'falta ' : 'faltan ').self::enPalabras($falta, $this->unidad).' de '.$this->cantidad;
+        $falta = ($falta === 1 ? 'falta ' : 'faltan ').$this->presentacion->enPalabras($falta);
 
-        return $corto ? $texto : 'No va completo: '.$texto;
-    }
-
-    /**
-     * "1 caja", "3 cajas", "1 unidad", "5 unidades".
-     */
-    public static function enPalabras(int $cantidad, UnidadVenta $unidad): string
-    {
-        $palabra = match ($unidad) {
-            UnidadVenta::Caja   => $cantidad === 1 ? 'caja' : 'cajas',
-            UnidadVenta::Unidad => $cantidad === 1 ? 'unidad' : 'unidades',
-        };
-
-        return "{$cantidad} {$palabra}";
+        return $corto ? "{$falta}, pidió {$this->cantidad}" : "No va completo: {$falta} (pidió {$this->cantidad})";
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Compras\Schemas;
 
-use App\Enums\UnidadVenta;
 use App\Filament\Schemas\Components\LineasCompra;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
@@ -20,9 +19,11 @@ use Filament\Support\Icons\Heroicon;
 /**
  * Registrar una compra como viene en la factura del proveedor. Arriba el
  * proveedor y la factura; abajo los productos como lista tipo carrito
- * (LineasCompra): solo salen los de ese proveedor, se toca uno y entra con
- * el costo de hoy, en caja o suelto, cuántas y el costo de cada una CON ISV
- * (si el producto es gravado). Si el costo se aleja mucho del de hoy, avisa
+ * (LineasCompra): solo salen los de ese proveedor, se toca uno y entra en
+ * su presentación más grande (CJ de 12, CJ de 8, UN…), cuántas y el costo
+ * de cada una CON ISV (si el producto es gravado), que se escribe como
+ * viene en la factura; abajo dice a cuánto está y a cuánto quedará el
+ * costo y el precio de venta. Si el costo se aleja mucho del de hoy, avisa
  * antes de guardar. "Registrar compra" va en la barra del total.
  */
 final class CompraForm
@@ -64,7 +65,7 @@ final class CompraForm
                             ->required(),
                     ]),
                 Section::make('Productos')
-                    ->description('Toque el producto para agregarlo. Costo como viene en la factura, con ISV si es gravado. Al registrar sube la existencia y se recalculan costo y precio de venta.')
+                    ->description('Toque el producto para agregarlo y escoja en qué presentación viene. Costo como viene en la factura, con ISV si es gravado. Al registrar sube la existencia y se recalculan costo y precios de venta.')
                     ->icon(Heroicon::OutlinedArchiveBox)
                     ->extraAttributes(['class' => 'pv'])
                     ->schema([
@@ -92,7 +93,7 @@ final class CompraForm
      *
      * @param array<string, mixed> $data
      *
-     * @return list<array{producto_id: int, unidad: string, cantidad: int, costo: float}>
+     * @return list<array{producto_id: int, presentacion_id: int, cantidad: int, costo: float}>
      */
     public static function lineas(array $data): array
     {
@@ -103,13 +104,11 @@ final class CompraForm
                 continue;
             }
 
-            $unidad = $fila['unidad'] ?? UnidadVenta::Caja->value;
-
             $lineas[] = [
-                'producto_id' => (int) $fila['producto_id'],
-                'unidad'      => $unidad instanceof UnidadVenta ? $unidad->value : (string) $unidad,
-                'cantidad'    => (int) self::numero($fila['cantidad'] ?? 0),
-                'costo'       => self::numero($fila['costo'] ?? 0),
+                'producto_id'     => (int) $fila['producto_id'],
+                'presentacion_id' => (int) self::numero($fila['presentacion_id'] ?? 0),
+                'cantidad'        => (int) self::numero($fila['cantidad'] ?? 0),
+                'costo'           => self::numero($fila['costo'] ?? 0),
             ];
         }
 

@@ -12,7 +12,6 @@ use App\Enums\EstadoPedido;
 use App\Enums\ModoImpresion;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
@@ -48,9 +47,9 @@ beforeEach(function (): void {
     $this->encargado = User::factory()->create(['bodega_id' => $this->bodega->id]);
     $this->encargado->assignRole(Rol::Bodega->value);
 
-    // Gravado: L 100 la unidad. Exento: L 50 la unidad, caja de 10 = L 500.
-    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['unidades_por_caja' => 12]);
-    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->create(['unidades_por_caja' => 10]);
+    // Gravado: L 100 la UN. Exento: L 50 la UN, CJ10 = L 500.
+    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create();
+    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->conCaja(10)->create();
 
     facturacionLista();
 });
@@ -67,8 +66,8 @@ function pedidoParaImprimir(Bodega $bodega, User $vendedor, Producto $gravado, P
         'fecha'       => now(),
     ]);
 
-    $pedido->items()->create(['producto_id' => $gravado->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 2]);
-    $pedido->items()->create(['producto_id' => $exento->id, 'unidad' => UnidadVenta::Caja, 'cantidad' => 1]);
+    $pedido->items()->create(['producto_id' => $gravado->id, 'presentacion_id' => presentacion($gravado)->id, 'cantidad' => 2]);
+    $pedido->items()->create(['producto_id' => $exento->id, 'presentacion_id' => caja($exento)->id, 'cantidad' => 1]);
 
     return app(RecalcularPedido::class)->ejecutar($pedido);
 }
@@ -333,7 +332,7 @@ test('corregir un pedido impreso: anula la factura, vuelve a por imprimir y al r
     imprimir($pedido, $this->encargado, ModoImpresion::Originales);
 
     // Sube el precio después de validado: la corrección no lo cambia.
-    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precioUnidad: 110.0);
+    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precios: [presentacion($this->gravado)->id => ['precio' => 110.0]]);
 
     $this->actingAs($this->encargado);
     $undoRepeaterFake = Repeater::fake();
@@ -432,9 +431,9 @@ test('ver pedido: resumen con el cliente y el total, cada producto con lo que sa
         ->assertSee('Sin validar')
         ->assertSee('COBRAR EN EFECTIVO')
         ->assertSee('2 UN')
-        ->assertSee('1 CJ')
+        ->assertSee('1 CJ10')
         ->assertSee('L. 100.00 c/u + ISV')
-        ->assertSee('L. 500.00 la caja de 10 · exento')
+        ->assertSee('L. 500.00 por caja de 10 · exento')
         ->assertSee('L. 730.00')
         ->assertDontSee('No va completo');
 
@@ -446,6 +445,6 @@ test('ver pedido: resumen con el cliente y el total, cada producto con lo que sa
         ->assertSee($this->encargado->name)
         ->assertSee('Sin imprimir')
         ->assertSee('1 UN')
-        ->assertSee('No va completo: falta 1 unidad de 2')
+        ->assertSee('No va completo: falta 1 unidad (pidió 2)')
         ->assertSee('L. 615.00');
 });

@@ -6,7 +6,7 @@
 @php
     /** @var \App\Models\Pedido $pedido */
     $pedido = $getRecord();
-    $pedido->loadMissing(['items.producto', 'items.promocion']);
+    $pedido->loadMissing(['items.producto', 'items.presentacion.unidadMedida', 'items.promocion']);
     $items = $pedido->items->sortBy('id');
 @endphp
 
@@ -19,11 +19,11 @@
         <ul class="vp-lista">
             @foreach ($items as $item)
                 @php
-                    $caja = $item->unidad === \App\Enums\UnidadVenta::Caja;
-                    $sigla = $caja ? 'CJ' : 'UN';
+                    $caja = ! $item->presentacion->es_base;
+                    $sigla = $item->presentacion->sigla();
                     $noSalio = $item->cantidad_despachada === 0;
                     $precio = lempiras($item->precio)
-                        .($caja ? ' la caja de '.$item->producto->unidades_por_caja : ' c/u')
+                        .($caja ? ' por '.$item->presentacion->palabra(1) : ' c/u')
                         .($item->gravado ? ' + ISV' : ' · exento');
                 @endphp
                 <li @class(['vp-linea', 'vp-no-salio' => $noSalio])>

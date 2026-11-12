@@ -200,5 +200,5 @@
         @endif
     </section>
 
-    <div class="rp-nota">Montos sin ISV, salvo "Con ISV". Costo y precio por unidad. Invertido = existencia × costo promedio; a precio de venta = existencia × precio de venta.</div>
+    <div class="rp-nota">Montos sin ISV, salvo "Con ISV". Costo y precio por unidad base (la UN; si la UN no se vende, su parte de la presentación más grande). Invertido = existencia × costo promedio; a precio de venta = existencia × precio de venta.</div>
 </div>

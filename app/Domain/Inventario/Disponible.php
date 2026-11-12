@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Domain\Inventario;
 
 use App\Enums\EstadoPedido;
-use App\Enums\UnidadVenta;
 use App\Models\Existencia;
 use App\Models\PedidoItem;
 use App\Models\Producto;
@@ -23,8 +22,8 @@ use Illuminate\Database\Eloquent\Builder;
  */
 final class Disponible
 {
-    /** Suma en unidades: la caja cuenta sus unidades (el ? es 'caja'). */
-    private const UNIDADES = 'SUM(CASE WHEN pedido_items.unidad = ? THEN pedido_items.cantidad * productos.unidades_por_caja ELSE pedido_items.cantidad END)';
+    /** Suma en unidades base: cada línea, lo pedido × lo que trae su presentación. */
+    private const UNIDADES = 'SUM(pedido_items.cantidad * pedido_items.contenido)';
 
     /**
      * [producto_id => unidades en la bodega].
@@ -67,10 +66,9 @@ final class Disponible
 
         /** @var array<int, int> $apartado */
         $apartado = self::pendientes($bodegaId, $sinPedido)
-            ->join('productos', 'productos.id', '=', 'pedido_items.producto_id')
             ->whereIn('pedido_items.producto_id', $productoIds)
             ->groupBy('pedido_items.producto_id')
-            ->selectRaw('pedido_items.producto_id, '.self::UNIDADES.' as total', [UnidadVenta::Caja->value])
+            ->selectRaw('pedido_items.producto_id, '.self::UNIDADES.' as total')
             ->pluck('total', 'producto_id')
             ->map(fn (mixed $cantidad): int => (int) $cantidad)
             ->all();
@@ -116,7 +114,7 @@ final class Disponible
             ->when($bodegaId !== null, fn (Builder $query): Builder => $query->where('existencias.bodega_id', $bodegaId));
 
         $apartado = self::pendientes($bodegaId, $sinPedido)
-            ->selectRaw('COALESCE('.self::UNIDADES.', 0)', [UnidadVenta::Caja->value])
+            ->selectRaw('COALESCE('.self::UNIDADES.', 0)')
             ->whereColumn('pedido_items.producto_id', 'productos.id');
 
         return $productos

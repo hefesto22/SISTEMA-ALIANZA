@@ -6,7 +6,6 @@ use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
 use App\Enums\EstadoPedido;
 use App\Enums\Rol;
-use App\Enums\UnidadVenta;
 use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\Pedido;
@@ -25,9 +24,9 @@ beforeEach(function (): void {
     $this->encargado = User::factory()->create(['bodega_id' => $this->bodega->id]);
     $this->encargado->assignRole(Rol::Bodega->value);
 
-    // Gravado: L 100 la unidad. Exento: L 50 la unidad, caja de 10 = L 500.
-    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create(['unidades_por_caja' => 12]);
-    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->create(['unidades_por_caja' => 10]);
+    // Gravado: L 100 la UN. Exento: L 50 la UN, CJ10 = L 500.
+    $this->gravado = Producto::factory()->precio(80.0, 100.0)->create();
+    $this->exento = Producto::factory()->exento()->precio(40.0, 50.0)->conCaja(10)->create();
 });
 
 /**
@@ -42,8 +41,8 @@ function pedidoConPromo(Bodega $bodega, User $vendedor, Producto $gravado, Produ
         'fecha'       => now(),
     ]);
 
-    $pedido->items()->create(['producto_id' => $gravado->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 2]);
-    $pedido->items()->create(['producto_id' => $exento->id, 'unidad' => UnidadVenta::Caja, 'cantidad' => 1]);
+    $pedido->items()->create(['producto_id' => $gravado->id, 'presentacion_id' => presentacion($gravado)->id, 'cantidad' => 2]);
+    $pedido->items()->create(['producto_id' => $exento->id, 'presentacion_id' => caja($exento)->id, 'cantidad' => 1]);
 
     return app(RecalcularPedido::class)->ejecutar($pedido);
 }
@@ -54,7 +53,7 @@ function pedidoConPromo(Bodega $bodega, User $vendedor, Producto $gravado, Produ
 function promoCajaExento(Producto $gravado, Producto $exento): Promocion
 {
     return Promocion::factory()
-        ->para($exento, $gravado, porcentaje: 50, unidadCondicion: UnidadVenta::Caja)
+        ->para($exento, $gravado, porcentaje: 50, enCaja: true)
         ->create();
 }
 
@@ -85,7 +84,7 @@ test('el resumen explica la promoción', function (): void {
     $promo = promoCajaExento($this->gravado, $this->exento);
     $tresPorDos = Promocion::factory()->para($this->gravado, $this->gravado, cantidad: 2)->create();
 
-    expect($promo->resumen())->toBe("Compra 1 caja de {$this->exento->descripcion} → 1 unidad de {$this->gravado->descripcion} a mitad de precio")
+    expect($promo->resumen())->toBe("Compra 1 caja de 10 de {$this->exento->descripcion} → 1 unidad de {$this->gravado->descripcion} a mitad de precio")
         ->and($tresPorDos->resumen())->toBe("Compra 2 unidades de {$this->gravado->descripcion} y lleva 1 unidad más gratis");
 });
 
