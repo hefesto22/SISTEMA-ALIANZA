@@ -17,7 +17,8 @@ use Filament\Support\Icons\Heroicon;
 
 /**
  * Bodega revisa el pedido línea por línea: lo que no hay se marca "No hay",
- * lo que no alcanzó se baja y, si el cliente pidió más, se sube. Al confirmar, el
+ * lo que no alcanzó se baja y, si el cliente pidió más, se sube; también puede
+ * agregar un producto que no venía en el pedido. Al confirmar, el
  * pedido se recalcula (precio según Configuración), sale de la existencia
  * de la bodega y queda Por imprimir.
  *
@@ -77,6 +78,6 @@ final class ValidarDespachoAction
             ? ' "Sale" ya viene con lo que alcanza en la bodega.'
             : '';
 
-        return "Cambie las cajas y unidades que salen con − y +: \"No hay\" si no hay, menos si no alcanzó, más o en la otra unidad si hace falta (unidades sueltas si una caja vino dañada).{$existencia} {$precio}; lo que sale se descuenta de la bodega y el pedido pasa a Por imprimir.";
+        return "Cambie las cajas y unidades que salen con − y +: \"No hay\" si no hay, menos si no alcanzó, más o en la otra unidad si hace falta (unidades sueltas si una caja vino dañada). Con \"Agregar otro producto\" se manda uno que no venía en el pedido.{$existencia} {$precio}; lo que sale se descuenta de la bodega y el pedido pasa a Por imprimir.";
     }
 }

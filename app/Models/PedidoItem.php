@@ -116,9 +116,25 @@ class PedidoItem extends Model
     }
 
     /**
+     * Bodega la agregó al validar o al corregir: el cliente no pidió nada de
+     * ese producto (ni en caja ni en unidad).
+     */
+    public function esAgregado(): bool
+    {
+        return $this->cantidad === 0
+            && ! self::query()
+                ->where('pedido_id', $this->pedido_id)
+                ->where('producto_id', $this->producto_id)
+                ->where('cantidad', '>', 0)
+                ->exists();
+    }
+
+    /**
      * "Va de más: 1 unidad más de lo pedido (pidió 2)" (corto: "+1 unidad,
      * pidió 2"). Si bodega la agregó en la otra unidad (pidió 0): "Va de
-     * más: 45 unidades (no lo pidió en unidades)". Null si no salió de más.
+     * más: 45 unidades (no lo pidió en unidades)". Si el producto no venía en
+     * el pedido: "Agregado: 2 cajas (no venía en el pedido)". Null si no
+     * salió de más.
      */
     public function deMasEnPalabras(bool $corto = false): ?string
     {
@@ -126,6 +142,12 @@ class PedidoItem extends Model
 
         if ($mas === 0) {
             return null;
+        }
+
+        if ($this->esAgregado()) {
+            return $corto
+                ? '+'.self::enPalabras($mas, $this->unidad).', no venía en el pedido'
+                : 'Agregado: '.self::enPalabras($mas, $this->unidad).' (no venía en el pedido)';
         }
 
         if ($this->cantidad === 0) {

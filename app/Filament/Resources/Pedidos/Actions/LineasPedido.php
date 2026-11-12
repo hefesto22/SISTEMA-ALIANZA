@@ -18,10 +18,14 @@ use Filament\Schemas\Components\Component;
 /**
  * Las líneas del pedido en el modal de Validar y de Corregir: cuánto sale
  * de cada producto (SalidaDePedido). Lo que no hay se marca "No hay" (sale
- * 0). "Hay" es la existencia de la bodega del pedido.
+ * 0). "Hay" es la existencia de la bodega del pedido. Bodega también puede
+ * agregar un producto que no venía en el pedido (paraAgregar()).
  */
 final class LineasPedido
 {
+    /** Cuántos productos trae el buscador de "Agregar otro producto". */
+    public const RESULTADOS = 20;
+
     /**
      * @return array<int, Component>
      */
@@ -56,8 +60,7 @@ final class LineasPedido
     {
         $items = $pedido->items()->with('producto')->orderBy('id')->get();
         $hay = Disponible::existencia($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all());
-        $mueve = ! $pedido->estaValidado() || SalidaDeBodega::yaSalio($pedido);
-        $salio = $pedido->estaValidado() && $mueve ? SalidaDeBodega::yaSalido($pedido) : [];
+        [$mueve, $salio] = self::movimiento($pedido);
 
         $ajustar = $segunExistencia && Configuracion::actual()->controlar_existencias;
         $quedan = $hay;
@@ -91,8 +94,81 @@ final class LineasPedido
     }
 
     /**
-     * Las líneas que bodega llenó en la unidad que el pedido no traía:
-     * [{producto_id, unidad, cantidad}] para ValidarDespacho / CorregirPedido.
+     * Buscador de "Agregar otro producto" en Validar y Corregir: productos activos
+     * por código o nombre, para mandar uno que el cliente no pidió. Primero
+     * los que hay en la bodega del pedido, después el código exacto y luego
+     * por nombre. Cada uno trae sus filas (caja y unidad, sin id, "pidió 0"),
+     * iguales a las de datos(), para que el modal las sume a la lista. "Sale"
+     * ya viene en 1: una caja si en la bodega alcanza para una (o no hay
+     * nada), si no una unidad.
+     *
+     * @return list<array{producto_id: int, codigo: string, descripcion: string, por_caja: int, hay_unidades: int, filas: list<array<string, mixed>>}>
+     */
+    public static function paraAgregar(Pedido $pedido, string $buscar): array
+    {
+        $buscar = trim($buscar);
+
+        if ($buscar === '') {
+            return [];
+        }
+
+        $productos = Producto::query()
+            ->fromSub(Disponible::conColumnas(Producto::query()->activos()->buscar($buscar), $pedido->bodega_id), 'productos')
+            ->orderByRaw('CASE WHEN existencia_bodega > 0 THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN UPPER(codigo) = ? THEN 0 ELSE 1 END', [mb_strtoupper($buscar)])
+            ->orderBy('descripcion')
+            ->limit(self::RESULTADOS)
+            ->get();
+
+        [$mueve, $salio] = self::movimiento($pedido);
+        $resultados = [];
+
+        foreach ($productos as $producto) {
+            $enBodega = $producto->getAttribute('existencia_bodega');
+            $enBodega = is_numeric($enBodega) ? (int) $enBodega : 0;
+            $hay = [$producto->id => $enBodega];
+            $conCaja = $producto->unidades_por_caja > 1;
+            $enCaja = $conCaja && ($enBodega >= $producto->unidades_por_caja || $enBodega <= 0);
+            $filas = [];
+
+            if ($conCaja) {
+                $filas[] = self::fila(null, $producto, UnidadVenta::Caja, 0, $enCaja ? 1 : 0, $hay, $salio, $mueve);
+            }
+
+            $filas[] = self::fila(null, $producto, UnidadVenta::Unidad, 0, $enCaja ? 0 : 1, $hay, $salio, $mueve);
+
+            $resultados[] = [
+                'producto_id'  => $producto->id,
+                'codigo'       => $producto->codigo,
+                'descripcion'  => $producto->descripcion,
+                'por_caja'     => $producto->unidades_por_caja,
+                'hay_unidades' => $enBodega,
+                'filas'        => $filas,
+            ];
+        }
+
+        return $resultados;
+    }
+
+    /**
+     * Si el pedido mueve la existencia de la bodega y lo que ya sacó de cada
+     * producto (en unidades). Al validar mueve y no ha sacado nada; al
+     * corregir, lo del kárdex. Los validados antes de que hubiera inventario
+     * no sacaron nada y corregirlos no mueve la existencia.
+     *
+     * @return array{0: bool, 1: array<int, int>}
+     */
+    private static function movimiento(Pedido $pedido): array
+    {
+        $mueve = ! $pedido->estaValidado() || SalidaDeBodega::yaSalio($pedido);
+
+        return [$mueve, $pedido->estaValidado() && $mueve ? SalidaDeBodega::yaSalido($pedido) : []];
+    }
+
+    /**
+     * Las líneas que bodega llenó en la unidad que el pedido no traía o de un
+     * producto que agregó: [{producto_id, unidad, cantidad}] para
+     * ValidarDespacho / CorregirPedido.
      *
      * @param array<string, mixed> $data
      *
@@ -152,14 +228,22 @@ final class LineasPedido
     /**
      * Para el aviso al validar: "Sale completo." o "No va completo: ACEITE…
      * (falta 1 caja de 3); JABON… (no sale: pidió 2 unidades). Va de más:
-     * AZUCAR… (+1 unidad, pidió 2)."
+     * AZUCAR… (+1 unidad, pidió 2)." Lo que bodega agregó va al final:
+     * "Agregado: SAL… (2 cajas)."
      */
     public static function incompletas(Pedido $pedido): string
     {
         $faltan = [];
         $deMas = [];
+        $agregados = [];
 
         foreach ($pedido->items()->with('producto')->orderBy('id')->get() as $item) {
+            if ($item->cantidadFacturable() > 0 && $item->esAgregado()) {
+                $agregados[] = "{$item->producto->descripcion} (".PedidoItem::enPalabras($item->cantidadFacturable(), $item->unidad).')';
+
+                continue;
+            }
+
             if (($falta = $item->faltaEnPalabras(corto: true)) !== null) {
                 $faltan[] = "{$item->producto->descripcion} ({$falta})";
             }
@@ -169,11 +253,13 @@ final class LineasPedido
             }
         }
 
-        if ($faltan === [] && $deMas === []) {
-            return 'Sale completo.';
-        }
+        $partes = $faltan === [] && $deMas === []
+            ? ['Sale completo.']
+            : [self::lista('No va completo', $faltan), self::lista('Va de más', $deMas)];
 
-        return trim(self::lista('No va completo', $faltan).' '.self::lista('Va de más', $deMas));
+        $partes[] = self::lista('Agregado', $agregados);
+
+        return implode(' ', array_filter($partes, fn (string $parte): bool => $parte !== ''));
     }
 
     /**

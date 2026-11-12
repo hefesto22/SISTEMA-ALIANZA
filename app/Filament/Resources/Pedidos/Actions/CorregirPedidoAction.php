@@ -16,7 +16,8 @@ use Filament\Support\Icons\Heroicon;
 
 /**
  * Corregir un pedido ya validado (por imprimir o impreso) cuando avisan de un
- * error: quitar lo que no va o cambiar cantidades. Vuelve a Por imprimir.
+ * error: quitar lo que no va, cambiar cantidades o agregar un producto que
+ * no venía. Vuelve a Por imprimir.
  *
  * Si ya se imprimió, su factura queda ANULADA (con el motivo, que se pide
  * aquí) y al reimprimir sale una factura nueva que la sustituye.
@@ -32,8 +33,8 @@ final class CorregirPedidoAction
             ->authorize('corregir')
             ->modalHeading(fn (Pedido $record): string => "Corregir · {$record->numero} · {$record->cliente->nombre}")
             ->modalDescription(fn (Pedido $record): string => $record->factura !== null
-                ? "Ya se imprimió con la factura N° {$record->factura->numero}. Al guardar, esa factura queda ANULADA (hay que retirarla al cliente) y al reimprimir sale una nueva. Cambie lo que sale con − y + (\"No hay\" = no sale)."
-                : 'Cambie lo que sale con − y + ("No hay" = no sale). Sigue por imprimir.')
+                ? "Ya se imprimió con la factura N° {$record->factura->numero}. Al guardar, esa factura queda ANULADA (hay que retirarla al cliente) y al reimprimir sale una nueva. Cambie lo que sale con − y + (\"No hay\" = no sale) o agregue un producto."
+                : 'Cambie lo que sale con − y + ("No hay" = no sale) o agregue un producto. Sigue por imprimir.')
             ->modalWidth(Width::ThreeExtraLarge)
             ->modalSubmitActionLabel('Guardar corrección')
             ->fillForm(fn (Pedido $record): array => LineasPedido::datos($record))

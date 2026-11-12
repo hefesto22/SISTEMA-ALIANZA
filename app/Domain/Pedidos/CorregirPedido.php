@@ -37,7 +37,7 @@ final class CorregirPedido
 
     /**
      * @param array<int, int|string|null> $sale [id de línea => cantidad que sale]; si falta una línea se queda como estaba
-     * @param list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}> $nuevas productos del pedido en la unidad que no traían (ver AjustarLineas)
+     * @param list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en la otra unidad o uno que no venía (ver AjustarLineas)
      */
     public function ejecutar(Pedido $pedido, array $sale, User $usuario, ?string $motivo = null, array $nuevas = []): Pedido
     {

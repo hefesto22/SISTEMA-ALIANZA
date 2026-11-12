@@ -16,9 +16,10 @@ use App\Models\Producto;
  * cliente pidió más); la línea guarda lo que se pidió, así queda dicho.
  *
  * Bodega también puede mandar un producto del pedido en la otra unidad (en
- * unidades si una caja vino dañada, o en caja): esa línea entra nueva con
- * "pidió 0". Si después se deja en 0, se quita. Si al final no sale nada,
- * no se deja: para eso se anula el pedido.
+ * unidades si una caja vino dañada, o en caja) y agregar un producto que no
+ * venía en el pedido (activo): esa línea entra nueva con "pidió 0". Si
+ * después se deja en 0, se quita. Si al final no sale nada, no se deja:
+ * para eso se anula el pedido.
  */
 final class AjustarLineas
 {
@@ -28,7 +29,7 @@ final class AjustarLineas
     /**
      * @param array<int, int|string|null> $sale [id de línea => cantidad que sale]
      * @param bool $faltaSaleCompleta si una línea no viene: true = sale completa (validar), false = se queda como estaba (corregir)
-     * @param list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}> $nuevas productos del pedido en la unidad que no traían
+     * @param list<array{producto_id: int, unidad: UnidadVenta, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en la unidad que no traía o uno que no venía
      */
     public static function aplicar(Pedido $pedido, array $sale, bool $faltaSaleCompleta, array $nuevas = []): void
     {
@@ -49,12 +50,9 @@ final class AjustarLineas
             }
 
             $delPedido = $items->first(fn (PedidoItem $item): bool => $item->producto_id === $nueva['producto_id']);
+            $producto = $delPedido instanceof PedidoItem ? $delPedido->producto : self::paraAgregar($pedido, $nueva['producto_id']);
 
-            if (! $delPedido instanceof PedidoItem) {
-                throw new ReglaNegocioException("Al validar solo se cambian productos que ya vienen en el pedido {$pedido->numero}.");
-            }
-
-            $creada = self::nueva($pedido, $delPedido->producto, $nueva['unidad']);
+            $creada = self::nueva($pedido, $producto, $nueva['unidad']);
             $items->push($creada);
             $sale[$creada->id] = $nueva['cantidad'];
         }
@@ -89,6 +87,24 @@ final class AjustarLineas
         if (! $alguna) {
             throw new ReglaNegocioException("Al pedido {$pedido->numero} no le sale ningún producto. Si no hay nada, anúlelo.");
         }
+    }
+
+    /**
+     * Un producto que no venía en el pedido: tiene que existir y estar activo.
+     */
+    private static function paraAgregar(Pedido $pedido, int $productoId): Producto
+    {
+        $producto = Producto::query()->find($productoId);
+
+        if (! $producto instanceof Producto) {
+            throw new ReglaNegocioException("El producto que se quiere agregar al pedido {$pedido->numero} ya no existe.");
+        }
+
+        if (! $producto->activo) {
+            throw new ReglaNegocioException("{$producto->descripcion} no está activo: no se puede agregar al pedido {$pedido->numero}.");
+        }
+
+        return $producto;
     }
 
     /**

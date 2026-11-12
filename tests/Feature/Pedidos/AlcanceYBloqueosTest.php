@@ -10,6 +10,7 @@ use App\Enums\EstadoPedido;
 use App\Enums\ModoImpresion;
 use App\Enums\Rol;
 use App\Enums\UnidadVenta;
+use App\Filament\Resources\Pedidos\Actions\LineasPedido;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Pedidos\Pages\EditPedido;
 use App\Filament\Resources\Pedidos\Pages\ListPedidos;
@@ -202,4 +203,35 @@ test('el vendedor ve sus pedidos solo mientras están pendientes; ya validados s
 
     expect($pendiente->fresh()?->estado)->toBe(EstadoPedido::Anulado)
         ->and(Pedido::query()->visiblePara($this->vendedor)->count())->toBe(0);
+});
+
+test('el encargado busca y agrega al validar un producto que no venía en el pedido', function (): void {
+    $pedido = pedidoDeAlcance($this->bodega, $this->vendedor, $this->producto);
+
+    // Gravado: L 30 la unidad, caja de 6 = L 180. No hay en la bodega: sale 1 caja.
+    $sal = Producto::factory()->precio(20.0, 30.0)->create(['descripcion' => 'ZZSAL DE MESA 6X1KG', 'unidades_por_caja' => 6]);
+
+    $this->actingAs($this->encargado);
+
+    $prueba = Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
+        ->mountAction('validarDespacho');
+
+    /** @var list<array{producto_id: int, filas: list<array<string, mixed>>}> $resultados */
+    $resultados = $prueba->instance()->callSchemaComponentMethod('mountedActionSchema0.items', 'buscarProductos', ['buscar' => 'zzsal']);
+
+    expect(array_column($resultados, 'producto_id'))->toBe([$sal->id]);
+
+    // Lo que hace el modal al tocarlo: sus filas entran al final de la lista.
+    $prueba->fillForm(['items' => [...LineasPedido::datos($pedido, segunExistencia: true)['items'], ...$resultados[0]['filas']]])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    $agregada = $pedido->items()->where('producto_id', $sal->id)->sole();
+
+    // 2 × 100 = 200 (+30 ISV) y 1 caja × 180 = 180 (+27 ISV) → 437
+    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir)
+        ->and($agregada->cantidad)->toBe(0)
+        ->and($agregada->unidad)->toBe(UnidadVenta::Caja)
+        ->and($agregada->cantidad_despachada)->toBe(1)
+        ->and($pedido->fresh()?->total)->toBe(437.0);
 });

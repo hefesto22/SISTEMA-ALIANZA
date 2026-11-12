@@ -8,7 +8,16 @@
     pedido y cuánto quedaría, y los contadores de CAJAS y UNIDADES con − y +
     (se puede mandar menos, más o en la otra unidad: unidades sueltas si una
     caja vino dañada). Arriba, filtros: todos, con cambios, no alcanza. Abajo,
-    un resumen de lo que no va completo y de lo que va de más.
+    un resumen de lo que no va completo, de lo que va de más y de lo agregado.
+
+    "Agregar otro producto" (arriba): un botón que abre el buscador (así al
+    abrir el modal no salta el teclado del teléfono). Busca un producto
+    activo que no venía en el pedido (SalidaDePedido::buscarProductos), con
+    lo que hay en la bodega, y lo suma al final de la lista ya abierto, con 1
+    caja (o 1 unidad si no alcanza para una caja). Si ya está en la lista,
+    solo lo abre. Con "controlar existencias" encendido, lo que no tiene
+    existencia no entra. Uno agregado se puede quitar; si se deja en 0 no se
+    agrega.
 
     El estado son las líneas del pedido más, sin id, la unidad que cada
     producto no trae (LineasPedido::datos); aquí se juntan por producto.
@@ -20,6 +29,8 @@
     $filas = is_array($getState()) ? array_values($getState()) : [];
     $clave = md5((string) json_encode(array_map(fn (mixed $fila): mixed => is_array($fila) ? [$fila['id'] ?? null, $fila['producto_id'] ?? null, $fila['es_caja'] ?? null] : null, $filas)));
     $productos = count(array_unique(array_map(fn (mixed $fila): mixed => is_array($fila) ? ($fila['producto_id'] ?? null) : null, $filas)));
+    $componente = $getKey();
+    $controlar = \App\Models\Configuracion::actual()->controlar_existencias;
 @endphp
 
 <x-dynamic-component :component="$getFieldWrapperView()" :field="$field">
@@ -42,6 +53,40 @@
             .sp-filtro.sp-activo b { opacity: 1; }
             .sp-vacio { padding: 1.25rem 1rem; text-align: center; font-size: 0.85rem; color: var(--sp-tenue); }
 
+            /* ── Agregar producto (no venía en el pedido) ── */
+            .sp-agregar { display: grid; gap: 0.4rem; }
+            .sp-agregar-boton { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.55rem 0.875rem; border-radius: 0.75rem; font-size: 0.85rem; font-weight: 600; text-align: start; color: var(--primary-600); outline: 1px dashed color-mix(in oklab, var(--primary-500) 55%, transparent); }
+            .sp-agregar-boton:hover { background: color-mix(in oklab, var(--primary-500) 6%, transparent); }
+            .dark .sp-agregar-boton { color: var(--primary-400); }
+            .sp-agregar-boton svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; }
+            .sp-agregar-boton em { font-style: normal; font-weight: 500; color: var(--sp-tenue); }
+            .sp-agregar-cerrar { flex-shrink: 0; padding: 0 0.75rem; font-size: 0.78rem; font-weight: 600; color: var(--sp-tenue); }
+            .sp-agregar-cerrar:hover { color: var(--gray-700); }
+            .dark .sp-agregar-cerrar:hover { color: var(--gray-200); }
+            .sp-resultados { border-radius: 0.75rem; background: #fff; outline: 1px solid var(--sp-borde); box-shadow: 0 8px 20px rgb(0 0 0 / 0.1); max-height: min(20rem, 50vh); overflow-y: auto; overscroll-behavior: contain; }
+            .dark .sp-resultados { background: var(--gray-800); }
+            .sp-resultado { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 0.75rem; width: 100%; padding: 0.6rem 0.875rem; text-align: start; border-bottom: 1px solid var(--sp-linea); cursor: pointer; }
+            .sp-resultado:last-child { border-bottom: 0; }
+            .sp-resultado:hover, .sp-resultado:focus-visible { background: var(--sp-suave); outline: none; }
+            .sp-resultado-texto { display: grid; gap: 0.1rem; min-width: 0; }
+            .sp-resultado-nombre { font-size: 0.85rem; font-weight: 600; line-height: 1.3; }
+            .sp-resultado-meta { font-size: 0.72rem; color: var(--sp-tenue); font-variant-numeric: tabular-nums; }
+            .sp-resultado-ya { font-size: 0.72rem; font-weight: 600; color: var(--primary-600); }
+            .dark .sp-resultado-ya { color: var(--primary-400); }
+            .sp-resultado-hay { display: grid; justify-items: center; min-width: 4.75rem; padding: 0.3rem 0.5rem; border-radius: 0.5rem; line-height: 1.15; text-align: center; color: var(--success-700); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
+            .dark .sp-resultado-hay { color: var(--success-400); }
+            .sp-resultado-hay span { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; opacity: 0.8; }
+            .sp-resultado-hay strong { font-size: 0.8rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+            .sp-resultado-hay.sp-hay-nada, .dark .sp-resultado-hay.sp-hay-nada { color: #fff; background: var(--danger-600); }
+            .sp-resultado-hay.sp-hay-nada :is(span, strong) { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; opacity: 1; }
+            .sp-resultado.sp-agotado .sp-resultado-nombre { color: var(--sp-tenue); }
+            .sp-resultado.sp-bloqueado { cursor: not-allowed; }
+            .sp-resultado.sp-bloqueado .sp-resultado-texto { opacity: 0.55; }
+            .sp-resultado.sp-bloqueado:hover { background: transparent; }
+            .sp-aviso { padding: 0.7rem 0.875rem; font-size: 0.8rem; color: var(--sp-tenue); }
+            .sp-aviso-sin { padding: 0.55rem 0.75rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 600; color: var(--danger-700); background: color-mix(in oklab, var(--danger-500) 12%, transparent); }
+            .dark .sp-aviso-sin { color: var(--danger-300); }
+
             /* ── Lista ── */
             .sp-lista { display: grid; margin: 0; padding: 0; list-style: none; border-radius: 0.75rem; outline: 1px solid var(--sp-borde); overflow: hidden; }
             .sp-fila { border-bottom: 1px solid var(--sp-linea); transition: background-color 0.2s ease; }
@@ -49,6 +94,7 @@
             .sp-fila.sp-fila-nada { background: color-mix(in oklab, var(--danger-500) 6%, transparent); }
             .sp-fila.sp-fila-parcial { background: color-mix(in oklab, var(--warning-500) 5%, transparent); }
             .sp-fila.sp-fila-mas { background: color-mix(in oklab, var(--info-500) 6%, transparent); }
+            .sp-fila.sp-fila-nuevo { background: color-mix(in oklab, var(--success-500) 6%, transparent); }
             .sp-fila.sp-abierta { background: color-mix(in oklab, var(--primary-500) 6%, transparent); }
 
             /* Fila corta: lo que sale, nombre, cambio y lo que queda. Al tocarla se abre. */
@@ -70,6 +116,8 @@
             .dark .sp-chip.sp-chip-mas { color: var(--info-300); }
             .sp-chip.sp-chip-nada { color: var(--danger-700); background: color-mix(in oklab, var(--danger-500) 14%, transparent); }
             .dark .sp-chip.sp-chip-nada { color: var(--danger-300); }
+            .sp-chip.sp-chip-nuevo { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 14%, transparent); }
+            .dark .sp-chip.sp-chip-nuevo { color: var(--success-300); }
             .sp-corta-quedan { font-size: 0.7rem; color: var(--sp-tenue); white-space: nowrap; font-variant-numeric: tabular-nums; }
             .sp-corta-quedan.sp-neg { font-weight: 700; color: var(--danger-600); }
             .dark .sp-corta-quedan.sp-neg { color: var(--danger-400); }
@@ -104,6 +152,8 @@
             .dark .sp-estado.sp-estado-nada { color: var(--danger-400); }
             .sp-estado.sp-estado-mas { color: var(--info-600); }
             .dark .sp-estado.sp-estado-mas { color: var(--info-400); }
+            .sp-estado.sp-estado-nuevo { color: var(--success-700); }
+            .dark .sp-estado.sp-estado-nuevo { color: var(--success-400); }
             .sp-no-alcanza { font-size: 0.75rem; font-weight: 600; color: var(--danger-600); }
             .dark .sp-no-alcanza { color: var(--danger-400); }
 
@@ -144,6 +194,8 @@
             .sp-incompletas b { font-weight: 700; }
             .sp-incompletas.sp-de-mas { color: var(--info-800); background: color-mix(in oklab, var(--info-500) 10%, transparent); outline-color: color-mix(in oklab, var(--info-500) 40%, transparent); }
             .dark .sp-incompletas.sp-de-mas { color: var(--info-300); }
+            .sp-incompletas.sp-agregados { color: var(--success-800); background: color-mix(in oklab, var(--success-500) 10%, transparent); outline-color: color-mix(in oklab, var(--success-500) 40%, transparent); }
+            .dark .sp-incompletas.sp-agregados { color: var(--success-300); }
 
             /* Teléfono: un poco menos de relleno. */
             @media (max-width: 639.98px) {
@@ -164,6 +216,17 @@
             abierta: null,
             filtro: 'todos',
 
+            {{-- Agregar producto. --}}
+            controlar: @js($controlar),
+            agregando: false,
+            buscar: '',
+            resultados: [],
+            buscando: false,
+            buscado: false,
+            turnoBusqueda: 0,
+            esperaBusqueda: null,
+            avisoAgregar: '',
+
             init() {
                 if (! Array.isArray(this.filas)) {
                     this.filas = Object.values(this.filas ?? {})
@@ -181,6 +244,129 @@
                 const numero = parseInt(valor, 10)
 
                 return Number.isFinite(numero) ? numero : 0
+            },
+
+            llamar(metodo, argumentos) {
+                return Livewire.fireAction(this.$wire.__instance, 'callSchemaComponentMethod', [@js($componente), metodo, argumentos], { async: true })
+            },
+
+            alEscribir() {
+                clearTimeout(this.esperaBusqueda)
+                this.avisoAgregar = ''
+                const texto = this.buscar.trim()
+
+                if (texto.length < 2 && ! /^\d+$/.test(texto)) {
+                    this.resultados = []
+                    this.buscando = false
+                    this.buscado = false
+
+                    return
+                }
+
+                this.buscando = true
+                this.esperaBusqueda = setTimeout(async () => {
+                    const turno = ++this.turnoBusqueda
+                    let r = []
+
+                    try {
+                        r = await this.llamar('buscarProductos', { buscar: texto })
+                    } catch (e) {}
+
+                    if (turno !== this.turnoBusqueda) {
+                        return
+                    }
+
+                    this.resultados = Array.isArray(r) ? r : []
+                    this.buscando = false
+                    this.buscado = true
+                }, 300)
+            },
+
+            {{-- Enter: si el código coincide exacto o hay un solo resultado, lo agrega. --}}
+            alEnter() {
+                const texto = this.buscar.trim().toUpperCase()
+                const exacto = this.resultados.find((p) => String(p.codigo).toUpperCase() === texto)
+
+                if (exacto) {
+                    this.agregar(exacto)
+                } else if (this.resultados.length === 1) {
+                    this.agregar(this.resultados[0])
+                }
+            },
+
+            abrirBusqueda() {
+                this.agregando = true
+                this.$nextTick(() => this.$refs.buscador?.focus())
+            },
+
+            {{-- Escape en el buscador lo cierra (no cierra el modal). --}}
+            alEscape(evento) {
+                evento.preventDefault()
+                evento.stopPropagation()
+                this.cerrarBusqueda()
+            },
+
+            cerrarBusqueda() {
+                clearTimeout(this.esperaBusqueda)
+                this.turnoBusqueda++
+                this.agregando = false
+                this.avisoAgregar = ''
+                this.buscar = ''
+                this.resultados = []
+                this.buscado = false
+                this.buscando = false
+            },
+
+            enLista(p) {
+                return this.filas.some((fila) => this.n(fila.producto_id) === this.n(p.producto_id))
+            },
+
+            {{-- Controlando la existencia, lo que no hay en la bodega no se agrega. --}}
+            bloqueado(p) {
+                return this.controlar && ! this.enLista(p) && this.n(p.hay_unidades) <= 0 && p.filas.some((fila) => fila.mueve)
+            },
+
+            {{-- Entra al final de la lista, abierto para poner cajas y unidades; si ya estaba, solo se abre. --}}
+            agregar(p) {
+                if (this.bloqueado(p)) {
+                    this.avisoAgregar = 'No hay ' + p.descripcion + ' en la bodega: no se puede agregar.'
+
+                    return
+                }
+
+                const id = this.n(p.producto_id)
+                const raiz = this.$root
+
+                if (! this.enLista(p)) {
+                    this.filas.push(...p.filas.map((fila) => ({ ...fila })))
+                }
+
+                this.cerrarBusqueda()
+                this.filtro = 'todos'
+                this.abierta = id
+
+                this.$nextTick(() => raiz?.querySelector('[data-producto=\'' + id + '\']')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+            },
+
+            {{-- Un producto que no venía en el pedido: el cliente no pidió nada de él. --}}
+            nuevo(grupo) {
+                return this.filasDe(grupo).every((fila) => this.n(fila.cantidad) === 0)
+            },
+
+            productoNuevo(fila) {
+                return this.filas.every((otra) => this.n(otra.producto_id) !== this.n(fila.producto_id) || this.n(otra.cantidad) === 0)
+            },
+
+            {{-- Quitar uno agregado: si todavía no se guarda, sale de la lista; si ya estaba guardado (al corregir), queda en 0 y se quita al guardar. --}}
+            quitar(grupo) {
+                if (this.filasDe(grupo).every((fila) => fila.id === null || fila.id === undefined)) {
+                    this.filas = this.filas.filter((fila) => this.n(fila.producto_id) !== grupo.id)
+                    this.abierta = null
+
+                    return
+                }
+
+                this.noHay(grupo)
             },
 
             {{-- De 0 en adelante: menos de lo pedido si no alcanzó, más si el cliente pidió más. --}}
@@ -295,10 +481,11 @@
                 this.filasDe(grupo).forEach((fila) => fila.sale = this.n(fila.cantidad))
             },
 
-            {{-- A la derecha de la fila corta: "−1 CJ", "+3 UN", "No sale"; vacío si sale como se pidió. --}}
+            {{-- A la derecha de la fila corta: "−1 CJ", "+3 UN", "No sale", "Agregado"; vacío si sale como se pidió. --}}
             cambioCorto(grupo) {
                 if (! this.difiere(grupo)) return ''
                 if (this.total(grupo) === 0) return 'No sale'
+                if (this.nuevo(grupo)) return 'Agregado'
 
                 return this.filasDe(grupo)
                     .filter((fila) => this.n(fila.sale) !== this.n(fila.cantidad))
@@ -312,6 +499,7 @@
 
             claseCambio(grupo) {
                 if (this.total(grupo) === 0) return 'sp-chip-nada'
+                if (this.nuevo(grupo)) return 'sp-chip-nuevo'
 
                 return this.filasDe(grupo).some((fila) => this.n(fila.sale) < this.n(fila.cantidad)) ? '' : 'sp-chip-mas'
             },
@@ -339,6 +527,10 @@
                 const sale = this.n(fila.sale)
                 const pidio = this.n(fila.cantidad)
 
+                if (pidio === 0 && sale > 0 && this.productoNuevo(fila)) {
+                    return 'Agregado: ' + this.palabras(sale, fila) + ' (no venía en el pedido)'
+                }
+
                 if (pidio === 0) {
                     return sale > 0 ? 'Va de más: ' + this.palabras(sale, fila) + ' (no lo pidió en ' + (fila.es_caja ? 'cajas' : 'unidades') + ')' : ''
                 }
@@ -363,6 +555,8 @@
             claseEstado(fila) {
                 const sale = this.n(fila.sale)
 
+                if (sale > 0 && this.productoNuevo(fila)) return 'sp-estado-nuevo'
+
                 return sale > this.n(fila.cantidad) ? 'sp-estado-mas' : (sale === 0 ? 'sp-estado-nada' : '')
             },
 
@@ -376,12 +570,17 @@
             },
 
             deMas() {
-                return this.filas.filter((fila) => this.n(fila.sale) > this.n(fila.cantidad))
+                return this.filas.filter((fila) => this.n(fila.sale) > this.n(fila.cantidad) && ! this.productoNuevo(fila))
+            },
+
+            agregados() {
+                return this.filas.filter((fila) => this.n(fila.sale) > 0 && this.productoNuevo(fila))
             },
 
             claseGrupo(grupo) {
                 if (this.abierta === grupo.id) return 'sp-abierta'
                 if (this.total(grupo) === 0) return 'sp-fila-nada'
+                if (this.nuevo(grupo)) return 'sp-fila-nuevo'
                 if (this.filasDe(grupo).some((fila) => this.n(fila.cantidad) > 0 && this.n(fila.sale) < this.n(fila.cantidad))) return 'sp-fila-parcial'
                 if (this.filasDe(grupo).some((fila) => this.n(fila.sale) > this.n(fila.cantidad))) return 'sp-fila-mas'
 
@@ -392,10 +591,12 @@
             textoResumen() {
                 const faltan = this.incompletas().length
                 const mas = this.deMas().length
+                const nuevos = new Set(this.agregados().map((fila) => this.n(fila.producto_id))).size
                 const partes = []
 
                 if (faltan > 0) partes.push(faltan === 1 ? '1 no va completo' : faltan + ' no van completos')
                 if (mas > 0) partes.push(mas === 1 ? '1 va de más' : mas + ' van de más')
+                if (nuevos > 0) partes.push(nuevos === 1 ? '1 agregado' : nuevos + ' agregados')
 
                 return partes.length === 0 ? 'Sale como se pidió' : partes.join(' · ')
             },
@@ -404,9 +605,72 @@
         <div class="sp-resumen">
             <span x-text="grupos().length === 1 ? '1 producto' : grupos().length + ' productos'">{{ $productos === 1 ? '1 producto' : $productos.' productos' }}</span>
             <span
-                x-bind:class="incompletas().length === 0 && deMas().length === 0 ? 'sp-resumen-ok' : 'sp-resumen-falta'"
+                x-bind:class="incompletas().length === 0 && deMas().length === 0 && agregados().length === 0 ? 'sp-resumen-ok' : 'sp-resumen-falta'"
                 x-text="textoResumen()"
             ></span>
+        </div>
+
+        {{-- Agregar un producto que no venía en el pedido. --}}
+        <div class="sp-agregar">
+            <button type="button" class="sp-agregar-boton" x-show="! agregando" x-on:click="abrirBusqueda()">
+                {{ svg('heroicon-m-plus') }}
+                <span>Agregar otro producto <em>que no viene en el pedido</em></span>
+            </button>
+
+            <div class="fi-input-wrp" x-show="agregando" x-cloak>
+                <div class="fi-input-wrp-prefix fi-input-wrp-prefix-has-content fi-inline">
+                    {{ svg('heroicon-m-plus', 'fi-icon fi-size-md') }}
+                </div>
+
+                <div class="fi-input-wrp-content-ctn">
+                    <input
+                        x-ref="buscador"
+                        x-model="buscar"
+                        x-on:input="alEscribir()"
+                        x-on:keydown.enter.prevent="alEnter()"
+                        x-on:keydown.escape="alEscape($event)"
+                        type="text"
+                        enterkeyhint="search"
+                        autocomplete="off"
+                        placeholder="Código o nombre del producto…"
+                        aria-label="Agregar un producto que no viene en el pedido: buscar por código o nombre"
+                        class="fi-input"
+                    />
+                </div>
+
+                <div class="fi-input-wrp-suffix fi-inline" x-show="buscando" x-cloak>
+                    {{ svg('heroicon-m-arrow-path', 'fi-icon fi-size-md animate-spin') }}
+                </div>
+
+                <button type="button" class="sp-agregar-cerrar" x-on:click="cerrarBusqueda()">Cerrar</button>
+            </div>
+
+            <div class="sp-aviso-sin" x-show="avisoAgregar !== ''" x-cloak x-text="avisoAgregar"></div>
+
+            <div class="sp-resultados" x-show="buscado || (buscar.trim().length === 1 && ! /^\d+$/.test(buscar.trim()))" x-cloak>
+                <template x-for="p in resultados" x-bind:key="'agregar-' + p.producto_id">
+                    <button
+                        type="button"
+                        class="sp-resultado"
+                        x-bind:class="{ 'sp-agotado': n(p.hay_unidades) <= 0, 'sp-bloqueado': bloqueado(p) }"
+                        x-bind:aria-disabled="bloqueado(p)"
+                        x-on:click="agregar(p)"
+                    >
+                        <span class="sp-resultado-texto">
+                            <span class="sp-resultado-nombre" x-text="p.descripcion"></span>
+                            <span class="sp-resultado-meta" x-text="p.codigo + (n(p.por_caja) > 1 ? ' · caja de ' + p.por_caja : '')"></span>
+                            <span class="sp-resultado-ya" x-show="enLista(p)">Ya está en la lista: tocar para verlo</span>
+                        </span>
+                        <span class="sp-resultado-hay" x-bind:class="{ 'sp-hay-nada': n(p.hay_unidades) <= 0 }">
+                            <span x-text="n(p.hay_unidades) <= 0 ? 'Sin' : 'Hay'"></span>
+                            <strong x-text="n(p.hay_unidades) <= 0 ? 'existencia' : enCajas(p.hay_unidades, p.por_caja)"></strong>
+                        </span>
+                    </button>
+                </template>
+
+                <div class="sp-aviso" x-show="buscado && resultados.length === 0">No hay productos activos con ese código o nombre.</div>
+                <div class="sp-aviso" x-show="! buscado && buscar.trim().length === 1">Escriba al menos 2 letras (o el código).</div>
+            </div>
         </div>
 
         {{-- Con muchos productos: ver solo los que cambiaron o los que no alcanzan. --}}
@@ -418,7 +682,7 @@
 
         <ul class="sp-lista">
             <template x-for="grupo in gruposVisibles()" x-bind:key="grupo.id">
-                <li class="sp-fila" x-bind:class="claseGrupo(grupo)">
+                <li class="sp-fila" x-bind:class="claseGrupo(grupo)" x-bind:data-producto="grupo.id">
                     {{-- Fila corta --}}
                     <button type="button" class="sp-corta" x-on:click="abrir(grupo)" x-bind:aria-expanded="abierta === grupo.id">
                         <span class="sp-cants">
@@ -430,7 +694,7 @@
 
                         <span class="sp-corta-texto">
                             <span class="sp-corta-nombre" x-text="grupo.info.descripcion ?? grupo.info.producto"></span>
-                            <span class="sp-corta-meta" x-text="(grupo.info.codigo ? grupo.info.codigo + ' · ' : '') + 'pidió ' + pidioCorto(grupo)"></span>
+                            <span class="sp-corta-meta" x-text="(grupo.info.codigo ? grupo.info.codigo + ' · ' : '') + (nuevo(grupo) ? 'no venía en el pedido' : 'pidió ' + pidioCorto(grupo))"></span>
                         </span>
 
                         <span class="sp-corta-lado">
@@ -449,7 +713,8 @@
                     {{-- Fila abierta --}}
                     <div class="sp-detalle" x-show="abierta === grupo.id">
                         <div class="sp-meta">
-                            <span>Pidió <strong x-text="pidio(grupo)"></strong></span>
+                            <span x-show="! nuevo(grupo)">Pidió <strong x-text="pidio(grupo)"></strong></span>
+                            <span x-show="nuevo(grupo)"><strong>No venía en el pedido:</strong> lo agrega bodega.</span>
                         </div>
 
                         {{-- Del producto en la bodega del pedido. --}}
@@ -500,9 +765,10 @@
                             </template>
 
                             <div class="sp-acciones">
-                                <button type="button" class="sp-enlace sp-subrayado" x-show="total(grupo) > 0 && difiere(grupo)" x-on:click="comoSePidio(grupo)">Volver a lo pedido</button>
-                                <button type="button" class="sp-boton sp-no" x-show="total(grupo) > 0" x-on:click="noHay(grupo)">No hay</button>
-                                <button type="button" class="sp-boton sp-si" x-show="total(grupo) === 0" x-on:click="comoSePidio(grupo)">Sí hay</button>
+                                <button type="button" class="sp-enlace sp-subrayado" x-show="! nuevo(grupo) && total(grupo) > 0 && difiere(grupo)" x-on:click="comoSePidio(grupo)">Volver a lo pedido</button>
+                                <button type="button" class="sp-boton sp-no" x-show="! nuevo(grupo) && total(grupo) > 0" x-on:click="noHay(grupo)">No hay</button>
+                                <button type="button" class="sp-boton sp-si" x-show="! nuevo(grupo) && total(grupo) === 0" x-on:click="comoSePidio(grupo)">Sí hay</button>
+                                <button type="button" class="sp-boton sp-no" x-show="nuevo(grupo)" x-on:click="quitar(grupo)">Quitar</button>
                                 <button type="button" class="sp-enlace" x-show="grupos().length > 1" x-on:click="abierta = null">Listo</button>
                             </div>
                         </div>
@@ -527,6 +793,15 @@
             <ul>
                 <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.producto_id + '-' + sigla(fila)">
                     <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
+                </template>
+            </ul>
+        </div>
+
+        <div class="sp-incompletas sp-agregados" x-show="agregados().length > 0" x-cloak>
+            <strong>Agregado (no venía en el pedido)</strong>
+            <ul>
+                <template x-for="fila in agregados()" x-bind:key="'agregado-' + fila.producto_id + '-' + sigla(fila)">
+                    <li><b x-text="(fila.es_caja ? 'Caja' : 'Unidad') + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="palabras(fila.sale, fila)"></span></li>
                 </template>
             </ul>
         </div>

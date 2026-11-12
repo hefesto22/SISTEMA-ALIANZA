@@ -14,6 +14,7 @@ use App\Enums\UnidadVenta;
 use App\Filament\Resources\Pedidos\Actions\LineasPedido;
 use App\Models\Bodega;
 use App\Models\Cliente;
+use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
@@ -137,6 +138,62 @@ test('bodega puede mandar en la otra unidad: una caja dañada sale en unidades s
         ->and($sueltas->deMasEnPalabras())->toBe('Va de más: 7 unidades (no lo pidió en unidades)')
         ->and($lineaExenta->fresh()?->faltaEnPalabras())->toBe('No sale: pidió 1 caja')
         ->and($despachado->total)->toBe(580.0);
+});
+
+test('bodega puede agregar al validar un producto que no venía en el pedido', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+
+    // Gravado: L 30 la unidad, caja de 6 = L 180.
+    $sal = Producto::factory()->precio(20.0, 30.0)->create(['unidades_por_caja' => 6]);
+
+    $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [], $this->vendedor, [
+        ['producto_id' => $sal->id, 'unidad' => UnidadVenta::Caja, 'cantidad' => 2],
+    ]);
+
+    $agregada = $despachado->items()->where('producto_id', $sal->id)->sole();
+
+    // 2 × 100 = 200 (+30 ISV), 1 caja × 500 = 500 exento y 2 cajas × 180 = 360 (+54 ISV) → 1144
+    expect($agregada->cantidad)->toBe(0)
+        ->and($agregada->unidad)->toBe(UnidadVenta::Caja)
+        ->and($agregada->cantidad_despachada)->toBe(2)
+        ->and($agregada->esAgregado())->toBeTrue()
+        ->and($agregada->deMasEnPalabras())->toBe('Agregado: 2 cajas (no venía en el pedido)')
+        ->and($agregada->faltaEnPalabras())->toBeNull()
+        ->and($despachado->total)->toBe(1144.0)
+        ->and(LineasPedido::incompletas($despachado))->toBe("Sale completo. Agregado: {$sal->descripcion} (2 cajas).");
+});
+
+test('al validar no se agrega un producto que no está activo', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    $viejo = Producto::factory()->create(['activo' => false]);
+
+    expect(fn (): Pedido => app(ValidarDespacho::class)->ejecutar($pedido, [], $this->vendedor, [
+        ['producto_id' => $viejo->id, 'unidad' => UnidadVenta::Unidad, 'cantidad' => 1],
+    ]))->toThrow(ReglaNegocioException::class, "{$viejo->descripcion} no está activo");
+
+    expect($pedido->fresh()?->estado)->toBe(EstadoPedido::Pendiente)
+        ->and($pedido->items()->count())->toBe(2);
+});
+
+test('el buscador de agregar trae productos activos, primero los que hay en la bodega, con sus filas', function (): void {
+    $pedido = crearPedido($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+
+    $gruesa = Producto::factory()->create(['descripcion' => 'ZZSAL GRUESA 12X1KG', 'unidades_por_caja' => 12]);
+    $mesa = Producto::factory()->create(['descripcion' => 'ZZSAL DE MESA 6X1KG', 'unidades_por_caja' => 6]);
+    Producto::factory()->create(['descripcion' => 'ZZSAL VIEJA 6X1KG', 'activo' => false]);
+
+    // De la de mesa hay 4 unidades (no alcanza para una caja): sale 1 unidad.
+    // De la gruesa no hay nada: sale 1 caja.
+    Existencia::query()->create(['bodega_id' => $this->bodega->id, 'producto_id' => $mesa->id, 'cantidad' => 4]);
+
+    $resultados = LineasPedido::paraAgregar($pedido, 'zzsal');
+    $filas = fn (int $i): array => array_map(fn (array $fila): array => [$fila['id'], $fila['es_caja'], $fila['cantidad'], $fila['sale'], $fila['hay_unidades']], $resultados[$i]['filas']);
+
+    expect(array_column($resultados, 'producto_id'))->toBe([$mesa->id, $gruesa->id])
+        ->and($resultados[0]['hay_unidades'])->toBe(4)
+        ->and($filas(0))->toBe([[null, true, 0, 0, 4], [null, false, 0, 1, 4]])
+        ->and($filas(1))->toBe([[null, true, 0, 1, 0], [null, false, 0, 0, 0]])
+        ->and(LineasPedido::paraAgregar($pedido, '  '))->toBe([]);
 });
 
 test('un pedido despachado no se puede validar otra vez', function (): void {
