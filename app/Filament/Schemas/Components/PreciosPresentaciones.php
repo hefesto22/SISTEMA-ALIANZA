@@ -21,8 +21,9 @@ use Filament\Forms\Components\Field;
  * ISV), % de utilidad, precio (con ISV si es gravado), cuánto gana y si el
  * precio es "Con %" (sale del costo con ese % y lo mueven las compras) o
  * "Fijo" (lo pone la empresa; las compras no lo mueven), con una línea que
- * lo explica con los números de esa fila. Escribir un % la deja "Con %";
- * escribir otro precio la deja "Fijo". Las cuentas pasan en el navegador
+ * lo explica con los números de esa fila. En "Con %" solo se escribe el %
+ * (el precio sale solo); en "Fijo" solo el precio (el % muestra lo que
+ * deja); se cambia con los botones. Las cuentas pasan en el navegador
  * mientras se escribe; al guardar, ActualizarPrecioAction las revisa y
  * ActualizarPrecioProducto las guarda.
  *

@@ -8,8 +8,9 @@
     utilidad, precio (con ISV si es gravado), cuánto gana y si el precio es
     "Con %" (sale del costo con ese % y lo mueven las compras) o "Fijo" (lo
     pone la empresa). Debajo de cada una, en palabras, qué pasa con ese
-    precio. Escribir un % la deja "Con %"; escribir otro precio, "Fijo"; el
-    campo que sale de la cuenta se ve más apagado.
+    precio. En "Con %" solo se escribe el % (el precio sale solo); en "Fijo"
+    solo el precio (el % muestra lo que deja). El que sale de la cuenta es de
+    solo lectura y se ve apagado; se cambia con los botones Con % / Fijo.
 
     Las cuentas son las de CalculadoraPrecio (4 decimales sin ISV, 2 en
     pantalla) y pasan aquí mientras se escribe; al servidor solo va el
@@ -55,7 +56,7 @@
             .ap-cabeza > :nth-child(6) { text-align: center; }
             .ap-pres { grid-area: pres; }
             .ap-costo { grid-area: costo; }
-            .ap-fila > .ap-campo:not(.ap-campo-dinero) { grid-area: margen; }
+            .ap-fila > .ap-campo-margen { grid-area: margen; }
             .ap-fila > .ap-campo-dinero { grid-area: precio; }
             .ap-gana { grid-area: gana; }
             .ap-segmento { grid-area: modo; }
@@ -80,10 +81,10 @@
             .ap-campo > span { font-size: 0.8rem; color: var(--ap-tenue); }
             .ap-campo-dinero input { font-size: 0.95rem; font-weight: 700; }
             .ap-campo-error, .ap-campo-error:focus-within { box-shadow: 0 0 0 2px var(--danger-500); }
-            /* El que sale de la cuenta (no el que manda): más apagado, pero se puede escribir. */
-            .ap-campo-calculado { background: transparent; box-shadow: inset 0 0 0 1px var(--ap-borde); }
-            .dark .ap-campo-calculado { background: transparent; }
-            .ap-campo-calculado input { color: var(--ap-tenue); font-weight: 600; }
+            /* El que sale de la cuenta: solo se lee (se cambia con Con % / Fijo). */
+            .ap-campo-calculado, .ap-campo-calculado:focus-within { background: transparent; box-shadow: inset 0 0 0 1px var(--ap-borde); cursor: default; }
+            .dark .ap-campo-calculado, .dark .ap-campo-calculado:focus-within { background: transparent; box-shadow: inset 0 0 0 1px var(--ap-borde); }
+            .ap-campo-calculado input { color: var(--ap-tenue); font-weight: 600; cursor: default; }
             .ap-correccion .ap-campo { width: 9rem; }
 
             .ap-gana { text-align: end; line-height: 1.25; min-width: 0; }
@@ -248,14 +249,18 @@
             },
 
             {{-- ── Al escribir ── --}}
+            {{-- Con %: se escribe el % y el precio sale solo. --}}
             alMargen(fila) {
+                if (fila.modo === 'fijo') {
+                    return
+                }
+
                 const m = this.num(this.entrada[fila.id].margen)
 
                 if (m === null) {
                     return
                 }
 
-                fila.modo = 'calculado'
                 fila.margen = this.r2(m)
                 this.regla[fila.id] = fila.margen
 
@@ -266,41 +271,52 @@
                     this.entrada[fila.id].precio = this.fijo2(this.pantalla(sugerido))
                 }
             },
+            {{-- Fijo: se escribe el precio y el % muestra lo que deja. --}}
             alPrecio(fila) {
-                const venta = this.num(this.entrada[fila.id].precio)
-
-                if (venta === null || venta <= 0) {
+                if (fila.modo !== 'fijo') {
                     return
                 }
 
-                fila.precio_base = this.r6(venta / this.factor())
+                const venta = this.num(this.entrada[fila.id].precio)
 
-                {{-- El mismo que da su %: sigue Con %. Otro: lo pone la empresa, queda fijo. --}}
-                const sugerido = this.sugerido(fila, this.regla[fila.id])
-
-                if (sugerido !== null && Math.abs(venta - this.pantalla(sugerido)) < 0.005) {
-                    fila.modo = 'calculado'
-                    fila.margen = this.regla[fila.id]
-                    fila.precio_base = sugerido
-                } else {
-                    fila.modo = 'fijo'
-                    fila.margen = this.margenReal(fila)
-                }
-
+                fila.precio_base = venta !== null && venta > 0 ? this.r6(venta / this.factor()) : null
+                fila.margen = this.margenReal(fila)
                 this.entrada[fila.id].margen = this.textoNumero(fila.margen)
             },
-            ponerModo(fila, modo) {
+            {{-- Los botones Con % / Fijo: cambian cuál se escribe y lo dejan listo para escribir. --}}
+            ponerModo(fila, modo, boton) {
                 if (fila.modo !== modo) {
-                    this.alternar(fila)
+                    if (modo === 'fijo') {
+                        fila.modo = 'fijo'
+                        fila.margen = this.margenReal(fila)
+                    } else {
+                        fila.modo = 'calculado'
+                        fila.margen = this.regla[fila.id]
+
+                        const sugerido = this.sugerido(fila, fila.margen)
+
+                        if (sugerido !== null) {
+                            fila.precio_base = sugerido
+                            this.entrada[fila.id].precio = this.fijo2(this.pantalla(sugerido))
+                        }
+                    }
+
+                    this.entrada[fila.id].margen = this.textoNumero(fila.margen)
                 }
+
+                this.$nextTick(() => boton?.closest('.ap-fila')?.querySelector(modo === 'fijo' ? '.ap-campo-dinero input' : '.ap-campo-margen input')?.select())
             },
             explicacion(fila) {
                 const fijo = fila.modo === 'fijo'
                 const precio = Number(fila.precio_base) > 0 ? this.dinero(this.pantalla(fila.precio_base)) : null
 
+                if (fijo && precio === null) {
+                    return 'escriba el precio de venta; las compras no lo van a mover.'
+                }
+
                 if (! (this.costoDe(fila) > 0)) {
                     return fijo
-                        ? 'el precio se queda en ' + (precio ?? 'lo que escriba') + ' aunque lleguen compras.'
+                        ? 'el precio se queda en ' + precio + ' aunque lleguen compras.'
                         : 'todavía no hay costo: el precio saldrá de la primera compra con ' + this.textoNumero(fila.margen) + ' %.'
                 }
 
@@ -310,7 +326,7 @@
 
                 const sugerido = this.sugerido(fila, this.regla[fila.id])
                 const real = this.textoNumero(fila.margen)
-                let texto = 'el precio se queda en ' + (precio ?? '—') + ' aunque cambie el costo'
+                let texto = 'el precio se queda en ' + precio + ' aunque cambie el costo'
 
                 if (real === '') {
                     texto += '.'
@@ -332,24 +348,6 @@
                 if (venta !== null && venta > 0) {
                     this.entrada[fila.id].precio = this.fijo2(venta)
                 }
-            },
-            alternar(fila) {
-                if (fila.modo === 'fijo') {
-                    fila.modo = 'calculado'
-                    fila.margen = this.regla[fila.id]
-
-                    const sugerido = this.sugerido(fila, fila.margen)
-
-                    if (sugerido !== null) {
-                        fila.precio_base = sugerido
-                        this.entrada[fila.id].precio = this.fijo2(this.pantalla(sugerido))
-                    }
-                } else {
-                    fila.modo = 'fijo'
-                    fila.margen = this.margenReal(fila)
-                }
-
-                this.entrada[fila.id].margen = this.textoNumero(fila.margen)
             },
 
             {{-- ── Corregir costo ── --}}
@@ -489,14 +487,14 @@
                         </p>
                     </div>
 
-                    <label class="ap-campo" role="cell" :class="{ 'ap-campo-error': errorMargen(fila), 'ap-campo-calculado': fila.modo === 'fijo' }">
-                        <input type="text" inputmode="decimal" x-model="entrada[fila.id].margen" x-on:input="alMargen(fila)" :aria-label="'Utilidad de ' + p(fila).sigla">
+                    <label class="ap-campo ap-campo-margen" role="cell" :class="{ 'ap-campo-error': errorMargen(fila), 'ap-campo-calculado': fila.modo === 'fijo' }" :title="fila.modo === 'fijo' ? 'Lo que deja el precio fijo. Para escribir el %, póngalo en Con %.' : ''">
+                        <input type="text" inputmode="decimal" x-model="entrada[fila.id].margen" x-on:input="alMargen(fila)" :readonly="fila.modo === 'fijo'" :tabindex="fila.modo === 'fijo' ? -1 : 0" :aria-label="'Utilidad de ' + p(fila).sigla">
                         <span>%</span>
                     </label>
 
-                    <label class="ap-campo ap-campo-dinero" role="cell" :class="{ 'ap-campo-error': errorPrecio(fila), 'ap-campo-calculado': fila.modo !== 'fijo' }">
+                    <label class="ap-campo ap-campo-dinero" role="cell" :class="{ 'ap-campo-error': errorPrecio(fila), 'ap-campo-calculado': fila.modo !== 'fijo' }" :title="fila.modo !== 'fijo' ? 'Sale del costo con el %. Para escribir el precio, póngalo en Fijo.' : ''">
                         <span>{{ $datos['simbolo'] ?? 'L.' }}</span>
-                        <input type="text" inputmode="decimal" x-model="entrada[fila.id].precio" x-on:input="alPrecio(fila)" x-on:blur="formatearPrecio(fila)" :aria-label="'Precio de ' + p(fila).sigla">
+                        <input type="text" inputmode="decimal" x-model="entrada[fila.id].precio" x-on:input="alPrecio(fila)" x-on:blur="formatearPrecio(fila)" :readonly="fila.modo !== 'fijo'" :tabindex="fila.modo !== 'fijo' ? -1 : 0" :aria-label="'Precio de ' + p(fila).sigla">
                     </label>
 
                     <div class="ap-gana" role="cell">
@@ -505,11 +503,11 @@
                     </div>
 
                     <div class="ap-segmento" role="cell">
-                        <button type="button" :class="{ 'ap-segmento-con': fila.modo !== 'fijo' }" x-on:click="ponerModo(fila, 'calculado')" title="Sale del costo con el %: lo mueven las compras">
+                        <button type="button" :class="{ 'ap-segmento-con': fila.modo !== 'fijo' }" x-on:click="ponerModo(fila, 'calculado', $el)" title="Usted escribe el %; el precio sale del costo y lo mueven las compras">
                             {{ svg('heroicon-o-lock-open') }}
                             <span>Con %</span>
                         </button>
-                        <button type="button" :class="{ 'ap-segmento-fijo': fila.modo === 'fijo' }" x-on:click="ponerModo(fila, 'fijo')" title="Lo pone usted: las compras no lo mueven">
+                        <button type="button" :class="{ 'ap-segmento-fijo': fila.modo === 'fijo' }" x-on:click="ponerModo(fila, 'fijo', $el)" title="Usted escribe el precio; las compras no lo mueven">
                             {{ svg('heroicon-o-lock-closed') }}
                             <span>Fijo</span>
                         </button>
@@ -523,6 +521,6 @@
             </template>
         </div>
 
-        <p class="ap-ayuda">Escriba el % o el precio: el que escriba manda y el otro sale de la cuenta. Aplica en todas las bodegas y queda en el historial.</p>
+        <p class="ap-ayuda">Con %: usted escribe el % y el precio sale solo. Fijo: usted escribe el precio y el % muestra lo que deja. Aplica en todas las bodegas y queda en el historial.</p>
     </div>
 </x-dynamic-component>
