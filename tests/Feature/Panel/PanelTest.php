@@ -73,32 +73,46 @@ test('las pantallas de administración abren', function (): void {
     Livewire::test(ListPedidos::class)->assertOk();
 });
 
-// "Actualizar precio" con Repeater::fake(): las filas de presentaciones van
-// de la más grande a la base, así que 0 = CJ12 y 1 = UN. El factory deja
-// costo 50 por unidad (16 % de la categoría), la UN a 59.5238 y la CJ12 a
-// 714.2856 (sin ISV). El costo no se escribe: es el de las compras.
+// "Actualizar precio": las cuentas pasan en el navegador mientras se
+// escribe; al servidor llega el estado de PreciosPresentaciones con las
+// filas de la más grande a la base (0 = CJ12, 1 = UN), precios sin ISV y
+// el % (14 = 14 %). El factory deja costo 50 por unidad (16 % de la
+// categoría), la UN a 59.5238 y la CJ12 a 714.2856. El costo no se
+// escribe: es el de las compras.
 
-test('actualizar precio: el costo es el de las compras; se escribe el precio de venta con ISV y se guarda sin ISV', function (): void {
+test('actualizar precio: abre con el costo de las compras y una fila por presentación', function (): void {
     $this->actingAs($this->encargado);
-    $undoRepeaterFake = Repeater::fake();
 
-    // La UN a L 80.50 con ISV = 70 sin ISV: distinto al que da el 16 % → queda fija (deja 28.57 %).
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
         ->assertSchemaStateSet([
-            'corregir_costo'          => false,
-            'costo_base'              => 50.0,
-            'presentaciones.0.costo'  => 690.0,
-            'presentaciones.0.margen' => 16.0,
-            'presentaciones.1.precio' => 68.45,
+            'precios.corregir'            => false,
+            'precios.costo_base'          => 50.0,
+            'precios.filas.0.id'          => presentacion($this->producto, 12)->id,
+            'precios.filas.0.modo'        => 'calculado',
+            'precios.filas.0.margen'      => 16.0,
+            'precios.filas.0.precio_base' => 714.2856,
+            'precios.filas.1.id'          => presentacion($this->producto)->id,
+            'precios.filas.1.precio_base' => 59.5238,
         ])
-        ->assertMountedActionModalSee('Costo promedio')
-        ->fillForm(['presentaciones' => [['modo' => 'calculado'], ['precio' => 80.50]]])
-        ->assertSchemaStateSet(['presentaciones.1.modo' => 'fijo', 'presentaciones.1.margen' => 28.57])
+        ->assertMountedActionModalSee('Costo promedio por UN')
+        ->assertMountedActionModalSee('Corregir costo');
+});
+
+test('actualizar precio: un precio escrito queda fijo y se guarda sin ISV', function (): void {
+    $this->actingAs($this->encargado);
+
+    // La UN a L 80.50 con ISV = 70 sin ISV (deja 28.57 %). La CJ12 sigue con su %.
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->mountAction('actualizarPrecio')
+        ->fillForm([
+            'precios.filas.0.modo'        => 'calculado',
+            'precios.filas.1.modo'        => 'fijo',
+            'precios.filas.1.precio_base' => 70.0,
+            'precios.filas.1.margen'      => 28.57,
+        ])
         ->callMountedAction()
         ->assertHasNoActionErrors();
-
-    $undoRepeaterFake();
 
     $un = presentacion($this->producto);
     $cambio = $this->producto->cambiosPrecio()->where('presentacion_id', $un->id)->sole();
@@ -117,17 +131,17 @@ test('actualizar precio: el costo es el de las compras; se escribe el precio de 
 
 test('cada presentación con su %: la caja deja menos que la unidad y su precio sigue al costo de cada compra', function (): void {
     $this->actingAs($this->encargado);
-    $undoRepeaterFake = Repeater::fake();
 
-    // La CJ12 al 10 %: 600 ÷ 0.90 = 666.6667 sin ISV = L 766.67 con ISV. La UN sigue con el 16 %.
+    // La CJ12 al 10 %: 600 ÷ 0.90 = 666.6667 sin ISV. La UN sigue con el 16 %.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
-        ->fillForm(['presentaciones' => [['margen' => 10], ['modo' => 'calculado']]])
-        ->assertSchemaStateSet(['presentaciones.0.precio' => 766.67, 'presentaciones.0.modo' => 'calculado'])
+        ->fillForm([
+            'precios.filas.0.margen'      => 10,
+            'precios.filas.0.precio_base' => 666.6667,
+            'precios.filas.1.modo'        => 'calculado',
+        ])
         ->callMountedAction()
         ->assertHasNoActionErrors();
-
-    $undoRepeaterFake();
 
     expect(presentacion($this->producto, 12)->precio)->toBe(666.6667)
         ->and(presentacion($this->producto, 12)->margen)->toBe(0.1)
@@ -144,36 +158,32 @@ test('cada presentación con su %: la caja deja menos que la unidad y su precio 
         ->and(presentacion($this->producto)->precio)->toBe(53.5714);
 });
 
-test('corregir el costo: lo escrito por caja se reparte por unidad, sin descuadrarse', function (): void {
+test('corregir el costo: se guarda el corregido y los de "Con %" salen de él', function (): void {
     $this->actingAs($this->encargado);
-    $undoRepeaterFake = Repeater::fake();
 
-    // CJ12 a L 600 con ISV → 43.4783 la unidad sin ISV: CJ12 a L 714.29 y UN a L 59.52 con el 16 %.
+    // CJ12 a L 600 con ISV → 43.478261 la unidad sin ISV.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
-        ->fillForm(['corregir_costo' => true])
-        ->assertSchemaStateSet(['costo_por' => presentacion($this->producto, 12)->id, 'costo' => 690.0])
-        ->fillForm(['costo' => 600])
-        ->assertSchemaStateSet([
-            'presentaciones.0.costo'  => 600.0,
-            'presentaciones.1.costo'  => 50.0,
-            'presentaciones.0.precio' => 714.29,
-            'presentaciones.1.precio' => 59.52,
-        ])
-        ->assertMountedActionModalSee('Costo corregido por UN')
-        ->fillForm(['costo_por' => presentacion($this->producto)->id])
-        ->assertSchemaStateSet(['costo' => 50.0])
-        ->fillForm(['costo_por' => presentacion($this->producto, 12)->id])
-        ->assertSchemaStateSet(['costo' => 600.0])
+        ->fillForm(['precios.corregir' => true, 'precios.costo_base' => 43.478261])
         ->callMountedAction()
         ->assertHasNoActionErrors();
-
-    $undoRepeaterFake();
 
     expect($this->producto->fresh()?->costo_unidad)->toBe(43.4783)
         ->and(presentacion($this->producto)->precio)->toBe(51.7599)
         ->and(presentacion($this->producto, 12)->precio)->toBe(621.1186)
         ->and($this->producto->cambiosPrecio()->first()?->motivo)->toBe(MotivoCambioPrecio::Manual);
+});
+
+test('sin "Corregir costo", el costo que llegue no se toca', function (): void {
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->mountAction('actualizarPrecio')
+        ->fillForm(['precios.costo_base' => 10])
+        ->callMountedAction()
+        ->assertNotified('Se guardó sin cambios de precio');
+
+    expect($this->producto->fresh()?->costo_unidad)->toBe(50.0);
 });
 
 test('abrir y guardar sin cambiar nada no deja historial', function (): void {
@@ -189,6 +199,23 @@ test('abrir y guardar sin cambiar nada no deja historial', function (): void {
         ->and(presentacion($this->producto, 12)->precio)->toBe(714.2856)
         ->and($this->producto->fresh()?->costo_unidad)->toBe(50.0)
         ->and($this->producto->cambiosPrecio()->count())->toBe(0);
+});
+
+test('un % fuera de 0 a 99.99 o un fijo sin precio no se guardan y el modal sigue abierto', function (): void {
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
+        ->mountAction('actualizarPrecio')
+        ->fillForm(['precios.filas.0.margen' => 100, 'precios.filas.1.modo' => 'calculado'])
+        ->callMountedAction()
+        ->assertNotified('La utilidad de CJ12 debe ser de 0 % a 99.99 %.')
+        ->assertActionMounted('actualizarPrecio')
+        ->fillForm(['precios.filas.0.margen' => 16, 'precios.filas.1.modo' => 'fijo', 'precios.filas.1.precio_base' => null])
+        ->callMountedAction()
+        ->assertNotified('Escriba el precio de UN.');
+
+    expect($this->producto->cambiosPrecio()->count())->toBe(0)
+        ->and(presentacion($this->producto)->precio)->toBe(59.5238);
 });
 
 test('el vendedor no ve costos ni puede cambiar precios', function (): void {
@@ -289,16 +316,13 @@ test('el personal entra con su código de usuario', function (): void {
     expect(auth()->attempt(['codigo' => 'HO77', 'password' => 'password']))->toBeTrue();
 });
 
-test('precio fijo: las compras no lo mueven y avisa si queda bajo el costo; con "Con %" vuelve a salir del costo', function (): void {
+test('precio fijo: las compras no lo mueven; al abrir se ve lo que deja y con "Con %" vuelve a salir del costo', function (): void {
     $this->actingAs($this->encargado);
-    $undoRepeaterFake = Repeater::fake();
 
-    // Costo 50 con 16 % → la UN a L 68.45 con ISV; se escribe L 65: queda fija (deja 11.54 %). La CJ12 sigue con su %.
+    // La UN fija a L 65 con ISV = 56.5217 sin ISV.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
-        ->assertSchemaStateSet(['presentaciones.1.modo' => 'calculado', 'presentaciones.1.precio' => 68.45])
-        ->fillForm(['presentaciones' => [['modo' => 'calculado'], ['precio' => 65]]])
-        ->assertSchemaStateSet(['presentaciones.1.modo' => 'fijo', 'presentaciones.1.margen' => 11.54, 'presentaciones.0.modo' => 'calculado'])
+        ->fillForm(['precios.filas.0.modo' => 'calculado', 'precios.filas.1.modo' => 'fijo', 'precios.filas.1.precio_base' => 56.521739, 'precios.filas.1.margen' => 11.54])
         ->callMountedAction()
         ->assertHasNoActionErrors();
 
@@ -311,17 +335,13 @@ test('precio fijo: las compras no lo mueven y avisa si queda bajo el costo; con 
     expect(presentacion($this->producto)->precio)->toBe(56.5217)
         ->and(presentacion($this->producto, 12)->precio)->toBe(857.1429);
 
-    // Al abrir: la UN pierde (−6.15 %) y se avisa; con "Con %" vuelve al 16 %: L 82.14.
+    // Al abrir: la UN fija deja −6.15 %. Con "Con %" (16 %) vuelve a salir del costo: 71.4286.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
-        ->assertSchemaStateSet(['presentaciones.1.modo' => 'fijo', 'presentaciones.1.margen' => -6.15])
-        ->assertMountedActionModalSee('UN queda por debajo del costo')
-        ->fillForm(['presentaciones' => [['modo' => 'calculado'], ['modo' => 'calculado']]])
-        ->assertSchemaStateSet(['presentaciones.1.precio' => 82.14, 'presentaciones.1.margen' => 16.0])
+        ->assertSchemaStateSet(['precios.filas.1.modo' => 'fijo', 'precios.filas.1.margen' => -6.15, 'precios.costo_base' => 60.0])
+        ->fillForm(['precios.filas.0.modo' => 'calculado', 'precios.filas.1.modo' => 'calculado', 'precios.filas.1.margen' => 16])
         ->callMountedAction()
         ->assertHasNoActionErrors();
-
-    $undoRepeaterFake();
 
     expect(presentacion($this->producto)->precio_fijo)->toBeFalse()
         ->and($this->producto->fresh()?->costo_unidad)->toBe(60.0)
