@@ -65,6 +65,20 @@ class AdminPanelProvider extends PanelProvider
         .'.fi-ta-cell.celda-recortada .fi-ta-text,.fi-ta-cell.celda-recortada .fi-ta-text>*{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
         .'</style>';
 
+    /**
+     * Interruptores: el tema shadcn los pinta del mismo gris encendidos y
+     * apagados en modo oscuro, y no se sabe cuál está prendido. Encendido va
+     * en verde; apagado, gris con borde y (en oscuro) la bolita gris. Con
+     * ".fi-body" ganan sobre las reglas del tema aunque carguen después.
+     */
+    private const ESTILO_INTERRUPTORES = '<style>'
+        .'.fi-body .fi-toggle.fi-toggle-on.fi-color-primary{background-color:var(--success-600)!important}'
+        .'.dark .fi-body .fi-toggle.fi-toggle-on.fi-color-primary{background-color:var(--success-500)!important}'
+        .'.fi-body .fi-toggle.fi-toggle-off{background-color:var(--gray-200)!important;box-shadow:inset 0 0 0 1px var(--gray-300)}'
+        .'.dark .fi-body .fi-toggle.fi-toggle-off{background-color:rgb(255 255 255/0.06)!important;box-shadow:inset 0 0 0 1px rgb(255 255 255/0.2)}'
+        .'.dark .fi-body .fi-toggle.fi-toggle-off>div,.dark .fi-body .fi-toggle.fi-toggle-off>div>div:first-child{background-color:var(--gray-400)!important}'
+        .'</style>';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -127,7 +141,7 @@ class AdminPanelProvider extends PanelProvider
             ->sidebarWidth('17rem')
             ->sidebarCollapsibleOnDesktop()
             // Todo se guarda en MAYÚSCULAS (GuardaEnMayusculas): se escribe ya en mayúsculas.
-            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES.self::ESTILO_LISTADOS.view('filament.menu.estilos')->render())
+            ->renderHook(PanelsRenderHook::HEAD_END, fn (): string => self::ESTILO_MAYUSCULAS.self::ESTILO_MODALES.self::ESTILO_LISTADOS.self::ESTILO_INTERRUPTORES.view('filament.menu.estilos')->render())
             // Abajo del menú: quién entró, su rol y su bodega.
             ->renderHook(PanelsRenderHook::SIDEBAR_FOOTER, fn (): string => view('filament.menu.pie')->render())
             // Imprimir hojas de pedidos ahí mismo, sin abrir otra pestaña.
