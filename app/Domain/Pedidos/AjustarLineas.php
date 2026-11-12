@@ -48,7 +48,7 @@ final class AjustarLineas
                 continue;
             }
 
-            $presentacion = self::paraAgregar($pedido, $nueva['presentacion_id'], $items->map(fn (PedidoItem $item): int => $item->producto_id)->values()->all());
+            $presentacion = self::paraAgregar($pedido, $nueva['presentacion_id'], array_values($items->map(fn (PedidoItem $item): int => $item->producto_id)->all()));
 
             $creada = self::nueva($pedido, $presentacion);
             $items->push($creada);

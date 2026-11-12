@@ -114,10 +114,10 @@ test('al validar, cada producto trae todas sus presentaciones aunque el pedido t
         [true, $this->exento->id, 'UN', 0],
     ]);
 
-    // Lo que bodega llena en esas filas entra como línea nueva.
+    // Lo que bodega llena en esas filas entra como línea nueva (la presentación ya dice de qué producto es).
     $filas[3]['sale'] = 7;
 
-    expect(LineasPedido::nuevas(['items' => $filas]))->toBe([['producto_id' => $this->exento->id, 'presentacion_id' => presentacion($this->exento)->id, 'cantidad' => 7]]);
+    expect(LineasPedido::nuevas(['items' => $filas]))->toBe([['presentacion_id' => presentacion($this->exento)->id, 'cantidad' => 7]]);
 });
 
 test('bodega puede mandar en otra presentación: una caja dañada sale en unidades sueltas', function (): void {

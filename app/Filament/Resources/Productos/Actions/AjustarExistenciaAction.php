@@ -126,7 +126,9 @@ final class AjustarExistenciaAction
      */
     private static function porCaja(Producto $producto): int
     {
-        return max(1, $producto->presentacionMayor()?->contenido ?? 1);
+        $mayor = $producto->presentacionMayor();
+
+        return $mayor === null ? 1 : max(1, $mayor->contenido);
     }
 
     /**
