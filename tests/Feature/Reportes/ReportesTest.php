@@ -338,14 +338,13 @@ test('PDF / Imprimir abre la vista de impresión en un modal; la hoja de adentro
     Livewire::test(ReporteVentas::class)
         ->mountAction('pdf')
         ->assertActionMounted('pdf')
-        ->assertSeeHtml('id="'.VistaImpresion::MARCO.'"')
-        ->assertSeeHtml('embebido=1')
-        ->assertSee('Imprimir o guardar PDF');
+        ->assertMountedActionModalSeeHtml(['id="'.VistaImpresion::MARCO.'"', 'reportes/ventas/imprimir', 'embebido=1'])
+        ->assertMountedActionModalSee('Imprimir o guardar PDF');
 
     Livewire::test(ReporteInventario::class)
         ->mountAction('pdf')
         ->assertActionMounted('pdf')
-        ->assertSeeHtml('reportes/inventario/imprimir');
+        ->assertMountedActionModalSeeHtml(['reportes/inventario/imprimir', 'embebido=1']);
 
     $hoy = ['desde' => now()->toDateString(), 'hasta' => now()->toDateString()];
 

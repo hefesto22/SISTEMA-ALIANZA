@@ -110,7 +110,7 @@ final class VentasDelPeriodo
     {
         $fila = $this->consultar('SELECT COUNT(DISTINCT l.pedido_id) AS cuantos FROM lineas l WHERE l.estimado')[0] ?? null;
 
-        return (int) self::numero($fila?->cuantos ?? 0);
+        return (int) self::numero($fila->cuantos ?? 0);
     }
 
     /**

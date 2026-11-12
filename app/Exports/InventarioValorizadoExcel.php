@@ -102,10 +102,10 @@ final class InventarioValorizadoExcel implements Export, WithMultipleSheets
      */
     private function encabezado(): array
     {
-        return array_values(array_filter([
+        return [
             'Inventario valorizado · '.$this->reporte->nombreBodega(),
             'Al '.now()->format('d/m/Y H:i').($this->reporte->filtrosTexto() === null ? '' : ' · '.$this->reporte->filtrosTexto()),
             'Montos en lempiras, sin ISV (salvo "Invertido con ISV"). Invertido = existencia × costo promedio.',
-        ]));
+        ];
     }
 }
