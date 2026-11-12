@@ -154,3 +154,49 @@ test('un precio en cero o menos no se acepta', function (): void {
     expect(fn () => app(ActualizarPrecioProducto::class)->ejecutar($producto, 50.0, MotivoCambioPrecio::Manual, precios: [presentacion($producto)->id => ['precio' => 0.0]]))
         ->toThrow(ReglaNegocioException::class);
 });
+
+test('cada presentación puede tener su propio %: la caja deja menos y su precio sigue al costo en cada compra', function (): void {
+    $producto = Producto::factory()->create();
+    $caja = presentacion($producto, 12);
+
+    app(ActualizarPrecioProducto::class)->ejecutar($producto, 50.0, MotivoCambioPrecio::Manual, precios: [$caja->id => ['margen' => 0.10]]);
+
+    // CJ12: 600 ÷ 0.90 = 666.6667; la UN sigue con el 16 % de la categoría.
+    expect($caja->fresh()?->precio)->toBe(666.6667)
+        ->and($caja->fresh()?->margen)->toBe(0.1)
+        ->and(presentacion($producto)->precio)->toBe(59.5238)
+        ->and(presentacion($producto)->margen)->toBeNull();
+
+    // Compran más barato: el costo baja a 45 y cada una baja con su %.
+    app(ActualizarPrecioProducto::class)->ejecutar($producto->fresh() ?? $producto, 45.0, MotivoCambioPrecio::Compra);
+
+    expect($caja->fresh()?->precio)->toBe(600.0)
+        ->and(presentacion($producto)->precio)->toBe(53.5714)
+        ->and(CambioPrecio::query()->where('presentacion_id', $caja->id)->latest('id')->first()?->margen)->toBe(0.1);
+
+    // Sin % propio (null) vuelve al del producto: 540 ÷ 0.84.
+    app(ActualizarPrecioProducto::class)->ejecutar($producto->fresh() ?? $producto, 45.0, MotivoCambioPrecio::Manual, precios: [$caja->id => ['margen' => null]]);
+
+    expect($caja->fresh()?->margen)->toBeNull()
+        ->and($caja->fresh()?->precio)->toBe(642.8571);
+});
+
+test('cambiar el margen de la categoría no toca el % propio de una presentación', function (): void {
+    $categoria = Categoria::factory()->create(['margen' => 0.16]);
+    $producto = Producto::factory()->for($categoria)->create();
+    presentacion($producto, 12)->forceFill(['margen' => 0.10, 'precio' => 666.6667])->save();
+
+    $cambiados = app(CambiarMargenCategoria::class)->ejecutar($categoria, 0.20);
+
+    expect($cambiados)->toBe(1)
+        ->and(presentacion($producto)->precio)->toBe(62.5)
+        ->and(presentacion($producto, 12)->precio)->toBe(666.6667)
+        ->and(presentacion($producto, 12)->margen)->toBe(0.1);
+});
+
+test('un % de utilidad fuera de 0 a 99.99 no se acepta', function (): void {
+    $producto = Producto::factory()->create();
+
+    expect(fn () => app(ActualizarPrecioProducto::class)->ejecutar($producto, 50.0, MotivoCambioPrecio::Manual, precios: [presentacion($producto, 12)->id => ['margen' => 1.0]]))
+        ->toThrow(ReglaNegocioException::class, 'debe ser de 0 % a 99.99 %');
+});

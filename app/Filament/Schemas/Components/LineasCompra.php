@@ -214,6 +214,7 @@ class LineasCompra extends Field
             'plural'    => $presentacion->palabra(2),
             'contenido' => $presentacion->contenido,
             'fijo'      => $presentacion->precio_fijo,
+            'margen'    => $presentacion->margen ?? $producto->margenAplicado(),
             'costoHoy'  => $producto->costo_unidad > 0 ? CalculadoraPrecio::aPantalla($producto->costo_unidad, $producto->gravado, $presentacion->contenido) : 0.0,
             'precioHoy' => round(CalculadoraPrecio::conIsv($presentacion->precio, $producto->gravado), 2),
         ];

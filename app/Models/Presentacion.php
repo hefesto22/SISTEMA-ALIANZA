@@ -16,9 +16,10 @@ use Illuminate\Support\Carbon;
  *
  * La existencia y el costo del producto van en unidades base; el costo de
  * la presentación es el costo por unidad × lo que trae. El precio es de la
- * presentación completa y SIN ISV: calculado con el % de utilidad (se
- * recalcula con cada compra) o fijo (lo pone la empresa a mano). Se cambia
- * por App\Domain\Precios\ActualizarPrecioProducto, que deja el historial.
+ * presentación completa y SIN ISV: calculado con el % de utilidad (el
+ * suyo o, si no tiene, el del producto o su categoría; se recalcula con
+ * cada compra) o fijo (lo pone la empresa a mano). Se cambia por
+ * App\Domain\Precios\ActualizarPrecioProducto, que deja el historial.
  *
  * Lo que trae no se cambia cuando ya se usó en pedidos o compras: se
  * desactiva y se crea otra. Una desactivada ya no se vende ni se compra.
@@ -28,6 +29,7 @@ use Illuminate\Support\Carbon;
  * @property int $unidad_medida_id
  * @property int $contenido
  * @property float $precio
+ * @property float|null $margen % de utilidad propio (0.10 = 10 %); null = el del producto
  * @property bool $precio_fijo
  * @property bool $es_base
  * @property bool $activo
@@ -46,6 +48,7 @@ class Presentacion extends Model
         'unidad_medida_id',
         'contenido',
         'precio',
+        'margen',
         'precio_fijo',
         'es_base',
         'activo',
@@ -69,6 +72,7 @@ class Presentacion extends Model
             'unidad_medida_id' => 'integer',
             'contenido'        => 'integer',
             'precio'           => 'float',
+            'margen'           => 'float',
             'precio_fijo'      => 'boolean',
             'es_base'          => 'boolean',
             'activo'           => 'boolean',
@@ -154,11 +158,19 @@ class Presentacion extends Model
     }
 
     /**
-     * Precio que da el % de utilidad del producto con su costo de hoy (sin ISV).
+     * El % de utilidad con que se calcula: el suyo o, si no tiene, el del producto (o su categoría).
+     */
+    public function margenAplicado(): float
+    {
+        return $this->margen ?? $this->producto->margenAplicado();
+    }
+
+    /**
+     * Precio que da su % de utilidad con el costo de hoy (sin ISV).
      */
     public function precioCalculado(?float $costoUnidad = null): float
     {
-        return CalculadoraPrecio::precioVenta(round(($costoUnidad ?? $this->producto->costo_unidad) * $this->contenido, 4), $this->producto->margenAplicado());
+        return CalculadoraPrecio::precioVenta(round(($costoUnidad ?? $this->producto->costo_unidad) * $this->contenido, 4), $this->margenAplicado());
     }
 
     /**

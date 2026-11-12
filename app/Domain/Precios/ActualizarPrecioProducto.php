@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\DB;
  *
  * El costo es uno solo, por unidad base y sin ISV. Cada presentación (UN,
  * CJ de 12, FD de 6…) tiene su precio, de la presentación completa y sin
- * ISV, que sale del costo × lo que trae con el margen que le toca, salvo
+ * ISV, que sale del costo × lo que trae con su % de utilidad (el propio de
+ * la presentación o, si no tiene, el del producto o su categoría), salvo
  * que se mande un precio a mano o que la presentación tenga precio fijo
  * (ahí se queda el que tiene: una compra o un cambio de margen no lo
  * mueven). Sin costo todavía (producto nuevo sin compras) un precio
@@ -29,7 +30,7 @@ use Illuminate\Support\Facades\DB;
  * cuándo, desde qué bodega y de cuánto a cuánto.
  *
  * Si no cambió nada no escribe historial y devuelve [] (si solo cambió lo
- * de precio fijo, lo guarda sin historial).
+ * de precio fijo o un % que no mueve el precio, lo guarda sin historial).
  */
 final class ActualizarPrecioProducto
 {
@@ -39,7 +40,7 @@ final class ActualizarPrecioProducto
     private const REDONDEO = 0.005;
 
     /**
-     * @param array<int, array{precio?: float|null, fijo?: bool|null}> $precios por presentación (id): precio sin ISV de la presentación completa (null = el que le toca) y si queda fijo (null = como está)
+     * @param array<int, array{precio?: float|null, fijo?: bool|null, margen?: float|null}> $precios por presentación (id): precio sin ISV de la presentación completa (null = el que le toca), si queda fijo (null = como está) y su % de utilidad propio (0.10 = 10 %; si viene null, el del producto; si no viene, el que tiene)
      *
      * @return list<CambioPrecio> lo que quedó en el historial
      */
@@ -53,7 +54,7 @@ final class ActualizarPrecioProducto
     ): array {
         $producto->loadMissing(['categoria', 'presentaciones.unidadMedida']);
 
-        $margen = $producto->margenAplicado();
+        $margenProducto = $producto->margenAplicado();
         $costoUnidad = round($costoUnidad, 4);
         $primera = $producto->precio_actualizado_at === null;
         $cambiaCosto = abs($costoUnidad - $producto->costo_unidad) >= self::TOLERANCIA;
@@ -68,6 +69,12 @@ final class ActualizarPrecioProducto
             $pide = $precios[$presentacion->id] ?? [];
             $dado = isset($pide['precio']) ? round($pide['precio'], 4) : null;
             $fijo = $pide['fijo'] ?? $presentacion->precio_fijo;
+            $propio = array_key_exists('margen', $pide) ? ($pide['margen'] === null ? null : round($pide['margen'], 4)) : $presentacion->margen;
+            $margen = $propio ?? $margenProducto;
+
+            if ($margen < 0 || $margen >= 1) {
+                throw new ReglaNegocioException("La utilidad de {$presentacion->sigla()} de {$producto->codigo} debe ser de 0 % a 99.99 %.");
+            }
 
             // Fijo y sin precio nuevo: se queda el que tiene.
             $mantiene = $dado === null && $fijo && $presentacion->precio > 0;
@@ -94,6 +101,8 @@ final class ActualizarPrecioProducto
                 'presentacion' => $presentacion,
                 'precio'       => $nuevo,
                 'fijo'         => $fijo,
+                'propio'       => $propio,
+                'margen'       => $margen,
                 'aMano'        => $dado !== null || $mantiene || $costoUnidad <= 0,
                 'mantiene'     => $mantiene,
                 'cambia'       => abs($nuevo - $presentacion->precio) >= self::TOLERANCIA,
@@ -102,7 +111,7 @@ final class ActualizarPrecioProducto
 
         $cambiaAlgo = $cambiaCosto || collect($planes)->contains(fn (array $plan): bool => $plan['cambia']);
 
-        return DB::transaction(function () use ($producto, $costoUnidad, $margen, $motivo, $usuario, $nota, $planes, $primera, $cambiaCosto, $cambiaAlgo): array {
+        return DB::transaction(function () use ($producto, $costoUnidad, $motivo, $usuario, $nota, $planes, $primera, $cambiaCosto, $cambiaAlgo): array {
             $cambios = [];
 
             foreach ($planes as $plan) {
@@ -114,7 +123,7 @@ final class ActualizarPrecioProducto
 
                     // Precio a mano (o el fijo que se quedó): se guarda el margen que de verdad deja.
                     // (Topado a lo que cabe en el historial: muy por debajo del costo da un margen muy negativo.)
-                    $margenGuardado = $plan['aMano'] ? max(-99.9999, CalculadoraPrecio::margenReal($costoNuevo, $plan['precio'])) : $margen;
+                    $margenGuardado = $plan['aMano'] ? max(-99.9999, CalculadoraPrecio::margenReal($costoNuevo, $plan['precio'])) : $plan['margen'];
 
                     $cambios[] = CambioPrecio::query()->create([
                         'producto_id'     => $producto->id,
@@ -131,8 +140,8 @@ final class ActualizarPrecioProducto
                     ]);
                 }
 
-                if ($plan['cambia'] || $plan['fijo'] !== $presentacion->precio_fijo) {
-                    $presentacion->forceFill(['precio' => $plan['precio'], 'precio_fijo' => $plan['fijo']])->save();
+                if ($plan['cambia'] || $plan['fijo'] !== $presentacion->precio_fijo || $plan['propio'] !== $presentacion->margen) {
+                    $presentacion->forceFill(['precio' => $plan['precio'], 'precio_fijo' => $plan['fijo'], 'margen' => $plan['propio']])->save();
                 }
             }
 

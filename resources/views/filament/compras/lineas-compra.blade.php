@@ -428,7 +428,7 @@
                 const fijo = pr.fijo && Number(pr.precioHoy) > 0
                 const precio = fijo
                     ? Number(pr.precioHoy)
-                    : this.redondear(this.conIsv(this.r4(this.r4(final * contenido) / (1 - Number(p.margen))), p.gravado))
+                    : this.redondear(this.conIsv(this.r4(this.r4(final * contenido) / (1 - Number(pr.margen ?? p.margen))), p.gravado))
 
                 return { costo, precio, fijo }
             },

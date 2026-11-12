@@ -97,7 +97,7 @@ class ProductoInfolist
                                     ->helperText(fn (Presentacion $record): ?string => $record->producto->gravado ? 'neto '.lempiras($record->costo(), 4) : null) : null,
                                 $verCostos ? TextEntry::make('utilidad')
                                     ->state(fn (Presentacion $record): string => self::porcentaje(CalculadoraPrecio::margenReal($record->costo(), $record->precio)))
-                                    ->helperText(fn (Presentacion $record): string => $record->precio_fijo ? 'precio fijo' : 'calculado') : null,
+                                    ->helperText(fn (Presentacion $record): string => $record->precio_fijo ? 'precio fijo' : 'con '.self::porcentaje($record->margenAplicado()).($record->margen !== null ? ' (de la presentación)' : '')) : null,
                             ]))),
                         TextEntry::make('precio_actualizado_at')
                             ->label('Último cambio')
