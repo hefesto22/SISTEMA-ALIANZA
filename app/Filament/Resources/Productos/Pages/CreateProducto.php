@@ -42,11 +42,13 @@ class CreateProducto extends CreateRecord
      * escribió un costo o algún precio, se cargan por la misma puerta de
      * siempre para que el historial arranque desde aquí.
      *
-     * El costo se toma de la presentación más grande que lo trae escrito
-     * (costo con ISV de la presentación completa → por unidad base sin ISV).
-     * Un precio escrito es el de esa presentación; las demás salen del
-     * costo con el % de utilidad (sin costo, quedan sin precio hasta la
-     * primera compra).
+     * Cada presentación queda con el costo que se le escribió (con ISV, de
+     * la presentación completa → sin ISV); las que no lo traen, con uno
+     * estimado por unidad (el de la base si se escribió; si no, el más alto
+     * por unidad de las otras) × lo que traen, hasta su primera compra. Un
+     * precio escrito es el de esa presentación; las demás salen de su costo
+     * con el % de utilidad (sin costo, quedan sin precio hasta la primera
+     * compra).
      */
     protected function afterCreate(): void
     {
@@ -72,7 +74,7 @@ class CreateProducto extends CreateRecord
                 $filas[] = ['presentacion' => $presentacion, 'costo' => $otras[$i]['costo'], 'precio' => $otras[$i]['precio']];
             }
 
-            $costo = self::costoUnidad($filas, $producto->gravado);
+            $costos = self::costos($filas, $producto->gravado);
             $precios = [];
 
             foreach ($filas as $fila) {
@@ -81,16 +83,16 @@ class CreateProducto extends CreateRecord
                 }
             }
 
-            if ($costo !== null || $precios !== []) {
+            if ($costos !== [] || $precios !== []) {
                 $producto->refresh();
 
                 app(ActualizarPrecioProducto::class)->ejecutar(
                     $producto,
-                    $costo ?? 0.0,
                     MotivoCambioPrecio::Compra,
                     $usuario,
                     $precios,
                     'Producto nuevo',
+                    $costos,
                 );
             }
         } catch (ReglaNegocioException $e) {
@@ -99,21 +101,39 @@ class CreateProducto extends CreateRecord
     }
 
     /**
-     * Costo por unidad base sin ISV: de la presentación más grande que trae costo escrito.
+     * El costo sin ISV de cada presentación: el escrito o, si no tiene, el
+     * estimado por unidad × lo que trae. [] si no se escribió ninguno.
      *
      * @param list<array{presentacion: Presentacion, costo: float|null, precio: float|null}> $filas
+     *
+     * @return array<int, float>
      */
-    private static function costoUnidad(array $filas, bool $gravado): ?float
+    private static function costos(array $filas, bool $gravado): array
     {
-        $conCosto = array_filter($filas, fn (array $fila): bool => $fila['costo'] !== null);
+        $escritos = [];
+        $porUnidad = [];
 
-        if ($conCosto === []) {
-            return null;
+        foreach ($filas as $fila) {
+            if ($fila['costo'] !== null) {
+                $presentacion = $fila['presentacion'];
+                $escritos[$presentacion->id] = CalculadoraPrecio::aUnidadSinIsv((float) $fila['costo'], $gravado);
+                $porUnidad[$presentacion->es_base ? 'base' : $presentacion->id] = $escritos[$presentacion->id] / max(1, $presentacion->contenido);
+            }
         }
 
-        usort($conCosto, fn (array $a, array $b): int => $b['presentacion']->contenido <=> $a['presentacion']->contenido);
+        if ($escritos === []) {
+            return [];
+        }
 
-        return CalculadoraPrecio::aUnidadSinIsv((float) $conCosto[0]['costo'], $gravado, $conCosto[0]['presentacion']->contenido);
+        $referencia = $porUnidad['base'] ?? max($porUnidad);
+        $costos = [];
+
+        foreach ($filas as $fila) {
+            $presentacion = $fila['presentacion'];
+            $costos[$presentacion->id] = $escritos[$presentacion->id] ?? round($referencia * $presentacion->contenido, 4);
+        }
+
+        return $costos;
     }
 
     protected function getRedirectUrl(): string

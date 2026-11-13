@@ -60,11 +60,12 @@ class ProductosTable
                     ->color(fn (bool $state): string => $state ? 'info' : 'gray')
                     ->tooltip(fn (Producto $record): string => $record->gravado ? 'Gravado 15%' : 'Exento')
                     ->alignCenter(),
-                TextColumn::make('costo_unidad')
+                TextColumn::make('costos')
                     ->label('Costo')
-                    ->formatStateUsing(fn (Producto $record): string => lempiras(CalculadoraPrecio::conIsv($record->costo_unidad, $record->gravado), 4))
-                    ->description(fn (Producto $record): string => 'por '.$record->presentacionBase()->sigla().' · '.self::porcentaje($record->margenAplicado()).' util.')
-                    ->tooltip(fn (Producto $record): ?string => $record->gravado ? 'Costo por unidad base con ISV' : null)
+                    ->state(fn (Producto $record): array => self::costos($record))
+                    ->listWithLineBreaks()
+                    ->description(fn (Producto $record): string => self::porcentaje($record->margenAplicado()).' util.')
+                    ->tooltip(fn (Producto $record): ?string => $record->gravado ? 'Costo promedio de cada presentación, con ISV' : 'Costo promedio de cada presentación')
                     ->alignEnd()
                     ->color('gray')
                     ->visible($verCostos),
@@ -78,7 +79,7 @@ class ProductosTable
                     ->color('primary'),
                 TextColumn::make('existencia')
                     ->label('Existencia')
-                    ->state(fn (Producto $record): string => $record->existenciaEnTexto(self::existencia($record)))
+                    ->state(fn (Producto $record): string => $record->existenciaPorPresentacion(self::porPresentacion($record)))
                     ->description(fn (): ?string => Acceso::veTodo() ? 'todas las bodegas' : null)
                     ->color(fn (Producto $record): string => self::existencia($record) > 0 ? 'success' : 'danger')
                     ->weight('semibold')
@@ -148,7 +149,36 @@ class ProductosTable
     }
 
     /**
-     * La existencia que trae la consulta (ProductoResource::getEloquentQuery).
+     * "UN · L 10.65", "CJ48 · L 511.26": el costo promedio de cada una que se vende.
+     *
+     * @return list<string>
+     */
+    private static function costos(Producto $producto): array
+    {
+        return array_values($producto->presentacionesActivas()
+            ->map(fn (Presentacion $presentacion): string => $presentacion->sigla().' · '.lempiras(CalculadoraPrecio::conIsv($presentacion->costo, $producto->gravado)))
+            ->all());
+    }
+
+    /**
+     * Lo que hay de cada presentación (las existencias que trae la consulta:
+     * de su bodega o de todas).
+     *
+     * @return array<int, int>
+     */
+    private static function porPresentacion(Producto $producto): array
+    {
+        $cantidades = [];
+
+        foreach ($producto->existencias as $existencia) {
+            $cantidades[$existencia->presentacion_id] = ($cantidades[$existencia->presentacion_id] ?? 0) + $existencia->cantidad;
+        }
+
+        return $cantidades;
+    }
+
+    /**
+     * La existencia total en unidades base que trae la consulta (ProductoResource::getEloquentQuery).
      */
     private static function existencia(Producto $producto): int
     {

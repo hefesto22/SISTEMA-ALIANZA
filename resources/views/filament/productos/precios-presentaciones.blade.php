@@ -2,9 +2,10 @@
     Precios de venta de un producto en "Actualizar precio"
     (App\Filament\Schemas\Components\PreciosPresentaciones).
 
-    Arriba, para leer: costo promedio de las compras, última compra y
-    existencia; "Corregir costo" abre un campo solo para cuando está mal.
-    Abajo, una fila por presentación: costo promedio (con y sin ISV), % de
+    Arriba, para leer: lo que hay de cada presentación y la última compra;
+    "Corregir costos" deja escribir el costo de cada una (solo para cuando
+    está mal). Abajo, una fila por presentación: SU costo promedio (con y
+    sin ISV; cada caja tiene el suyo), % de
     utilidad, precio (con ISV si es gravado), cuánto gana y si el precio es
     "Con %" (sale del costo con ese % y lo mueven las compras) o "Fijo" (lo
     pone la empresa). Debajo de cada una, en palabras, qué pasa con ese
@@ -39,11 +40,7 @@
             .dark .ap-enlace { color: var(--primary-400); }
             .ap-enlace:hover { text-decoration: underline; }
 
-            /* ── Corregir costo ── */
-            .ap-correccion { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding: 0.6rem 0.9rem; border-radius: 0.75rem; font-size: 0.8rem; background: color-mix(in oklab, var(--warning-500) 9%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--warning-500) 35%, transparent); }
-            .ap-correccion .ap-enlace { margin-inline-start: auto; }
-            .ap-select { height: 2.25rem; padding: 0 2rem 0 0.6rem; border-radius: 0.5rem; border: 0; font: inherit; font-weight: 600; background-color: #fff; box-shadow: 0 0 0 1px var(--ap-borde-campo); color: inherit; }
-            .dark .ap-select { background-color: var(--gray-900); }
+            .ap-aviso-correccion { margin: 0; padding: 0.55rem 0.9rem; border-radius: 0.75rem; font-size: 0.8rem; background: color-mix(in oklab, var(--warning-500) 9%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--warning-500) 35%, transparent); }
 
             /* ── Tabla ── */
             .ap-tabla { border-radius: 0.75rem; box-shadow: 0 0 0 1px var(--ap-borde); overflow: hidden; }
@@ -72,6 +69,8 @@
             .ap-costo small { font-size: 0.68rem; color: var(--ap-tenue); }
             .ap-costo strong { font-weight: 600; }
             .ap-costo span { font-size: 0.8rem; color: var(--ap-tenue); }
+            .ap-costo .ap-campo { height: 2rem; }
+            .ap-costo .ap-mal { font-size: 0.68rem; font-weight: 600; }
 
             .ap-campo { display: flex; align-items: center; gap: 0.35rem; height: 2.25rem; padding: 0 0.6rem; border-radius: 0.5rem; background: #fff; box-shadow: 0 0 0 1px var(--ap-borde-campo); transition: box-shadow 0.15s ease; cursor: text; }
             .dark .ap-campo { background: rgb(255 255 255 / 0.05); }
@@ -85,7 +84,6 @@
             .ap-campo-calculado, .ap-campo-calculado:focus-within { background: transparent; box-shadow: inset 0 0 0 1px var(--ap-borde); cursor: default; }
             .dark .ap-campo-calculado, .dark .ap-campo-calculado:focus-within { background: transparent; box-shadow: inset 0 0 0 1px var(--ap-borde); }
             .ap-campo-calculado input { color: var(--ap-tenue); font-weight: 600; cursor: default; }
-            .ap-correccion .ap-campo { width: 9rem; }
 
             .ap-gana { text-align: end; line-height: 1.25; min-width: 0; }
             .ap-gana strong { display: block; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -143,16 +141,19 @@
             datos: @js($datos),
             entrada: {},
             regla: {},
-            costoPor: null,
-            costoTexto: '',
+            costoTexto: {},
 
             init() {
                 if (! this.estado || typeof this.estado !== 'object') {
-                    this.estado = { corregir: false, costo_base: this.datos.costoHoy ?? 0, filas: [] }
+                    this.estado = { corregir: false, costos: {}, filas: [] }
                 }
 
                 if (! Array.isArray(this.estado.filas)) {
                     this.estado.filas = Object.values(this.estado.filas ?? {})
+                }
+
+                if (! this.estado.costos || typeof this.estado.costos !== 'object' || Array.isArray(this.estado.costos)) {
+                    this.estado.costos = {}
                 }
 
                 for (const fila of this.estado.filas) {
@@ -161,10 +162,9 @@
                         margen: this.textoNumero(fila.margen),
                         precio: Number(fila.precio_base) > 0 ? this.fijo2(this.pantalla(fila.precio_base)) : '',
                     }
+                    this.estado.costos[fila.id] ??= this.p(fila).costoHoy ?? 0
+                    this.costoTexto[fila.id] = this.fijo2(this.pantalla(this.costoDe(fila)))
                 }
-
-                this.costoPor = this.estado.filas[0]?.id ?? null
-                this.costoTexto = this.fijo2(this.costoEnPantalla(this.costoPor))
             },
 
             {{-- ── Números (las mismas cuentas que CalculadoraPrecio) ── --}}
@@ -185,9 +185,9 @@
             dinero4(numero) { return this.datos.simbolo + ' ' + (Number(numero) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) },
 
             {{-- ── Cada presentación ── --}}
-            p(fila) { return this.datos.presentaciones[fila.id] ?? { sigla: '?', nombre: '', contenido: 1, precioHoy: 0, regla: 0 } },
-            costoBase() { return Number(this.estado.costo_base) || 0 },
-            costoDe(fila) { return this.r4(this.costoBase() * this.p(fila).contenido) },
+            p(fila) { return this.datos.presentaciones[fila.id] ?? { sigla: '?', nombre: '', contenido: 1, precioHoy: 0, costoHoy: 0, existencia: 0, regla: 0 } },
+            {{-- El costo de la presentación completa, sin ISV (el suyo; cada caja tiene el suyo). --}}
+            costoDe(fila) { return this.r4(Number(this.estado.costos?.[fila.id]) || 0) },
             sugerido(fila, margen) {
                 const costo = this.costoDe(fila)
                 const m = Number(margen)
@@ -304,7 +304,7 @@
                     this.entrada[fila.id].margen = this.textoNumero(fila.margen)
                 }
 
-                this.$nextTick(() => boton?.closest('.ap-fila')?.querySelector(modo === 'fijo' ? '.ap-campo-dinero input' : '.ap-campo-margen input')?.select())
+                this.$nextTick(() => boton?.closest('.ap-fila')?.querySelector(modo === 'fijo' ? ':scope > .ap-campo-dinero input' : ':scope > .ap-campo-margen input')?.select())
             },
             explicacion(fila) {
                 const fijo = fila.modo === 'fijo'
@@ -350,40 +350,38 @@
                 }
             },
 
-            {{-- ── Corregir costo ── --}}
-            costoEnPantalla(id) {
-                const presentacion = this.datos.presentaciones[id]
-
-                return presentacion ? this.r2(this.conIsv(this.r4(this.costoBase() * presentacion.contenido))) : 0
-            },
+            {{-- ── Corregir costos (cada presentación el suyo) ── --}}
             abrirCorreccion() {
                 this.estado.corregir = true
-                this.costoPor = this.estado.filas[0]?.id ?? null
-                this.costoTexto = this.fijo2(this.costoEnPantalla(this.costoPor))
-                this.$nextTick(() => this.$refs.costo?.select())
+
+                for (const fila of this.estado.filas) {
+                    this.costoTexto[fila.id] = this.fijo2(this.pantalla(this.costoDe(fila)))
+                }
+
+                this.$nextTick(() => this.$root.querySelector('.ap-costo input')?.select())
             },
             quitarCorreccion() {
                 this.estado.corregir = false
-                this.estado.costo_base = this.datos.costoHoy
-                this.costoTexto = this.fijo2(this.costoEnPantalla(this.costoPor))
+
+                for (const fila of this.estado.filas) {
+                    this.estado.costos[fila.id] = this.p(fila).costoHoy ?? 0
+                    this.costoTexto[fila.id] = this.fijo2(this.pantalla(this.costoDe(fila)))
+                }
+
                 this.recalcular()
             },
-            alCosto() {
-                const costo = this.num(this.costoTexto)
-                const presentacion = this.datos.presentaciones[this.costoPor]
+            alCosto(fila) {
+                const costo = this.num(this.costoTexto[fila.id])
 
-                if (costo === null || costo < 0 || ! presentacion) {
+                if (costo === null || costo < 0) {
                     return
                 }
 
-                this.estado.costo_base = this.r6(this.r6(costo / this.factor()) / presentacion.contenido)
+                this.estado.costos[fila.id] = this.r6(costo / this.factor())
                 this.recalcular()
             },
-            alCostoPor() {
-                this.costoTexto = this.fijo2(this.costoEnPantalla(this.costoPor))
-            },
-            corregido() {
-                return this.estado.corregir && Math.abs(this.r4(this.costoBase()) - this.datos.costoHoy) >= 0.00005
+            corregido(fila) {
+                return this.estado.corregir && Math.abs(this.costoDe(fila) - this.r4(Number(this.p(fila).costoHoy) || 0)) >= 0.00005
             },
             recalcular() {
                 for (const fila of this.estado.filas) {
@@ -406,18 +404,6 @@
         {{-- ── Resumen: lo que dejan las compras ── --}}
         <div class="ap-resumen">
             <div class="ap-dato">
-                <span class="ap-eyebrow">Costo promedio por {{ $datos['base'] ?? 'UN' }}</span>
-                <strong x-text="datos.costoHoy > 0 ? dinero(pantalla(datos.costoHoy)) : 'Sin costo'"></strong>
-                <small x-text="datos.costoHoy > 0 ? (datos.gravado ? 'con ISV · sin ISV ' + dinero4(datos.costoHoy) : 'de las compras (exento)') : 'lo pone la primera compra'"></small>
-            </div>
-
-            <div class="ap-dato" x-show="corregido()" x-cloak>
-                <span class="ap-eyebrow">Corregido a</span>
-                <strong class="ap-mal" x-text="dinero(pantalla(costoBase()))"></strong>
-                <small>se guarda en lugar del promedio</small>
-            </div>
-
-            <div class="ap-dato">
                 <span class="ap-eyebrow">Última compra</span>
                 <template x-if="datos.ultima">
                     <div class="ap-dato">
@@ -439,24 +425,11 @@
                 <small>todas las bodegas</small>
             </div>
 
-            <button type="button" class="ap-enlace" x-show="! estado.corregir" x-on:click="abrirCorreccion()">Corregir costo</button>
+            <button type="button" class="ap-enlace" x-show="! estado.corregir" x-on:click="abrirCorreccion()">Corregir costos</button>
+            <button type="button" class="ap-enlace" x-show="estado.corregir" x-cloak x-on:click="quitarCorreccion()">Quitar corrección</button>
         </div>
 
-        {{-- ── Corregir costo (solo si está mal) ── --}}
-        <div class="ap-correccion" x-show="estado.corregir" x-cloak>
-            <span>Costo correcto{{ $conIsv }} de</span>
-            <select class="ap-select" x-model.number="costoPor" x-on:change="alCostoPor()" aria-label="Presentación del costo">
-                <template x-for="fila in estado.filas" :key="fila.id">
-                    <option :value="fila.id" x-text="p(fila).sigla"></option>
-                </template>
-            </select>
-            <label class="ap-campo ap-campo-dinero">
-                <span>{{ $datos['simbolo'] ?? 'L.' }}</span>
-                <input type="text" inputmode="decimal" x-ref="costo" x-model="costoTexto" x-on:input="alCosto()" aria-label="Costo correcto">
-            </label>
-            <span x-text="'= ' + dinero4(conIsv(costoBase())) + ' por ' + @js($datos['base'] ?? 'UN')"></span>
-            <button type="button" class="ap-enlace" x-on:click="quitarCorreccion()">Quitar corrección</button>
-        </div>
+        <p class="ap-aviso-correccion" x-show="estado.corregir" x-cloak>Escriba el costo correcto{{ $conIsv }} de cada presentación que esté mal (la caja completa). Se guarda en lugar del promedio de las compras.</p>
 
         {{-- ── Precio de cada presentación ── --}}
         <div class="ap-tabla" role="table" aria-label="Precio de venta de cada presentación">
@@ -477,13 +450,20 @@
                     </div>
 
                     <div class="ap-costo" role="cell">
-                        <p>
+                        <p x-show="! estado.corregir">
                             <small x-text="costoDe(fila) > 0 ? (datos.gravado ? 'con ISV' : 'exento') : 'sin costo'"></small>
                             <strong x-text="costoDe(fila) > 0 ? dinero(pantalla(costoDe(fila))) : '—'"></strong>
                         </p>
+                        <label class="ap-campo ap-campo-dinero" x-show="estado.corregir" x-cloak>
+                            <span>{{ $datos['simbolo'] ?? 'L.' }}</span>
+                            <input type="text" inputmode="decimal" x-model="costoTexto[fila.id]" x-on:input="alCosto(fila)" :aria-label="'Costo correcto de ' + p(fila).sigla">
+                        </label>
                         <p x-show="datos.gravado && costoDe(fila) > 0">
                             <small>sin ISV</small>
                             <span x-text="dinero(costoDe(fila))"></span>
+                        </p>
+                        <p x-show="corregido(fila)" x-cloak>
+                            <small class="ap-mal" x-text="'antes ' + dinero(pantalla(p(fila).costoHoy))"></small>
                         </p>
                     </div>
 

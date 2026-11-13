@@ -9,6 +9,7 @@ use App\Domain\Inventario\AjustarExistencia;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Existencia;
+use App\Models\Presentacion;
 use App\Models\Producto;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
@@ -20,12 +21,14 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Conteo físico de un producto en una bodega: se escribe lo que hay (en su
- * presentación más grande —cajas, sacos…— y sueltas) y la existencia queda
- * en eso (en unidades base). Sirve para cargar el inventario
- * inicial y para dañados o faltantes. Queda en el kárdex; el costo no cambia.
+ * Conteo físico de un producto en una bodega: se escribe lo que hay de
+ * cada presentación (cuántas CJ48, cuántas CJ32, cuántas UN sueltas) y la
+ * existencia de cada una queda en eso. Sirve para cargar el inventario
+ * inicial y para dañados o faltantes. Queda en el kárdex; los costos no
+ * cambian.
  *
  * El encargado ajusta su bodega; administración escoge la bodega.
  */
@@ -39,8 +42,8 @@ final class AjustarExistenciaAction
             ->color('gray')
             ->visible(fn (): bool => Acceso::puede('AjustarExistencia:Producto'))
             ->modalHeading(fn (Producto $record): string => "Existencia · {$record->descripcion}")
-            ->modalDescription('Escriba lo que contó en la bodega. Queda en el kárdex como ajuste por conteo; el costo no cambia.')
-            ->modalWidth(Width::Medium)
+            ->modalDescription('Escriba lo que contó en la bodega de cada presentación (las cajas cerradas y las unidades sueltas aparte). Queda en el kárdex como ajuste por conteo; el costo no cambia.')
+            ->modalWidth(Width::Large)
             ->modalSubmitActionLabel('Guardar conteo')
             ->fillForm(fn (Producto $record): array => self::conteo($record, Acceso::veTodo() ? null : Acceso::usuario()?->bodega_id))
             ->schema(fn (Producto $record): array => [
@@ -50,9 +53,7 @@ final class AjustarExistenciaAction
                     ->required()
                     ->live()
                     ->afterStateUpdated(function (mixed $state, Set $set) use ($record): void {
-                        $conteo = self::conteo($record, is_numeric($state) ? (int) $state : null);
-                        $set('cajas', $conteo['cajas']);
-                        $set('unidades', $conteo['unidades']);
+                        $set('conteo', self::conteo($record, is_numeric($state) ? (int) $state : null)['conteo']);
                     })
                     ->visible(Acceso::veTodo()),
                 TextEntry::make('hay')
@@ -62,24 +63,18 @@ final class AjustarExistenciaAction
 
                         return $bodegaId === null
                             ? 'Escoja la bodega'
-                            : $record->existenciaEnTexto(Existencia::en($bodegaId, $record->id));
+                            : $record->existenciaPorPresentacion(Existencia::porPresentacion($bodegaId, $record->id));
                     }),
                 Grid::make(['default' => 2])
-                    ->schema([
-                        TextInput::make('cajas')
-                            ->label(mb_ucfirst($record->presentacionMayor()?->palabra(2) ?? 'cajas'))
-                            ->numeric()
-                            ->integer()
-                            ->minValue(0)
-                            ->default(0)
-                            ->visible(self::porCaja($record) > 1),
-                        TextInput::make('unidades')
-                            ->label(mb_ucfirst($record->presentacionBase()->palabra(2)).(self::porCaja($record) > 1 ? ' sueltas' : ''))
+                    ->schema(array_map(
+                        fn (Presentacion $presentacion): TextInput => TextInput::make("conteo.{$presentacion->id}")
+                            ->label(self::etiqueta($presentacion, $record->presentaciones->count() > 1))
                             ->numeric()
                             ->integer()
                             ->minValue(0)
                             ->required(),
-                    ]),
+                        self::presentaciones($record),
+                    )),
                 TextInput::make('nota')
                     ->label('Motivo')
                     ->placeholder('Ej. Conteo inicial, producto dañado')
@@ -100,51 +95,81 @@ final class AjustarExistenciaAction
                     return;
                 }
 
-                $contado = self::entero($data['cajas'] ?? 0) * self::porCaja($record) + self::entero($data['unidades'] ?? 0);
-                $antes = Existencia::en($bodegaId, $record->id);
+                $contado = is_array($data['conteo'] ?? null) ? $data['conteo'] : [];
+                $nota = is_string($data['nota'] ?? null) ? $data['nota'] : null;
+                $antes = Existencia::porPresentacion($bodegaId, $record->id);
+                $cambios = 0;
 
                 try {
-                    $movimiento = app(AjustarExistencia::class)->ejecutar($bodegaId, $record, $contado, $usuario, is_string($data['nota'] ?? null) ? $data['nota'] : null);
+                    DB::transaction(function () use ($record, $contado, $bodegaId, $usuario, $nota, &$cambios): void {
+                        foreach (self::presentaciones($record) as $presentacion) {
+                            if (! array_key_exists($presentacion->id, $contado)) {
+                                continue;
+                            }
+
+                            if (app(AjustarExistencia::class)->ejecutar($bodegaId, $presentacion, self::entero($contado[$presentacion->id]), $usuario, $nota) !== null) {
+                                $cambios++;
+                            }
+                        }
+                    });
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
 
                     return;
                 }
 
+                $despues = $record->existenciaPorPresentacion(Existencia::porPresentacion($bodegaId, $record->id));
+
                 Notification::make()
-                    ->title($movimiento === null ? 'No cambió: ya había eso' : 'Existencia ajustada')
-                    ->body($movimiento === null
-                        ? $record->existenciaEnTexto($antes)
-                        : $record->existenciaEnTexto($antes).' → '.$record->existenciaEnTexto($contado))
+                    ->title($cambios === 0 ? 'No cambió: ya había eso' : 'Existencia ajustada')
+                    ->body($cambios === 0 ? $despues : $record->existenciaPorPresentacion($antes).' → '.$despues)
                     ->success()
                     ->send();
             });
     }
 
     /**
-     * Cuántas unidades base trae la presentación más grande (1 si solo tiene la base).
+     * Las que se cuentan: las que se venden y las que todavía tienen algo en
+     * alguna bodega (para poder dejarlas en 0), la más grande primero.
+     *
+     * @return list<Presentacion>
      */
-    private static function porCaja(Producto $producto): int
+    private static function presentaciones(Producto $producto): array
     {
-        $mayor = $producto->presentacionMayor();
+        $producto->loadMissing('presentaciones.unidadMedida');
+        $conExistencia = Existencia::query()->where('producto_id', $producto->id)->where('cantidad', '!=', 0)->pluck('presentacion_id')->all();
 
-        return $mayor === null ? 1 : max(1, $mayor->contenido);
+        return array_values($producto->presentaciones
+            ->filter(fn (Presentacion $presentacion): bool => $presentacion->activo || in_array($presentacion->id, $conExistencia, true))
+            ->sortByDesc('contenido')
+            ->all());
     }
 
     /**
-     * Lo que hay hoy en la bodega, en su presentación más grande y sueltas, para llenar el conteo.
+     * "Cajas de 48 (CJ48)", "Unidades sueltas (UN)".
+     */
+    private static function etiqueta(Presentacion $presentacion, bool $varias): string
+    {
+        return mb_ucfirst($presentacion->palabra(2)).($presentacion->es_base && $varias ? ' sueltas' : '')." ({$presentacion->sigla()})";
+    }
+
+    /**
+     * Lo que hay hoy de cada presentación en la bodega, para llenar el conteo.
      *
-     * @return array{bodega_id: int|null, cajas: int, unidades: int, nota: null}
+     * @return array{bodega_id: int|null, conteo: array<int, int>, nota: null}
      */
     private static function conteo(Producto $producto, ?int $bodegaId): array
     {
-        $hay = $bodegaId === null ? 0 : max(0, Existencia::en($bodegaId, $producto->id));
-        $porCaja = self::porCaja($producto);
+        $hay = $bodegaId === null ? [] : Existencia::porPresentacion($bodegaId, $producto->id);
+        $conteo = [];
+
+        foreach (self::presentaciones($producto) as $presentacion) {
+            $conteo[$presentacion->id] = max(0, $hay[$presentacion->id] ?? 0);
+        }
 
         return [
             'bodega_id' => $bodegaId,
-            'cajas'     => $porCaja > 1 ? intdiv($hay, $porCaja) : 0,
-            'unidades'  => $porCaja > 1 ? $hay % $porCaja : $hay,
+            'conteo'    => $conteo,
             'nota'      => null,
         ];
     }

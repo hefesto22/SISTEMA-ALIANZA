@@ -66,7 +66,7 @@ test('bodega despacha lo que hay y se cobra con el precio vigente al despachar',
     $encargado->assignRole(Rol::Bodega->value);
 
     // Sube el precio después de la preventa.
-    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precios: [presentacion($this->gravado)->id => ['precio' => 110.0]]);
+    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, MotivoCambioPrecio::Manual, precios: [presentacion($this->gravado)->id => ['precio' => 110.0]]);
 
     [$lineaGravada, $lineaExenta] = $pedido->items->all();
 
@@ -183,7 +183,7 @@ test('el buscador de agregar trae productos activos, primero los que hay en la b
 
     // De la de mesa hay 4 unidades (no alcanza para una CJ6): sale 1 UN.
     // De la gruesa no hay nada: sale 1 de la más grande (CJ12).
-    Existencia::query()->create(['bodega_id' => $this->bodega->id, 'producto_id' => $mesa->id, 'cantidad' => 4]);
+    Existencia::query()->create(['bodega_id' => $this->bodega->id, 'producto_id' => $mesa->id, 'presentacion_id' => presentacion($mesa)->id, 'cantidad' => 4]);
 
     $resultados = LineasPedido::paraAgregar($pedido, 'zzsal');
     $filas = fn (int $i): array => array_map(fn (array $fila): array => [$fila['id'], $fila['sigla'], $fila['cantidad'], $fila['sale'], $fila['hay_unidades']], $resultados[$i]['filas']);

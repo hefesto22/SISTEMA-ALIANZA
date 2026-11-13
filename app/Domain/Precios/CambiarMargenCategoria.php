@@ -51,7 +51,6 @@ final class CambiarMargenCategoria
                 ->each(function (Producto $producto) use ($usuario, $nota, &$cambiados): void {
                     $cambios = $this->actualizarPrecio->ejecutar(
                         $producto,
-                        $producto->costo_unidad,
                         MotivoCambioPrecio::Margen,
                         $usuario,
                         nota: $nota,

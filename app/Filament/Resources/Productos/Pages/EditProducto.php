@@ -76,11 +76,11 @@ class EditProducto extends EditRecord
 
             $nuevas = array_filter($guardadas['otras'], fn (Presentacion $presentacion): bool => ! in_array($presentacion->id, $antes, true));
 
-            // Las nuevas salen del costo de hoy con el % de utilidad.
-            if ($nuevas !== [] && $producto->costo_unidad > 0) {
+            // Las nuevas traen un costo estimado (GuardarPresentaciones): su precio sale de él con el % de utilidad.
+            if (array_filter($nuevas, fn (Presentacion $presentacion): bool => $presentacion->costo > 0) !== []) {
                 $producto->refresh();
 
-                app(ActualizarPrecioProducto::class)->ejecutar($producto, $producto->costo_unidad, MotivoCambioPrecio::Manual, $usuario, nota: 'PRESENTACIÓN NUEVA');
+                app(ActualizarPrecioProducto::class)->ejecutar($producto, MotivoCambioPrecio::Manual, $usuario, nota: 'PRESENTACIÓN NUEVA');
             }
         } catch (ReglaNegocioException $e) {
             Notification::make()->title('Se guardó el producto, pero no las presentaciones')->body($e->getMessage())->danger()->persistent()->send();

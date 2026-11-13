@@ -4,8 +4,10 @@
     Pensado para pedidos largos (30 productos o más): cada producto es una
     fila corta con lo que sale ("2 CJ12", "3 UN"), el nombre, lo que pidió y,
     a la derecha, si cambió ("−1 CJ12", "+3 UN", "No sale") y cuánto queda en
-    la bodega. Al tocarla se abre: cuánto hay en la bodega, cuánto saca este
-    pedido y cuánto quedaría, y un contador con − y + por cada presentación
+    la bodega. Al tocarla se abre: cuánto hay en la bodega de cada
+    presentación (cajas cerradas y sueltas aparte), cuánto saca este pedido y
+    cuánto quedaría; si las sueltas no alcanzan, qué caja se abre (lo escoge
+    bodega; viene sugerida la más chica que alcanza), y un contador con − y + por cada presentación
     que se vende (CJ12, CJ8, UN…): se puede mandar menos, más o en otra
     presentación (unidades sueltas si una caja vino dañada). Arriba, filtros: todos, con cambios, no alcanza. Abajo,
     un resumen de lo que no va completo, de lo que va de más y de lo agregado.
@@ -155,6 +157,14 @@
             .sp-estado.sp-estado-nuevo { color: var(--success-700); }
             .dark .sp-estado.sp-estado-nuevo { color: var(--success-400); }
             .sp-no-alcanza { font-size: 0.75rem; font-weight: 600; color: var(--danger-600); }
+
+            /* Las sueltas no alcanzan: qué caja se abre. */
+            .sp-abrir { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; padding: 0.5rem 0.65rem; border-radius: 0.5rem; font-size: 0.8rem; color: var(--warning-800); background: color-mix(in oklab, var(--warning-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--warning-500) 40%, transparent); }
+            .dark .sp-abrir { color: var(--warning-300); }
+            .sp-abrir strong { font-weight: 800; font-variant-numeric: tabular-nums; }
+            .sp-abrir select { height: 2rem; padding: 0 1.75rem 0 0.5rem; border-radius: 0.4rem; border: 0; font: inherit; font-weight: 700; color: inherit; background-color: #fff; outline: 1px solid color-mix(in oklab, var(--warning-500) 45%, transparent); }
+            .dark .sp-abrir select { background-color: var(--gray-900); }
+            .sp-abrir-control { display: inline-flex; align-items: center; gap: 0.4rem; }
             .dark .sp-no-alcanza { color: var(--danger-400); }
 
             /* Cajas y unidades, cada una con su − y + (como en la preventa). */
@@ -231,6 +241,8 @@
                 if (! Array.isArray(this.filas)) {
                     this.filas = Object.values(this.filas ?? {})
                 }
+
+                this.ajustarAperturas()
 
                 {{-- Un solo producto: ya abierto. --}}
                 const grupos = this.grupos()
@@ -339,6 +351,7 @@
 
                 if (! this.enLista(p)) {
                     this.filas.push(...p.filas.map((fila) => ({ ...fila })))
+                    this.ajustarAperturas()
                 }
 
                 this.cerrarBusqueda()
@@ -372,6 +385,7 @@
             {{-- De 0 en adelante: menos de lo pedido si no alcanzó, más si el cliente pidió más. --}}
             poner(fila, valor) {
                 fila.sale = Math.min(Math.max(this.n(valor), 0), this.maximo)
+                this.ajustarAperturas()
             },
 
             mover(fila, paso) {
@@ -411,33 +425,6 @@
             {{-- La más grande primero (CJ12, CJ8, UN). --}}
             filasDe(grupo) {
                 return [...grupo.filas].sort((a, b) => this.n(b.contenido) - this.n(a.contenido))
-            },
-
-            {{-- Unidades base con la presentación más grande del producto: "2 CJ12 + 5 UN", igual que Producto::existenciaEnTexto. --}}
-            enCajas(unidades, info) {
-                unidades = this.n(unidades)
-                const porCaja = Math.max(1, this.n(info.mayor_contenido))
-                const base = info.base_sigla ?? 'UN'
-
-                if (unidades === 0) {
-                    return '0'
-                }
-
-                const signo = unidades < 0 ? '-' : ''
-                const resto = Math.abs(unidades)
-
-                if (porCaja <= 1) {
-                    return signo + resto + ' ' + base
-                }
-
-                const partes = []
-                const cajas = Math.floor(resto / porCaja)
-                const sueltas = resto % porCaja
-
-                if (cajas > 0) partes.push(cajas + ' ' + info.mayor_sigla)
-                if (sueltas > 0) partes.push(sueltas + ' ' + base)
-
-                return signo + partes.join(' + ')
             },
 
             sigla(fila) {
@@ -484,10 +471,12 @@
 
             noHay(grupo) {
                 this.filasDe(grupo).forEach((fila) => fila.sale = 0)
+                this.ajustarAperturas()
             },
 
             comoSePidio(grupo) {
                 this.filasDe(grupo).forEach((fila) => fila.sale = this.n(fila.cantidad))
+                this.ajustarAperturas()
             },
 
             {{-- A la derecha de la fila corta: "−1 CJ12", "+3 UN", "No sale", "Agregado"; vacío si sale como se pidió. --}}
@@ -513,22 +502,158 @@
                 return this.filasDe(grupo).some((fila) => this.n(fila.sale) < this.n(fila.cantidad)) ? '' : 'sp-chip-mas'
             },
 
-            {{-- Unidades base que saca este pedido del producto (todas sus presentaciones). --}}
-            saleDelProducto(grupo) {
-                return this.filasDe(grupo).reduce((suma, fila) => suma + this.n(fila.sale) * Math.max(1, this.n(fila.contenido)), 0)
+            {{-- ── Existencia de cada presentación (las cajas cerradas y las sueltas aparte) ── --}}
+
+            {{-- Lo que cambia en la bodega de esa presentación: al validar sale todo; al corregir, la diferencia con lo que ya salió. --}}
+            cambioDe(fila) {
+                return this.n(fila.sale) - (this.paraValidar ? 0 : this.n(fila.salio_pres))
             },
 
-            {{-- Lo que cambia en la bodega: al validar sale todo; al corregir, la diferencia con lo que ya salió. --}}
+            baseDe(grupo) {
+                return grupo.filas.find((fila) => fila.es_base) ?? null
+            },
+
+            {{-- Cajas de esa presentación que quedan cerradas después de las que salen enteras: las que se pueden abrir. --}}
+            libres(fila) {
+                return Math.max(0, this.n(fila.hay_pres) - Math.max(0, this.cambioDe(fila)))
+            },
+
+            {{-- Unidades sueltas que salen de más sobre las que hay: hay que abrir cajas. --}}
+            faltanSueltas(grupo) {
+                const base = this.baseDe(grupo)
+
+                if (! grupo.info.mueve || ! base) {
+                    return 0
+                }
+
+                return Math.max(0, this.cambioDe(base) - Math.max(0, this.n(base.hay_pres)))
+            },
+
+            {{-- Las cajas que se pueden abrir (las que quedan cerradas), la más grande primero. --}}
+            opcionesAbrir(grupo) {
+                return this.filasDe(grupo).filter((fila) => ! fila.es_base && this.libres(fila) > 0)
+            },
+
+            cajaElegida(grupo) {
+                const base = this.baseDe(grupo)
+
+                return this.opcionesAbrir(grupo).find((fila) => this.n(fila.presentacion_id) === this.n(base?.abrir_de)) ?? null
+            },
+
+            {{-- Cuántas de la caja escogida se abren: las que hacen falta para las sueltas (hasta las que hay). --}}
+            cajasPorAbrir(grupo) {
+                const caja = this.cajaElegida(grupo)
+                const faltan = this.faltanSueltas(grupo)
+
+                if (! caja || faltan <= 0) {
+                    return 0
+                }
+
+                return Math.min(this.libres(caja), Math.ceil(faltan / Math.max(1, this.n(caja.contenido))))
+            },
+
+            {{-- Deja en la fila de las sueltas qué caja se abre y cuántas (es lo que va al servidor). Si bodega no ha escogido una que sirva, sugiere la más chica que alcanza (o la que más trae). --}}
+            ajustarApertura(grupo) {
+                const base = this.baseDe(grupo)
+
+                if (! base) {
+                    return
+                }
+
+                const opciones = this.opcionesAbrir(grupo)
+
+                if (this.faltanSueltas(grupo) <= 0 || opciones.length === 0) {
+                    base.abrir_cajas = 0
+
+                    return
+                }
+
+                if (! opciones.some((fila) => this.n(fila.presentacion_id) === this.n(base.abrir_de))) {
+                    const alcanza = [...opciones].reverse().find((fila) => this.libres(fila) * this.n(fila.contenido) >= this.faltanSueltas(grupo))
+                    base.abrir_de = this.n((alcanza ?? opciones[0]).presentacion_id)
+                }
+
+                base.abrir_cajas = this.cajasPorAbrir(grupo)
+            },
+
+            ajustarAperturas() {
+                this.grupos().forEach((grupo) => this.ajustarApertura(grupo))
+            },
+
+            elegirCaja(grupo, id) {
+                const base = this.baseDe(grupo)
+
+                if (base) {
+                    base.abrir_de = this.n(id)
+                    this.ajustarApertura(grupo)
+                }
+            },
+
+            {{-- Cuánto queda de esa presentación: lo que hay − lo que sale; las cajas que se abren salen y sus unidades entran a las sueltas. --}}
+            quedanDe(grupo, fila) {
+                let queda = this.n(fila.hay_pres) - (grupo.info.mueve ? this.cambioDe(fila) : 0)
+                const caja = this.cajaElegida(grupo)
+                const abiertas = this.cajasPorAbrir(grupo)
+
+                if (fila.es_base && caja) {
+                    queda += abiertas * this.n(caja.contenido)
+                }
+
+                if (caja && this.n(caja.presentacion_id) === this.n(fila.presentacion_id)) {
+                    queda -= abiertas
+                }
+
+                return queda
+            },
+
+            {{-- "2 CJ48 · 3 CJ32 · 5 UN" (las que están en 0 no salen; "0" si nada). --}}
+            porPresentacion(grupo, cuanto) {
+                const partes = this.filasDe(grupo)
+                    .map((fila) => [cuanto(fila), fila.sigla])
+                    .filter(([cantidad]) => cantidad !== 0)
+                    .map(([cantidad, sigla]) => cantidad + ' ' + sigla)
+
+                return partes.length === 0 ? '0' : partes.join(' · ')
+            },
+
+            enBodegaTexto(grupo) {
+                return this.porPresentacion(grupo, (fila) => this.n(fila.hay_pres))
+            },
+
+            {{-- "−2 CJ48 · −5 UN" (sale) o "+1 CJ48" (regresa al corregir). --}}
+            cambioTexto(grupo) {
+                return this.porPresentacion(grupo, (fila) => -this.cambioDe(fila)).replace(/(^|· )(\d)/g, '$1+$2').replace(/-/g, '−')
+            },
+
+            quedanTexto(grupo) {
+                return this.porPresentacion(grupo, (fila) => this.quedanDe(grupo, fila))
+            },
+
+            {{-- Lo que no alcanza: las presentaciones que quedarían en negativo por este pedido. --}}
+            faltaTexto(grupo) {
+                return this.filasDe(grupo)
+                    .filter((fila) => this.cambioDe(fila) > 0 && this.quedanDe(grupo, fila) < 0)
+                    .map((fila) => (-this.quedanDe(grupo, fila)) + ' ' + fila.sigla)
+                    .join(' · ')
+            },
+
+            aperturaTexto(grupo) {
+                const caja = this.cajaElegida(grupo)
+
+                return caja && this.cajasPorAbrir(grupo) > 0 ? 'abre ' + this.cajasPorAbrir(grupo) + ' ' + caja.sigla : ''
+            },
+
             cambio(grupo) {
-                return this.saleDelProducto(grupo) - (this.paraValidar ? 0 : this.n(grupo.info.salio_unidades))
-            },
-
-            quedan(grupo) {
-                return this.n(grupo.info.hay_unidades) - (grupo.info.mueve ? this.cambio(grupo) : 0)
+                return this.filasDe(grupo).reduce((suma, fila) => suma + this.cambioDe(fila) * Math.max(1, this.n(fila.contenido)), 0)
             },
 
             noAlcanza(grupo) {
-                return grupo.info.mueve && this.quedan(grupo) < 0
+                return grupo.info.mueve && this.faltaTexto(grupo) !== ''
+            },
+
+            {{-- Para el resumen de abajo: las cajas que se abren. --}}
+            aperturas() {
+                return this.grupos().filter((grupo) => this.aperturaTexto(grupo) !== '')
             },
 
             {{-- Como PedidoItem: "No sale: pidió 2 cajas de 12", "No va completo: falta 1 caja de 12 (pidió 3)", "Va de más: …"; vacío si va justo. --}}
@@ -712,7 +837,7 @@
                                 class="sp-corta-quedan"
                                 x-show="grupo.info.mueve"
                                 x-bind:class="{ 'sp-neg': noAlcanza(grupo) }"
-                                x-text="noAlcanza(grupo) ? 'no alcanza −' + enCajas(-quedan(grupo), grupo.info) : 'quedan ' + enCajas(quedan(grupo), grupo.info)"
+                                x-text="(aperturaTexto(grupo) !== '' ? aperturaTexto(grupo) + ' · ' : '') + (noAlcanza(grupo) ? 'no alcanza: faltan ' + faltaTexto(grupo) : 'quedan ' + quedanTexto(grupo))"
                             ></span>
                         </span>
 
@@ -730,19 +855,36 @@
                         <div class="sp-bodega" x-bind:class="{ 'sp-bodega-sola': ! grupo.info.mueve }">
                             <div class="sp-dato">
                                 <span>En bodega</span>
-                                <strong x-text="enCajas(grupo.info.hay_unidades, grupo.info)"></strong>
+                                <strong x-text="enBodegaTexto(grupo)"></strong>
                             </div>
                             <div class="sp-dato" x-show="grupo.info.mueve" x-bind:class="cambio(grupo) < 0 ? 'sp-regresa' : 'sp-sale'">
                                 <span x-text="paraValidar ? 'Este pedido' : (cambio(grupo) < 0 ? 'Regresan' : (cambio(grupo) > 0 ? 'Salen más' : 'Sin cambio'))"></span>
-                                <strong x-text="(cambio(grupo) > 0 ? '−' : (cambio(grupo) < 0 ? '+' : '')) + enCajas(Math.abs(cambio(grupo)), grupo.info)"></strong>
+                                <strong x-text="cambioTexto(grupo)"></strong>
                             </div>
-                            <div class="sp-dato" x-show="grupo.info.mueve" x-bind:class="{ 'sp-negativo': quedan(grupo) < 0, 'sp-justo': quedan(grupo) === 0 }">
+                            <div class="sp-dato" x-show="grupo.info.mueve" x-bind:class="{ 'sp-negativo': noAlcanza(grupo), 'sp-justo': ! noAlcanza(grupo) && quedanTexto(grupo) === '0' }">
                                 <span>Quedan</span>
-                                <strong x-text="enCajas(quedan(grupo), grupo.info)"></strong>
+                                <strong x-text="quedanTexto(grupo)"></strong>
                             </div>
                         </div>
 
-                        <div class="sp-no-alcanza" x-show="noAlcanza(grupo)" x-text="'No alcanza: faltan ' + enCajas(-quedan(grupo), grupo.info) + ' en la bodega'"></div>
+                        {{-- Las sueltas no alcanzan: bodega escoge qué caja abre. --}}
+                        <div class="sp-abrir" x-show="faltanSueltas(grupo) > 0" x-cloak>
+                            <span x-text="'Faltan ' + faltanSueltas(grupo) + ' ' + (baseDe(grupo)?.sigla ?? 'UN') + ' sueltas:'"></span>
+                            <template x-if="opcionesAbrir(grupo).length > 0">
+                                <span class="sp-abrir-control">
+                                    <span>se abre<span x-show="cajasPorAbrir(grupo) !== 1">n</span></span>
+                                    <strong x-text="cajasPorAbrir(grupo)"></strong>
+                                    <select x-on:change="elegirCaja(grupo, $event.target.value)" aria-label="Qué caja se abre">
+                                        <template x-for="caja in opcionesAbrir(grupo)" x-bind:key="'abrir-' + caja.presentacion_id">
+                                            <option x-bind:value="caja.presentacion_id" x-bind:selected="n(caja.presentacion_id) === n(baseDe(grupo)?.abrir_de)" x-text="caja.sigla + ' (hay ' + libres(caja) + ')'"></option>
+                                        </template>
+                                    </select>
+                                </span>
+                            </template>
+                            <span x-show="opcionesAbrir(grupo).length === 0">no hay cajas cerradas para abrir.</span>
+                        </div>
+
+                        <div class="sp-no-alcanza" x-show="noAlcanza(grupo)" x-text="'No alcanza: faltan ' + faltaTexto(grupo) + ' en la bodega'"></div>
 
                         <template x-for="fila in filasDe(grupo)" x-bind:key="'estado-' + fila.presentacion_id">
                             <div class="sp-estado" x-bind:class="claseEstado(fila)" x-show="estado(fila) !== ''" x-text="estado(fila)"></div>
@@ -802,6 +944,15 @@
             <ul>
                 <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.presentacion_id">
                     <li><b x-text="sigla(fila) + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
+                </template>
+            </ul>
+        </div>
+
+        <div class="sp-incompletas sp-de-mas" x-show="aperturas().length > 0" x-cloak>
+            <strong>Cajas que se abren</strong>
+            <ul>
+                <template x-for="grupo in aperturas()" x-bind:key="'abre-' + grupo.id">
+                    <li><b x-text="grupo.info.descripcion ?? grupo.info.producto"></b> — <span x-text="aperturaTexto(grupo) + ' (sus unidades pasan a las sueltas)'"></span></li>
                 </template>
             </ul>
         </div>

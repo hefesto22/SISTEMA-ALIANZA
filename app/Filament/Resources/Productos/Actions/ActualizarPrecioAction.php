@@ -23,12 +23,13 @@ use Illuminate\Support\Facades\Auth;
 /**
  * "Actualizar precio": aquí se pone el PRECIO DE VENTA de cada presentación.
  *
- * El costo no se escribe: es el promedio ponderado que van dejando las
- * compras (o el de la última, según Configuración); solo si está mal se
- * corrige. Cada presentación se vende "Con %" (el precio sale del costo con
- * su % y se ajusta solo en cada compra: si compran barato, baja y la
- * ganancia se mantiene; la caja puede dejar menos que la unidad) o "Fijo"
- * (lo pone la empresa; las compras no lo mueven).
+ * El costo no se escribe: cada presentación tiene el suyo, el promedio
+ * ponderado que van dejando sus compras (o el de la última, según
+ * Configuración); solo si está mal se corrige. Cada presentación se vende
+ * "Con %" (el precio sale de SU costo con su % y se ajusta solo cuando ese
+ * costo cambia: si compran barato, baja y la ganancia se mantiene; la caja
+ * puede dejar menos que la unidad) o "Fijo" (lo pone la empresa; las
+ * compras no lo mueven).
  *
  * La pantalla es App\Filament\Schemas\Components\PreciosPresentaciones (las
  * cuentas pasan en el navegador mientras se escribe). Aquí se revisa lo que
@@ -68,11 +69,11 @@ final class ActualizarPrecioAction
                 try {
                     $cambios = app(ActualizarPrecioProducto::class)->ejecutar(
                         $record,
-                        self::costoAGuardar($precios, $record),
                         MotivoCambioPrecio::Manual,
                         $usuario,
                         self::preciosAGuardar($precios, $record),
                         filled($data['nota'] ?? null) ? (string) $data['nota'] : null,
+                        self::costosAGuardar($precios, $record),
                     );
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
@@ -104,23 +105,39 @@ final class ActualizarPrecioAction
     }
 
     /**
-     * El costo por unidad base sin ISV que se guarda: el de hoy, salvo que se haya corregido.
+     * Los costos corregidos (sin ISV, de la presentación completa): solo los
+     * que de verdad cambiaron y solo si se abrió "Corregir costos".
      *
      * @param array<mixed> $precios el estado de PreciosPresentaciones
+     *
+     * @return array<int, float>
      */
-    private static function costoAGuardar(array $precios, Producto $producto): float
+    private static function costosAGuardar(array $precios, Producto $producto): array
     {
         if (! ($precios['corregir'] ?? false)) {
-            return $producto->costo_unidad;
+            return [];
         }
 
-        if (! is_numeric($precios['costo_base'] ?? null) || (float) $precios['costo_base'] < 0) {
-            throw new ReglaNegocioException('Escriba el costo correcto.');
+        $costos = is_array($precios['costos'] ?? null) ? $precios['costos'] : [];
+        $corregidos = [];
+
+        foreach ($producto->presentaciones as $presentacion) {
+            if (! array_key_exists($presentacion->id, $costos)) {
+                continue;
+            }
+
+            if (! is_numeric($costos[$presentacion->id]) || (float) $costos[$presentacion->id] < 0) {
+                throw new ReglaNegocioException("Escriba el costo correcto de {$presentacion->sigla()}.");
+            }
+
+            $nuevo = round((float) $costos[$presentacion->id], 4);
+
+            if (abs($nuevo - $presentacion->costo) >= 0.00005) {
+                $corregidos[$presentacion->id] = $nuevo;
+            }
         }
 
-        $nuevo = round((float) $precios['costo_base'], 4);
-
-        return abs($nuevo - $producto->costo_unidad) < 0.00005 ? $producto->costo_unidad : $nuevo;
+        return $corregidos;
     }
 
     /**

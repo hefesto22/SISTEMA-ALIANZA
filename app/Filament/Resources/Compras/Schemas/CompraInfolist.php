@@ -14,9 +14,9 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
 /**
- * La compra registrada y cómo quedó cada producto: costo de la factura,
- * costo nuevo por unidad y precio de venta nuevo de esa presentación (con
- * ISV si es gravado).
+ * La compra registrada y cómo quedó cada presentación que entró: costo de
+ * la factura, su costo nuevo y su precio de venta nuevo (con ISV si es
+ * gravado).
  */
 final class CompraInfolist
 {
@@ -60,7 +60,7 @@ final class CompraInfolist
                     ]),
 
                 Section::make('Productos')
-                    ->description('Con ISV si el producto es gravado. El costo nuevo es por unidad; el precio nuevo, de la presentación en que entró (sale del costo nuevo con el margen del producto, salvo precio fijo).')
+                    ->description('Con ISV si el producto es gravado. El costo nuevo y el precio nuevo son de la presentación en que entró (cada una tiene su costo; el precio sale de él con su % de utilidad, salvo precio fijo).')
                     ->columnSpanFull()
                     ->schema([
                         RepeatableEntry::make('items')
@@ -87,7 +87,7 @@ final class CompraInfolist
                                     ->weight('bold'),
                                 TextEntry::make('costo_nuevo')
                                     ->formatStateUsing(fn (CompraItem $record): string => lempiras(CalculadoraPrecio::conIsv($record->costo_nuevo, $record->gravado), 4))
-                                    ->helperText(fn (CompraItem $record): ?string => $record->costo_anterior === null ? null : 'antes '.lempiras(CalculadoraPrecio::conIsv($record->costo_anterior, $record->gravado), 4)),
+                                    ->helperText(fn (CompraItem $record): string => $record->presentacion->sigla().($record->costo_anterior === null ? '' : ' · antes '.lempiras(CalculadoraPrecio::conIsv($record->costo_anterior, $record->gravado), 4))),
                                 TextEntry::make('precio_nuevo')
                                     ->formatStateUsing(fn (CompraItem $record): string => lempiras(CalculadoraPrecio::conIsv($record->precio_nuevo, $record->gravado)))
                                     ->helperText(fn (CompraItem $record): string => $record->presentacion->sigla())

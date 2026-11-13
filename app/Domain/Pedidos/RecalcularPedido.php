@@ -43,7 +43,7 @@ final class RecalcularPedido
         $items = $pedido->items;
 
         foreach ($items as $item) {
-            $costo = round($item->producto->costo_unidad * max(1, $item->contenido), 4);
+            $costo = round($item->presentacion->costo, 4);
             $quedaBajoCosto = $sinPerdida && round($item->precio, 4) < $costo;
 
             if ($preciosVigentes || $quedaBajoCosto) {

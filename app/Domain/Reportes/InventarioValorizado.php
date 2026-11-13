@@ -6,7 +6,6 @@ namespace App\Domain\Reportes;
 
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Models\Bodega;
-use App\Models\Existencia;
 use App\Models\Proveedor;
 use Illuminate\Support\Facades\DB;
 use stdClass;
@@ -15,12 +14,13 @@ use stdClass;
  * Inventario valorizado: qué hay en la bodega (o en todas), de qué
  * productos y cuánto dinero hay en ellos.
  *
- *  - Invertido: existencia × costo promedio del producto, sin ISV (y aparte
- *    con ISV, que es lo que se le pagó al proveedor).
- *  - A precio de venta: existencia × precio de venta, sin ISV.
+ *  - Invertido: lo que hay de cada presentación × su costo promedio, sin
+ *    ISV (y aparte con ISV, que es lo que se le pagó al proveedor).
+ *  - A precio de venta: lo que hay de cada presentación × su precio de
+ *    venta, sin ISV.
  *  - Ganancia esperada: lo que dejaría si se vende todo a ese precio.
  *
- * Todo sale de cada bodega y producto, redondeado ahí, y de ahí se suman el
+ * Todo sale de cada bodega y presentación, redondeado ahí, y de ahí se suman el
  * detalle por producto, el resumen por bodega, por proveedor y el total: así
  * las cuentas cuadran entre sí. Lo que está en negativo (se despachó sin
  * tener existencia cargada) no se suma y se avisa.
@@ -102,9 +102,10 @@ final class InventarioValorizado
                 detalle: self::texto($primera->proveedor),
                 productos: 1,
                 unidades: $unidades,
-                existencia: Existencia::enCajas($unidades, (int) $primera->uxc, (string) $primera->caja.(int) $primera->uxc, (string) $primera->base),
-                costoUnidad: (float) $primera->costo_unidad,
-                precioUnidad: (float) $primera->precio_unidad,
+                existencia: self::existenciaTexto($filas),
+                // Por unidad base: lo invertido entre lo que hay (sin nada, el de la base).
+                costoUnidad: $unidades > 0 ? round($suma['invertido'] / $unidades, 4) : (float) $primera->costo_base,
+                precioUnidad: $unidades > 0 ? round($suma['valorVenta'] / $unidades, 4) : (float) $primera->precio_unidad,
                 invertido: $suma['invertido'],
                 invertidoConIsv: $suma['invertidoConIsv'],
                 valorVenta: $suma['valorVenta'],
@@ -225,8 +226,8 @@ final class InventarioValorizado
     }
 
     /**
-     * Una fila por bodega y producto con su existencia (o sin bodega si el
-     * producto no ha estado en ninguna).
+     * Una fila por bodega y presentación con su existencia (o sin bodega si
+     * el producto no ha estado en ninguna).
      *
      * @return list<stdClass>
      */
@@ -259,28 +260,32 @@ final class InventarioValorizado
         }
 
         /** @var list<stdClass> $filas */
+        // precio_unidad: para valorar lo que está en una presentación sin
+        // precio (las sueltas de un producto que no se vende suelto).
         $filas = DB::select(<<<SQL
-            SELECT p.id, p.codigo, p.descripcion, p.gravado, p.costo_unidad, p.activo,
-                COALESCE(mx.contenido, 1) AS uxc, mx.codigo AS caja, ub.codigo AS base,
+            SELECT p.id, p.codigo, p.descripcion, p.gravado, p.activo, pb.costo AS costo_base,
                 COALESCE(NULLIF(pb.precio, 0), ROUND(mx.precio / mx.contenido, 4), 0) AS precio_unidad, pb.precio_fijo,
-                COALESCE(NULLIF(pv.nombre_corto, ''), pv.nombre) AS proveedor, b.nombre AS bodega, e.cantidad
+                COALESCE(NULLIF(pv.nombre_corto, ''), pv.nombre) AS proveedor, b.nombre AS bodega, e.cantidad,
+                ps.contenido, ps.costo, ps.precio, CASE WHEN ps.contenido > 1 THEN um.codigo || ps.contenido ELSE um.codigo END AS sigla
             FROM productos p
             JOIN proveedores pv ON pv.id = p.proveedor_id
             JOIN presentaciones pb ON pb.producto_id = p.id AND pb.es_base
-            JOIN unidades_medida ub ON ub.id = pb.unidad_medida_id
-            LEFT JOIN LATERAL (SELECT pz.contenido, pz.precio, um.codigo FROM presentaciones pz JOIN unidades_medida um ON um.id = pz.unidad_medida_id
+            LEFT JOIN LATERAL (SELECT pz.contenido, pz.precio FROM presentaciones pz
                 WHERE pz.producto_id = p.id AND pz.activo AND pz.contenido > 1 ORDER BY pz.contenido DESC, pz.id LIMIT 1) mx ON TRUE
             LEFT JOIN existencias e ON e.producto_id = p.id{$deBodega}
+            LEFT JOIN presentaciones ps ON ps.id = e.presentacion_id
+            LEFT JOIN unidades_medida um ON um.id = ps.unidad_medida_id
             LEFT JOIN bodegas b ON b.id = e.bodega_id
             WHERE TRUE{$condiciones}
-            ORDER BY proveedor, p.descripcion, p.id, b.nombre
+            ORDER BY proveedor, p.descripcion, p.id, b.nombre, ps.contenido DESC, ps.id
             SQL, $valores);
 
         return $this->filas = $filas;
     }
 
     /**
-     * Suma las existencias positivas, redondeando cada una.
+     * Suma las existencias positivas, redondeando cada una: cada
+     * presentación con su costo y su precio.
      *
      * @param list<stdClass> $filas
      *
@@ -291,18 +296,19 @@ final class InventarioValorizado
         $suma = ['unidades' => 0, 'invertido' => 0.0, 'invertidoConIsv' => 0.0, 'valorVenta' => 0.0];
 
         foreach ($filas as $f) {
-            $unidades = max(0, (int) $f->cantidad);
+            $cantidad = max(0, (int) $f->cantidad);
 
-            if ($unidades === 0) {
+            if ($cantidad === 0) {
                 continue;
             }
 
-            $invertido = round($unidades * (float) $f->costo_unidad, 2);
+            $unidades = $cantidad * max(1, (int) $f->contenido);
+            $invertido = round($cantidad * (float) $f->costo, 2);
 
             $suma['unidades'] += $unidades;
             $suma['invertido'] += $invertido;
             $suma['invertidoConIsv'] += CalculadoraPrecio::conIsv($invertido, (bool) $f->gravado);
-            $suma['valorVenta'] += round($unidades * (float) $f->precio_unidad, 2);
+            $suma['valorVenta'] += (float) $f->precio > 0 ? round($cantidad * (float) $f->precio, 2) : round($unidades * (float) $f->precio_unidad, 2);
         }
 
         return [
@@ -311,6 +317,36 @@ final class InventarioValorizado
             'invertidoConIsv' => round($suma['invertidoConIsv'], 2),
             'valorVenta'      => round($suma['valorVenta'], 2),
         ];
+    }
+
+    /**
+     * Lo que hay de cada presentación (sumando las bodegas, sin lo negativo),
+     * la más grande primero: "2 CJ48 · 5 UN"; "0" si no hay.
+     *
+     * @param list<stdClass> $filas
+     */
+    private static function existenciaTexto(array $filas): string
+    {
+        $por = [];
+
+        foreach ($filas as $f) {
+            $cantidad = max(0, (int) $f->cantidad);
+
+            if ($cantidad > 0) {
+                $sigla = self::texto($f->sigla);
+                $por[$sigla] = [(int) $f->contenido, ($por[$sigla][1] ?? 0) + $cantidad];
+            }
+        }
+
+        uasort($por, fn (array $a, array $b): int => $b[0] <=> $a[0]);
+
+        $partes = [];
+
+        foreach ($por as $sigla => [, $cantidad]) {
+            $partes[] = "{$cantidad} {$sigla}";
+        }
+
+        return $partes === [] ? '0' : implode(' · ', $partes);
     }
 
     /**

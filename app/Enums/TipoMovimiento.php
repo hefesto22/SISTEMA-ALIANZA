@@ -16,6 +16,7 @@ enum TipoMovimiento: string implements HasColor, HasLabel
     case Despacho = 'despacho';
     case Correccion = 'correccion';
     case Ajuste = 'ajuste';
+    case Apertura = 'apertura';
 
     public function getLabel(): string
     {
@@ -24,6 +25,7 @@ enum TipoMovimiento: string implements HasColor, HasLabel
             self::Despacho   => 'Despacho',
             self::Correccion => 'Corrección de pedido',
             self::Ajuste     => 'Ajuste por conteo',
+            self::Apertura   => 'Caja abierta',
         };
     }
 
@@ -34,6 +36,7 @@ enum TipoMovimiento: string implements HasColor, HasLabel
             self::Despacho   => 'info',
             self::Correccion => 'warning',
             self::Ajuste     => 'gray',
+            self::Apertura   => 'primary',
         };
     }
 }

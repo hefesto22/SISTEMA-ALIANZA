@@ -38,10 +38,12 @@ use Livewire\Attributes\Renderless;
  *
  * Existencia: cada producto trae cuánto hay DISPONIBLE en la bodega del
  * pedido: lo que hay menos lo apartado en otros pedidos pendientes
- * (App\Domain\Inventario\Disponible), así no se vende dos veces lo mismo.
- * Con "controlar existencias" encendido (Configuración) lo que no tiene
- * disponible se ve en el buscador pero no se agrega, y no se pide (ni se
- * guarda) más de lo disponible.
+ * (App\Domain\Inventario\Disponible), así no se vende dos veces lo mismo;
+ * en total (unidades base) y de cada presentación ("2 CJ48 · 5 UN"): una
+ * caja solo sale de sus cajas; las unidades sueltas, de las sueltas o de
+ * abrir cajas. Con "controlar existencias" encendido (Configuración) lo que
+ * no tiene disponible se ve en el buscador pero no se agrega, y no se pide
+ * (ni se guarda) más de lo disponible.
  *
  * Promociones: las vigentes hoy en la bodega del pedido van arriba de la
  * lista para agregarlas de un toque (lo que pide la promoción más el
@@ -173,11 +175,14 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             ->with('presentaciones.unidadMedida')
             ->get();
 
+        $porPresentacion = Disponible::porPresentacion($bodega, $productos->modelKeys(), $this->pedidoQueSeEdita());
+
         return array_values($productos
             ->map(fn (Producto $producto): array => self::datosDe(
                 $producto,
                 self::entero($producto->getAttribute('existencia_bodega')),
                 self::entero($producto->getAttribute('apartado')),
+                porPresentacion: $porPresentacion[$producto->id] ?? [],
             ))
             ->all());
     }
@@ -249,10 +254,11 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $ids = array_keys($productos);
         $hay = Disponible::existencia($bodega, $ids);
         $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
+        $porPresentacion = Disponible::porPresentacion($bodega, $ids, $this->pedidoQueSeEdita());
         $datos = [];
 
         foreach ($productos as $id => $producto) {
-            $datos[$id] = self::datosDe($producto, $hay[$id] ?? 0, $apartado[$id] ?? 0);
+            $datos[$id] = self::datosDe($producto, $hay[$id] ?? 0, $apartado[$id] ?? 0, porPresentacion: $porPresentacion[$id] ?? []);
         }
 
         $promos = [];
@@ -322,6 +328,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $ids = $pedido->items->pluck('producto_id')->all();
         $hay = Disponible::existencia($bodega, $ids);
         $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
+        $porPresentacion = Disponible::porPresentacion($bodega, $ids, $this->pedidoQueSeEdita());
 
         foreach ($pedido->items as $item) {
             $enBodega = $hay[$item->producto_id] ?? 0;
@@ -340,7 +347,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             }
 
             $lineas[] = ['producto_id' => $item->producto_id, 'presentacion_id' => $item->presentacion_id, 'cantidad' => $item->cantidad];
-            $productos[$item->producto_id] = self::datosDe($item->producto, $enBodega, $apartado[$item->producto_id] ?? 0);
+            $productos[$item->producto_id] = self::datosDe($item->producto, $enBodega, $apartado[$item->producto_id] ?? 0, porPresentacion: $porPresentacion[$item->producto_id] ?? []);
         }
 
         return [
@@ -381,12 +388,13 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $bodega = $this->bodegaDelPedido();
         $hay = Disponible::existencia($bodega, $ids);
         $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
+        $porPresentacion = Disponible::porPresentacion($bodega, $ids, $this->pedidoQueSeEdita());
 
         // Las que ya lleva el pedido salen aunque ya no se vendan, para poder verlas y quitarlas.
         $enLineas = array_column($lineas, 'presentacion_id');
 
         foreach (Producto::query()->whereKey($ids)->with('presentaciones.unidadMedida')->get() as $producto) {
-            $productos[$producto->id] = self::datosDe($producto, $hay[$producto->id] ?? 0, $apartado[$producto->id] ?? 0, $enLineas);
+            $productos[$producto->id] = self::datosDe($producto, $hay[$producto->id] ?? 0, $apartado[$producto->id] ?? 0, $enLineas, $porPresentacion[$producto->id] ?? []);
         }
 
         return $productos;
@@ -395,16 +403,18 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     /**
      * Lo que el teléfono necesita de un producto para mostrarlo y sacar su
      * subtotal igual que el servidor (precio sin ISV × cantidad, más ISV),
-     * con sus presentaciones que se venden (la más grande primero) y cuál
-     * usar para contar la existencia ("2 CJ12 + 5 UN"). "hay" es lo
-     * disponible en unidades base: lo de la bodega menos lo apartado en otros
-     * pedidos pendientes.
+     * con sus presentaciones que se venden (la más grande primero). "hay" es
+     * lo disponible en unidades base (lo de la bodega menos lo apartado en
+     * otros pedidos pendientes); "hay_por", lo disponible de cada
+     * presentación (una caja solo sale de sus cajas) y "hay_texto", eso
+     * mismo para leer: "2 CJ48 · 5 UN".
      *
      * @param list<int> $incluir presentaciones que salen aunque ya no se vendan (las que ya lleva el pedido)
+     * @param array<int, int> $porPresentacion [presentacion_id => disponible en ella]
      *
      * @return array<string, mixed>
      */
-    public static function datosDe(Producto $producto, ?int $enBodega = null, int $apartado = 0, array $incluir = []): array
+    public static function datosDe(Producto $producto, ?int $enBodega = null, int $apartado = 0, array $incluir = [], array $porPresentacion = []): array
     {
         $mayor = $producto->presentacionMayor();
         $presentaciones = [];
@@ -440,6 +450,8 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             'hay'       => $enBodega === null ? null : $enBodega - $apartado,
             'en_bodega' => $enBodega,
             'apartado'  => $apartado,
+            'hay_por'   => (object) $porPresentacion,
+            'hay_texto' => $producto->existenciaPorPresentacion(array_filter($porPresentacion, fn (int $cantidad): bool => $cantidad > 0)),
         ];
     }
 
@@ -481,8 +493,9 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
     /**
      * Con "controlar existencias": el aviso del primer producto que pasa de
-     * lo disponible en la bodega ("No alcanza ACEITE…: disponible 1 CJ12 + 3
-     * UN."); null si alcanza todo o no se controla.
+     * lo disponible en la bodega ("No alcanza ACEITE… en CJ12: disponible 1
+     * CJ12 · 3 UN."); null si alcanza todo o no se controla. Cada caja sale
+     * de sus cajas; las sueltas, de las sueltas o de abrir cajas.
      *
      * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      */
@@ -496,24 +509,41 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
         $presentaciones = Presentacion::query()->whereKey(array_column($lineas, 'presentacion_id'))->get()->keyBy('id');
         $pide = [];
+        $porPresentacion = [];
 
         foreach ($lineas as $linea) {
             $presentacion = $presentaciones->get($linea['presentacion_id']);
 
             if ($presentacion instanceof Presentacion) {
                 $pide[$presentacion->producto_id] = ($pide[$presentacion->producto_id] ?? 0) + $linea['cantidad'] * $presentacion->contenido;
+                $porPresentacion[$presentacion->producto_id][$presentacion->id] = ($porPresentacion[$presentacion->producto_id][$presentacion->id] ?? 0) + $linea['cantidad'];
             }
         }
 
         $disponible = Disponible::en($bodega, array_keys($pide), $this->pedidoQueSeEdita());
+        $hayPor = Disponible::porPresentacion($bodega, array_keys($pide), $this->pedidoQueSeEdita());
         $productos = Producto::query()->whereKey(array_keys($pide))->with('presentaciones.unidadMedida')->get()->keyBy('id');
 
         foreach ($pide as $id => $unidades) {
             $producto = $productos->get($id);
-            $hay = $disponible[$id] ?? 0;
 
-            if ($producto instanceof Producto && $unidades > $hay) {
-                return "No alcanza {$producto->descripcion}: disponible ".$producto->existenciaEnTexto(max(0, $hay)).'.';
+            if (! $producto instanceof Producto) {
+                continue;
+            }
+
+            $hay = $hayPor[$id] ?? [];
+            $texto = $producto->existenciaPorPresentacion(array_filter($hay, fn (int $cantidad): bool => $cantidad > 0));
+            $faltan = Disponible::faltantes(
+                $porPresentacion[$id] ?? [],
+                $hay,
+                $producto->presentaciones->mapWithKeys(fn (Presentacion $presentacion): array => [$presentacion->id => $presentacion->contenido])->all(),
+                $producto->presentacionBase()->id,
+            );
+
+            if ($unidades > ($disponible[$id] ?? 0) || $faltan !== []) {
+                $en = $faltan === [] ? '' : ' en '.$producto->presentaciones->firstWhere('id', array_key_first($faltan))?->sigla();
+
+                return "No alcanza {$producto->descripcion}{$en}: disponible {$texto}.";
             }
         }
 

@@ -48,7 +48,7 @@ final class ValidarDespachoAction
                 }
 
                 try {
-                    $pedido = app(ValidarDespacho::class)->ejecutar($record, LineasPedido::cantidades($data, $record), $usuario, LineasPedido::nuevas($data));
+                    $pedido = app(ValidarDespacho::class)->ejecutar($record, LineasPedido::cantidades($data, $record), $usuario, LineasPedido::nuevas($data), LineasPedido::aperturas($data));
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
 
@@ -78,6 +78,6 @@ final class ValidarDespachoAction
             ? ' "Sale" ya viene con lo que alcanza en la bodega.'
             : '';
 
-        return "Cambie las cajas y unidades que salen con − y +: \"No hay\" si no hay, menos si no alcanzó, más o en la otra unidad si hace falta (unidades sueltas si una caja vino dañada). Con \"Agregar otro producto\" se manda uno que no venía en el pedido.{$existencia} {$precio}; lo que sale se descuenta de la bodega y el pedido pasa a Por imprimir.";
+        return "Cambie las cajas y unidades que salen con − y +: \"No hay\" si no hay, menos si no alcanzó, más o en la otra unidad si hace falta (unidades sueltas si una caja vino dañada). Si las unidades sueltas no alcanzan, escoja qué caja se abre. Con \"Agregar otro producto\" se manda uno que no venía en el pedido.{$existencia} {$precio}; lo que sale se descuenta de la bodega (cada presentación de la suya) y el pedido pasa a Por imprimir.";
     }
 }

@@ -17,7 +17,9 @@ use Illuminate\Support\Facades\DB;
  *    trae 1) siempre está; solo se dice si se vende suelta.
  *  - Las demás traen 2 o más unidades base (CJ de 12, FD de 6, SC de 10…)
  *    y no se repiten. Las que ya están se actualizan y las nuevas entran
- *    sin precio (el precio lo pone quien llama: ActualizarPrecioProducto).
+ *    sin precio (el precio lo pone quien llama: ActualizarPrecioProducto)
+ *    y con un costo estimado (el de referencia del producto × lo que
+ *    traen) hasta su primera compra.
  *  - Lo que trae una presentación que ya se usó en pedidos, compras o
  *    promociones no se cambia: se desactiva y se agrega otra.
  *  - Las que ya no vienen se borran; si ya se usaron, quedan desactivadas.
@@ -41,6 +43,8 @@ final class GuardarPresentaciones
 
         return DB::transaction(function () use ($producto, $baseActiva, $otras): array {
             $actuales = $producto->presentaciones()->with('unidadMedida')->get();
+            $producto->setRelation('presentaciones', $actuales);
+            $referencia = $producto->costoReferencia();
 
             /** @var Presentacion $base */
             $base = $actuales->first(fn (Presentacion $presentacion): bool => $presentacion->es_base)
@@ -57,7 +61,7 @@ final class GuardarPresentaciones
             $guardadas = [];
 
             foreach ($otras as $fila) {
-                $presentacion = $this->guardar($producto, $actuales->all(), $quedan, $fila);
+                $presentacion = $this->guardar($producto, $actuales->all(), $quedan, $fila, $referencia);
                 $quedan[] = $presentacion->id;
                 $guardadas[] = $presentacion;
             }
@@ -110,13 +114,14 @@ final class GuardarPresentaciones
 
     /**
      * Actualiza la que ya estaba (por su id, o una igual que se había quitado)
-     * o crea una nueva sin precio.
+     * o crea una nueva sin precio y con el costo estimado.
      *
      * @param array<int, Presentacion> $actuales
      * @param list<int> $quedan las que ya se guardaron
      * @param array{id?: int|null, unidad_medida_id: int, contenido: int, activo: bool} $fila
+     * @param float $referencia costo por unidad base sin ISV para estimar el de una nueva
      */
-    private function guardar(Producto $producto, array $actuales, array $quedan, array $fila): Presentacion
+    private function guardar(Producto $producto, array $actuales, array $quedan, array $fila, float $referencia): Presentacion
     {
         $libres = array_filter($actuales, fn (Presentacion $presentacion): bool => ! $presentacion->es_base && ! in_array($presentacion->id, $quedan, true));
         $id = isset($fila['id']) ? (int) $fila['id'] : null;
@@ -143,6 +148,7 @@ final class GuardarPresentaciones
                 'producto_id'      => $producto->id,
                 'unidad_medida_id' => $fila['unidad_medida_id'],
                 'contenido'        => $fila['contenido'],
+                'costo'            => round($referencia * $fila['contenido'], 4),
                 'activo'           => $fila['activo'],
             ]);
         }
@@ -165,6 +171,8 @@ final class GuardarPresentaciones
             'unidad_medida_id' => $fila['unidad_medida_id'],
             'contenido'        => $fila['contenido'],
             'activo'           => $fila['activo'],
+            // Si cambió lo que trae (nunca se usó), su costo estimado también.
+            'costo' => $cambia ? round($referencia * $fila['contenido'], 4) : $presentacion->costo,
         ])->save();
 
         return $presentacion;

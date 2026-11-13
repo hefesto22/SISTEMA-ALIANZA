@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Una línea de la compra: en qué presentación entró (CJ de 12, UN…),
- * cuántas, a qué costo y cómo quedó el producto (costo por unidad y precio
- * de esa presentación después de la compra).
+ * Una línea de la compra: en qué presentación entró (CJ de 48, UN…),
+ * cuántas, a qué costo y cómo quedó esa presentación después de la compra
+ * (su costo, de la presentación completa sin ISV, antes y después, y su
+ * precio). costo_unidad es lo que salió cada unidad base, sin ISV.
  *
  * @property int $id
  * @property int $compra_id

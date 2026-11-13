@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Domain\Precios\CalculadoraPrecio;
 use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\ProductoFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -17,20 +16,21 @@ use Illuminate\Support\Carbon;
 use LogicException;
 
 /**
- * Producto de un proveedor con su costo vigente y sus presentaciones.
+ * Producto de un proveedor con sus presentaciones.
  *
- * La existencia y el costo van en unidades BASE (casi siempre UN) y el
- * costo SIN ISV. Se vende en presentaciones (App\Models\Presentacion): la
- * base y las que traen varias (CJ de 8, CJ de 12, FD de 6…), cada una con
- * su precio. El costo y los precios son los mismos en todas las bodegas.
+ * Se vende y se compra en presentaciones (App\Models\Presentacion): la base
+ * (casi siempre UN) y las que traen varias (CJ de 32, CJ de 48, FD de 6…).
+ * CADA presentación lleva su existencia en cada bodega y su costo promedio
+ * (sin ISV): la CJ48 no se mezcla con la CJ32 ni con las UN sueltas. Al
+ * abrir una caja, sus unidades pasan a las sueltas con el costo de esa
+ * caja. Costo y precios son los mismos en todas las bodegas.
  *
- * Para cambiar costo/precios usar App\Domain\Precios\ActualizarPrecioProducto:
+ * Para cambiar costos/precios usar App\Domain\Precios\ActualizarPrecioProducto:
  * es lo que deja el registro en el historial.
  *
- * El costo es el promedio ponderado de lo comprado (Configuración). El
- * precio de cada presentación sale de ese costo con el % de utilidad, salvo
- * que sea precio fijo: ahí lo pone la empresa a mano y las compras o los
- * cambios de margen no lo tocan.
+ * El precio de cada presentación sale de su costo con el % de utilidad,
+ * salvo que sea precio fijo: ahí lo pone la empresa a mano y las compras o
+ * los cambios de margen no lo tocan.
  *
  * @property int $id
  * @property int $proveedor_id
@@ -40,7 +40,6 @@ use LogicException;
  * @property int $unidad_medida_id
  * @property bool $gravado
  * @property float|null $margen
- * @property float $costo_unidad
  * @property Carbon|null $precio_actualizado_at
  * @property int|null $precio_actualizado_por
  * @property bool $activo
@@ -50,6 +49,7 @@ use LogicException;
  * @property-read Categoria $categoria
  * @property-read UnidadMedida $unidadMedida
  * @property-read Collection<int, Presentacion> $presentaciones
+ * @property-read Collection<int, Existencia> $existencias
  */
 class Producto extends Model
 {
@@ -81,7 +81,6 @@ class Producto extends Model
             'gravado'               => 'boolean',
             'unidad_medida_id'      => 'integer',
             'margen'                => 'float',
-            'costo_unidad'          => 'float',
             'precio_actualizado_at' => 'datetime',
             'activo'                => 'boolean',
         ];
@@ -154,7 +153,7 @@ class Producto extends Model
     }
 
     /**
-     * Cuánto hay en cada bodega (en unidades).
+     * Cuánto hay en cada bodega, por presentación.
      *
      * @return HasMany<Existencia, $this>
      */
@@ -189,9 +188,24 @@ class Producto extends Model
         return $this->margen ?? $this->categoria->margen;
     }
 
-    public function costoUnidadConIsv(): float
+    /**
+     * Costo por unidad base (sin ISV) para estimar el de una presentación que
+     * todavía no tiene: el de la base si tiene; si no, el más alto por unidad
+     * de las otras (para no quedar por debajo del costo). 0 si ninguna tiene.
+     */
+    public function costoReferencia(): float
     {
-        return CalculadoraPrecio::conIsv($this->costo_unidad, $this->gravado);
+        $base = $this->presentaciones->first(fn (Presentacion $presentacion): bool => $presentacion->es_base);
+
+        if ($base instanceof Presentacion && $base->costo > 0) {
+            return round($base->costo, 4);
+        }
+
+        $porUnidad = $this->presentaciones
+            ->filter(fn (Presentacion $presentacion): bool => $presentacion->costo > 0)
+            ->map(fn (Presentacion $presentacion): float => $presentacion->costoPorUnidad());
+
+        return $porUnidad->isEmpty() ? 0.0 : (float) $porUnidad->max();
     }
 
     /**
@@ -233,8 +247,9 @@ class Producto extends Model
     }
 
     /**
-     * Unidades base como se cuentan en bodega, con la presentación más
-     * grande: "2 CJ12 + 5 UN", "3 SC10", "5 UN", "0".
+     * Unidades base en la presentación más grande: "2 CJ12 + 5 UN", "3
+     * SC10", "5 UN", "0". Solo para totales en unidades (lo que hay de verdad
+     * en cada presentación: existenciaPorPresentacion()).
      */
     public function existenciaEnTexto(int $unidades): string
     {
@@ -244,6 +259,38 @@ class Producto extends Model
         return $mayor === null
             ? Existencia::enCajas($unidades, 1, base: $base)
             : Existencia::enCajas($unidades, $mayor->contenido, $mayor->sigla(), $base);
+    }
+
+    /**
+     * Lo que hay en cada presentación, la más grande primero: "2 CJ48 · 3
+     * CJ32 · 5 UN"; "0" si no hay nada. Las que están en 0 no salen.
+     *
+     * @param array<int, int> $cantidades [presentacion_id => cantidad en esa presentación]
+     */
+    public function existenciaPorPresentacion(array $cantidades): string
+    {
+        $partes = [];
+
+        foreach ($this->presentaciones->sortByDesc('contenido') as $presentacion) {
+            $cantidad = $cantidades[$presentacion->id] ?? 0;
+
+            if ($cantidad !== 0) {
+                $partes[] = $cantidad.' '.$presentacion->sigla();
+            }
+        }
+
+        return $partes === [] ? '0' : implode(' · ', $partes);
+    }
+
+    /**
+     * Lo que hay de cada presentación en la bodega (o en todas):
+     * [presentacion_id => cantidad en esa presentación].
+     *
+     * @return array<int, int>
+     */
+    public function existenciaEn(?int $bodegaId): array
+    {
+        return Existencia::porPresentacion($bodegaId, $this->id);
     }
 
     /**

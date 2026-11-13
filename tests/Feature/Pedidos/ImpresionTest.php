@@ -332,7 +332,7 @@ test('corregir un pedido impreso: anula la factura, vuelve a por imprimir y al r
     imprimir($pedido, $this->encargado, ModoImpresion::Originales);
 
     // Sube el precio después de validado: la corrección no lo cambia.
-    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, 80.0, MotivoCambioPrecio::Manual, precios: [presentacion($this->gravado)->id => ['precio' => 110.0]]);
+    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado, MotivoCambioPrecio::Manual, precios: [presentacion($this->gravado)->id => ['precio' => 110.0]]);
 
     $this->actingAs($this->encargado);
     $undoRepeaterFake = Repeater::fake();

@@ -11,10 +11,11 @@ use App\Models\UnidadMedida;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
- * Crea el producto con costo y precios ya cargados. Trae su base (UN, que
- * nace con el producto) y una CJ de 12, con precio = UN × lo que trae:
+ * Crea el producto con costos y precios ya cargados. Trae su base (UN, que
+ * nace con el producto) y una CJ de 12; cada presentación con costo y
+ * precio = los de la UN × lo que trae (UN: costo 50, precio 59.5238):
  *
- *   Producto::factory()->precio(80.0, 100.0)->conCaja(10)->create();  // UN a 100, CJ10 a 1000
+ *   Producto::factory()->precio(80.0, 100.0)->conCaja(10)->create();  // UN cuesta 80 y vale 100; CJ10, 800 y 1000
  *   Producto::factory()->conCaja(1)->create();                       // solo la UN
  *   Producto::factory()->precioFijo()->create();                     // las compras no mueven sus precios
  *
@@ -24,6 +25,9 @@ class ProductoFactory extends Factory
 {
     /** Precio sin ISV de la UN si no se dice otro. */
     private const PRECIO = 59.5238;
+
+    /** Costo sin ISV de la UN si no se dice otro. */
+    private const COSTO = 50.0;
 
     /**
      * @return array<string, mixed>
@@ -37,25 +41,25 @@ class ProductoFactory extends Factory
             'descripcion'           => mb_strtoupper(fake()->word().' '.fake()->word()).' 12X100G',
             'gravado'               => true,
             'margen'                => null,
-            'costo_unidad'          => 50.0,
             'precio_actualizado_at' => now(),
             'activo'                => true,
         ];
     }
 
     /**
-     * La UN con su precio y una CJ de 12.
+     * La UN con su costo y precio, y una CJ de 12.
      */
     public function configure(): static
     {
         return $this->afterCreating(function (Producto $producto): void {
-            Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->update(['precio' => self::PRECIO]);
+            Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->update(['precio' => self::PRECIO, 'costo' => self::COSTO]);
 
             Presentacion::query()->create([
                 'producto_id'      => $producto->id,
                 'unidad_medida_id' => self::medida('CJ'),
                 'contenido'        => 12,
                 'precio'           => round(self::PRECIO * 12, 4),
+                'costo'            => round(self::COSTO * 12, 4),
             ]);
         });
     }
@@ -66,17 +70,18 @@ class ProductoFactory extends Factory
     }
 
     /**
-     * Costo por unidad y precio de la UN (sin ISV); cada presentación, ese precio × lo que trae.
+     * Costo y precio de la UN (sin ISV); cada presentación, esos × lo que trae.
      */
     public function precio(float $costo, float $precio): static
     {
-        return $this
-            ->state(fn (array $attributes): array => ['costo_unidad' => $costo])
-            ->afterCreating(function (Producto $producto) use ($precio): void {
-                foreach (Presentacion::query()->where('producto_id', $producto->id)->get() as $presentacion) {
-                    $presentacion->forceFill(['precio' => round($precio * $presentacion->contenido, 4)])->save();
-                }
-            });
+        return $this->afterCreating(function (Producto $producto) use ($costo, $precio): void {
+            foreach (Presentacion::query()->where('producto_id', $producto->id)->get() as $presentacion) {
+                $presentacion->forceFill([
+                    'precio' => round($precio * $presentacion->contenido, 4),
+                    'costo'  => round($costo * $presentacion->contenido, 4),
+                ])->save();
+            }
+        });
     }
 
     /**
@@ -107,24 +112,25 @@ class ProductoFactory extends Factory
                 return;
             }
 
-            $unidad = (float) Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->value('precio');
-            $caja->forceFill(['contenido' => $unidades, 'precio' => round($unidad * $unidades, 4)])->save();
+            $base = Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->firstOrFail();
+            $caja->forceFill(['contenido' => $unidades, 'precio' => round($base->precio * $unidades, 4), 'costo' => round($base->costo * $unidades, 4)])->save();
         });
     }
 
     /**
-     * Otra presentación (FD de 6, SC de 10…) con precio = UN × lo que trae.
+     * Otra presentación (FD de 6, SC de 10…) con costo y precio = los de la UN × lo que trae.
      */
     public function conPresentacion(string $codigo, int $unidades): static
     {
         return $this->afterCreating(function (Producto $producto) use ($codigo, $unidades): void {
-            $unidad = (float) Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->value('precio');
+            $base = Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->firstOrFail();
 
             Presentacion::query()->create([
                 'producto_id'      => $producto->id,
                 'unidad_medida_id' => self::medida($codigo),
                 'contenido'        => $unidades,
-                'precio'           => round($unidad * $unidades, 4),
+                'precio'           => round($base->precio * $unidades, 4),
+                'costo'            => round($base->costo * $unidades, 4),
             ]);
         });
     }

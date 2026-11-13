@@ -37,8 +37,9 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
  * Reportes de ventas e inventario valorizado: administración ve todas las
  * bodegas o una; el encargado, solo la suya; el vendedor no entra.
  *
- * Inventario: en Copán 24 del gravado (costo 80, precio 100) y 10 del exento
- * (costo 40, precio 50); en Ocotepeque 12 del gravado.
+ * Inventario: en Copán 2 CJ12 del gravado (costo 960, precio 1,200) y 10 UN
+ * del exento (costo 40, precio 50); en Ocotepeque 12 UN sueltas del gravado
+ * (costo 80, precio 100).
  */
 beforeEach(function (): void {
     $this->seed(RolesSistemaSeeder::class);
@@ -67,9 +68,9 @@ beforeEach(function (): void {
     ]);
 
     $ajustar = app(AjustarExistencia::class);
-    $ajustar->ejecutar($this->copan->id, $this->gravado, 24, $this->admin, 'conteo');
-    $ajustar->ejecutar($this->copan->id, $this->exento, 10, $this->admin, 'conteo');
-    $ajustar->ejecutar($this->ocote->id, $this->gravado, 12, $this->admin, 'conteo');
+    $ajustar->ejecutar($this->copan->id, presentacion($this->gravado, 12), 2, $this->admin, 'conteo');
+    $ajustar->ejecutar($this->copan->id, presentacion($this->exento), 10, $this->admin, 'conteo');
+    $ajustar->ejecutar($this->ocote->id, presentacion($this->gravado), 12, $this->admin, 'conteo');
 });
 
 /**
@@ -110,8 +111,11 @@ function ventasDeReporte(object $t): void
 test('ventas: totales, costo con el promedio del día que salió y ganancia', function (): void {
     ventasDeReporte($this);
 
-    // Después del despacho el costo sube: el reporte sigue con el de ese día (80).
-    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado->fresh() ?? $this->gravado, 90.0, MotivoCambioPrecio::Compra);
+    // Después del despacho los costos suben: el reporte sigue con los de ese día (80 la UN, 960 la CJ12).
+    app(ActualizarPrecioProducto::class)->ejecutar($this->gravado->fresh() ?? $this->gravado, MotivoCambioPrecio::Compra, costos: [
+        presentacion($this->gravado)->id     => 90.0,
+        presentacion($this->gravado, 12)->id => 1080.0,
+    ]);
 
     $todas = new VentasDelPeriodo(Periodo::de('hoy'), null);
     $total = $todas->totales();
@@ -261,7 +265,7 @@ test('inventario valorizado: cuánto hay en cada bodega, al costo y a precio de 
     $todas = new InventarioValorizado(null);
     $total = $todas->totales();
 
-    // Gravado: 36 × 80 = 2,880 (con ISV 3,312); exento: 10 × 40 = 400. A precio de venta: 3,600 + 500.
+    // Gravado: 2 CJ12 × 960 + 12 UN × 80 = 2,880 (con ISV 3,312); exento: 10 × 40 = 400. A precio de venta: 3,600 + 500.
     expect($total->productos)->toBe(2)
         ->and($total->unidades)->toBe(46)
         ->and($total->invertido)->toBe(3280.0)
@@ -286,7 +290,7 @@ test('inventario valorizado: cuánto hay en cada bodega, al costo y a precio de 
 test('inventario: lo negativo no se suma y se avisa; se puede buscar y ver lo que no tiene existencia', function (): void {
     $sinExistencia = Producto::factory()->create(['categoria_id' => $this->gravado->categoria_id]);
     $negativo = Producto::factory()->create(['categoria_id' => $this->gravado->categoria_id]);
-    app(MoverExistencia::class)->ejecutar($this->copan->id, $negativo, -5, TipoMovimiento::Ajuste, $this->admin);
+    app(MoverExistencia::class)->ejecutar($this->copan->id, presentacion($negativo), -5, TipoMovimiento::Ajuste, $this->admin);
 
     $reporte = new InventarioValorizado($this->copan);
 
@@ -361,7 +365,7 @@ test('PDF / Imprimir abre la vista de impresión en un modal; la hoja de adentro
 test('ventas de un proveedor: solo cuentan sus productos, en una bodega o en cada una', function (): void {
     // Otro proveedor: 4 unidades a L 25 (costo 20) en Copán. Con lo de siempre, el total del mes es L 1,700.
     $otro = Producto::factory()->exento()->precio(20.0, 25.0)->conCaja(1)->create();
-    app(AjustarExistencia::class)->ejecutar($this->copan->id, $otro, 10, $this->admin, 'conteo');
+    app(AjustarExistencia::class)->ejecutar($this->copan->id, presentacion($otro), 10, $this->admin, 'conteo');
     pedidoDeReporte($this->copan, $this->vendedor, [[$otro, 1, 4]], $this->admin);
     ventasDeReporte($this);
 

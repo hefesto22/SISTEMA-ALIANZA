@@ -14,6 +14,7 @@ use App\Filament\Resources\Productos\Schemas\ProductoForm;
 use App\Filament\Resources\Productos\Schemas\ProductoInfolist;
 use App\Filament\Resources\Productos\Tables\ProductosTable;
 use App\Filament\Support\Acceso;
+use App\Models\Existencia;
 use App\Models\Producto;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -21,6 +22,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ProductoResource extends Resource
 {
@@ -71,19 +73,30 @@ class ProductoResource extends Resource
 
     /**
      * Con la existencia: la de su bodega (encargado y vendedor) o la de
-     * todas las bodegas juntas (administración).
+     * todas las bodegas juntas (administración). "existencia" es el total
+     * en unidades base (para ordenar) y las existencias cargadas dicen
+     * cuánto hay de cada presentación.
      */
     public static function getEloquentQuery(): Builder
     {
         $usuario = Acceso::usuario();
         $todas = $usuario === null || $usuario->veTodasLasBodegas();
         $bodegaId = $usuario?->bodega_id;
+        $total = Existencia::query()
+            ->join('presentaciones as pe', 'pe.id', '=', 'existencias.presentacion_id')
+            ->selectRaw('COALESCE(SUM(existencias.cantidad * pe.contenido), 0)')
+            ->whereColumn('existencias.producto_id', 'productos.id')
+            ->when(! $todas, fn (Builder $query): Builder => $query->where('existencias.bodega_id', $bodegaId));
 
         return parent::getEloquentQuery()
-            ->with(['proveedor', 'categoria', 'presentaciones.unidadMedida', 'unidadMedida'])
-            ->withSum(['existencias as existencia' => fn (Builder $query): Builder => $todas
-                ? $query
-                : $query->where('bodega_id', $bodegaId)], 'cantidad');
+            ->with([
+                'proveedor',
+                'categoria',
+                'presentaciones.unidadMedida',
+                'unidadMedida',
+                'existencias' => fn (HasMany $existencias): HasMany => $todas ? $existencias : $existencias->where('bodega_id', $bodegaId),
+            ])
+            ->addSelect(['existencia' => $total]);
     }
 
     public static function getRelations(): array

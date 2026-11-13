@@ -22,9 +22,11 @@ use Illuminate\Support\Facades\DB;
  * Precio (Configuración): el del día del despacho, o el del pedido salvo que
  * ya quede por debajo del costo (ahí el de hoy, para no vender a pérdida).
  *
- * Lo que sale se descuenta de la existencia de la bodega del pedido. Con
- * "controlar existencias" encendido no deja sacar más de lo que hay: no se
- * valida nada y se avisa qué producto no alcanza.
+ * Lo que sale se descuenta de la existencia de la bodega del pedido, cada
+ * presentación de la suya. Si para las unidades sueltas hay que abrir
+ * cajas, bodega dice cuáles ($abrir) y se abren antes. Con "controlar
+ * existencias" encendido no deja sacar más de lo que hay: no se valida
+ * nada y se avisa qué producto no alcanza.
  *
  * Las promociones se vuelven a calcular con lo que de verdad sale: si ya no
  * se cumple la condición, el regalo se cobra. Se respetan las promociones con
@@ -40,10 +42,11 @@ final class ValidarDespacho
     /**
      * @param array<int, int|string|null> $despachado [id de línea => cantidad que sale]; si falta una línea sale completa
      * @param list<array{presentacion_id: int, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en otra presentación o uno que no venía (ver AjustarLineas)
+     * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener unidades sueltas
      */
-    public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = []): Pedido
+    public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = [], array $abrir = []): Pedido
     {
-        return DB::transaction(function () use ($pedido, $despachado, $usuario, $nuevas): Pedido {
+        return DB::transaction(function () use ($pedido, $despachado, $usuario, $nuevas, $abrir): Pedido {
             $pedido = Pedido::query()->lockForUpdate()->findOrFail($pedido->id);
 
             if (! $pedido->estaPendiente()) {
@@ -61,7 +64,7 @@ final class ValidarDespacho
                 sinPerdida: $precioDelPedido,
             );
 
-            $this->salida->ejecutar($pedido, TipoMovimiento::Despacho, $usuario);
+            $this->salida->ejecutar($pedido, TipoMovimiento::Despacho, $usuario, abrir: $abrir);
 
             $pedido->forceFill([
                 'estado'       => EstadoPedido::PorImprimir,

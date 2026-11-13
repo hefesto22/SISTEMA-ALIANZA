@@ -15,7 +15,9 @@
     mismo, sin compilar.
 
     Existencia: lo DISPONIBLE en la bodega del pedido, o sea lo que hay menos
-    lo apartado en otros pedidos pendientes (administración sin bodega
+    lo apartado en otros pedidos pendientes, de cada presentación ("2 CJ48 ·
+    5 UN": una caja solo sale de sus cajas; las sueltas, de las sueltas o de
+    abrir cajas) (administración sin bodega
     escogida: lo de todas). En el buscador salen primero los que tienen
     disponible; los que no, al final con "SIN EXISTENCIA" en rojo. Solo se
     muestra lo disponible (lo de otros pedidos ya va restado). Con
@@ -507,20 +509,37 @@
                 return hay === null || hay === undefined ? null : Number(hay)
             },
 
-            {{-- Debajo del producto abierto, solo lo disponible: "Disponible 2 CJ + 2 UN" o "Sin existencia". --}}
+            {{-- Lo disponible de cada presentación, para leer: "2 CJ48 · 5 UN" (cada caja tiene su existencia). --}}
+            textoDisponible(p) {
+                return p?.hay_texto ?? this.enCajas(p?.hay ?? 0, p)
+            },
+
+            {{-- Debajo del producto abierto, solo lo disponible: "Disponible 2 CJ48 · 5 UN" o "Sin existencia". --}}
             textoHay(id) {
                 const hay = this.hayDe(id) ?? 0
 
-                return hay > 0 ? 'Disponible ' + this.enCajas(hay, this.productos[id]) : 'Sin existencia'
+                return hay > 0 ? 'Disponible ' + this.textoDisponible(this.productos[id]) : 'Sin existencia'
             },
 
-            {{-- En el buscador, a la derecha: "disponible / 2 CJ" ("en todas" sin bodega escogida) o "sin / existencia". --}}
+            {{-- En el buscador, a la derecha: "disponible / 2 CJ48" ("en todas" sin bodega escogida) o "sin / existencia". --}}
             etiquetaHay(p) {
                 if (Number(p?.hay ?? 0) > 0) {
-                    return [this.sinBodegaEscogida() ? 'en todas' : 'disponible', this.enCajas(p.hay, p)]
+                    return [this.sinBodegaEscogida() ? 'en todas' : 'disponible', this.textoDisponible(p)]
                 }
 
                 return ['sin', 'existencia']
+            },
+
+            {{-- Cajas (no la base) disponibles en esa presentación: una caja solo sale de sus cajas. null si es la base o no se sabe. --}}
+            cajasDe(id, pres) {
+                const pr = this.presentacion(id, pres)
+                const por = this.productos[id]?.hay_por
+
+                if (! pr || pr.es_base || ! por) {
+                    return null
+                }
+
+                return Number(por[pres] ?? 0)
             },
 
             {{-- Controlando la existencia, lo que no tiene disponible se ve pero no se agrega. --}}
@@ -547,8 +566,10 @@
                 }
 
                 const contenido = Math.max(1, Number(this.presentacion(id, pres)?.contenido ?? 1))
+                const porUnidades = Math.max(0, Math.floor((hay - this.unidadesDe(id, pres)) / contenido))
+                const cajas = this.cajasDe(id, pres)
 
-                return Math.max(0, Math.floor((hay - this.unidadesDe(id, pres)) / contenido))
+                return cajas === null ? porUnidades : Math.min(porUnidades, Math.max(0, cajas))
             },
 
             avisarTope(id) {
@@ -764,6 +785,13 @@
                 for (const l of promo.lineas) {
                     const contenido = Math.max(1, Number(this.presentacion(l.producto_id, l.presentacion_id)?.contenido ?? 1))
                     pide[l.producto_id] = (pide[l.producto_id] ?? 0) + Number(l.cantidad) * contenido
+
+                    {{-- Una caja solo sale de sus cajas. --}}
+                    const cajas = this.cajasDe(l.producto_id, l.presentacion_id)
+
+                    if (cajas !== null && this.cant(l.producto_id, l.presentacion_id) + Number(l.cantidad) > cajas) {
+                        return this.nombreDe(l.producto_id)
+                    }
                 }
 
                 for (const id of Object.keys(pide)) {
@@ -999,7 +1027,7 @@
                         <div class="pv-linea-precio" x-text="precioDe(id)"></div>
                         <div class="pv-linea-promo" x-show="descuentoDe(id) > 0" x-cloak x-text="textoPromo(id) + ' por promoción'"></div>
                         <div class="pv-hay" x-show="hayDe(id) !== null" x-bind:class="{ 'pv-hay-poco': hayPoco(productos[id]), 'pv-hay-nada': (hayDe(id) ?? 0) <= 0 }" x-text="textoHay(id)"></div>
-                        <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: disponible ' + enCajas(Math.max(0, hayDe(id) ?? 0), productos[id])"></div>
+                        <div class="pv-tope" x-show="topado === id" x-cloak x-text="'No hay más: disponible ' + textoDisponible(productos[id])"></div>
 
                         <div class="pv-cantidades">
                             <template x-for="pr in presentacionesDe(id)" x-bind:key="'pres-' + pr.id">

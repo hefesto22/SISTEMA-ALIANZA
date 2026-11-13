@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Schemas\Components;
 
+use App\Domain\Inventario\AbrirCaja;
 use App\Domain\Pedidos\AjustarLineas;
 use App\Filament\Resources\Pedidos\Actions\LineasPedido;
 use App\Models\Pedido;
@@ -19,7 +20,9 @@ use Livewire\Attributes\Renderless;
  * cuánto quedaría. "No hay" lo deja en 0 y "Sí hay" lo regresa a lo pedido.
  * Puede salir menos de lo pedido, más, o en otra presentación (unidades
  * sueltas si una caja vino dañada); cada cosa se dice en palabras ("falta 1
- * caja de 12 (pidió 3)"). Arriba,
+ * caja de 12 (pidió 3)"). Cada presentación sale de su existencia; si las
+ * unidades sueltas no alcanzan, se escoge qué caja se abre (va en la fila
+ * de la base: abrir_de y abrir_cajas). Arriba,
  * "Agregar otro producto" busca uno que no venía en el pedido y lo suma a la
  * lista. Todo pasa en el teléfono; al servidor solo van la búsqueda y
  * confirmar.
@@ -84,6 +87,8 @@ class SalidaDePedido extends Field
         $rules["{$statePath}.*.producto_id"] = ['required', 'integer'];
         $rules["{$statePath}.*.presentacion_id"] = ['required', 'integer'];
         $rules["{$statePath}.*.sale"] = ['required', 'integer', 'min:0', 'max:'.AjustarLineas::MAXIMO];
+        $rules["{$statePath}.*.abrir_de"] = ['nullable', 'integer'];
+        $rules["{$statePath}.*.abrir_cajas"] = ['nullable', 'integer', 'min:0', 'max:'.AbrirCaja::MAXIMO];
     }
 
     /**

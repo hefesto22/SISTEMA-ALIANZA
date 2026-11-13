@@ -339,9 +339,11 @@ final class VentasDelPeriodo
             it AS (
                 SELECT i.pedido_id, i.producto_id,
                     SUM(i.subtotal) AS bruto, SUM(i.descuento) AS descuento, SUM(i.isv) AS isv, SUM(i.total) AS total,
-                    SUM(COALESCE(i.cantidad_despachada, i.cantidad) * GREATEST(i.contenido, 1)) AS unidades
+                    SUM(COALESCE(i.cantidad_despachada, i.cantidad) * GREATEST(i.contenido, 1)) AS unidades,
+                    SUM(COALESCE(i.cantidad_despachada, i.cantidad) * ps.costo) AS costo_hoy
                 FROM pedido_items i
                 JOIN ped ON ped.id = i.pedido_id
+                JOIN presentaciones ps ON ps.id = i.presentacion_id
                 JOIN productos pr ON pr.id = i.producto_id{$deProveedor}
                 GROUP BY i.pedido_id, i.producto_id
             ),
@@ -355,11 +357,10 @@ final class VentasDelPeriodo
             lineas AS (
                 SELECT ped.id AS pedido_id, ped.bodega_id, ped.cliente_id, ped.vendedor_id, ped.validado_at, it.producto_id,
                     it.descuento, it.bruto - it.descuento AS neta, it.isv, it.total, it.unidades,
-                    COALESCE(k.costo, it.unidades * pr.costo_unidad) AS costo,
+                    COALESCE(k.costo, it.costo_hoy) AS costo,
                     (k.pedido_id IS NULL AND it.unidades <> 0) AS estimado
                 FROM it
                 JOIN ped ON ped.id = it.pedido_id
-                JOIN productos pr ON pr.id = it.producto_id
                 LEFT JOIN k ON k.pedido_id = it.pedido_id AND k.producto_id = it.producto_id
             )
             SQL;

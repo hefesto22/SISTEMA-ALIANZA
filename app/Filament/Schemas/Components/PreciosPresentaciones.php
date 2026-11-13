@@ -15,10 +15,10 @@ use Filament\Forms\Components\Field;
  * Precios de venta de un producto, en el modal "Actualizar precio"
  * (App\Filament\Resources\Productos\Actions\ActualizarPrecioAction).
  *
- * Arriba, para leer: el costo promedio que dejan las compras, la última
- * compra y la existencia; "Corregir costo" abre un campo solo para cuando
- * está mal. Abajo, una fila por presentación: costo promedio (con y sin
- * ISV), % de utilidad, precio (con ISV si es gravado), cuánto gana y si el
+ * Arriba, para leer: la existencia de cada presentación y la última
+ * compra; "Corregir costos" deja escribir el costo de cada una, solo para
+ * cuando está mal. Abajo, una fila por presentación: SU costo promedio (con
+ * y sin ISV), % de utilidad, precio (con ISV si es gravado), cuánto gana y si el
  * precio es "Con %" (sale del costo con ese % y lo mueven las compras) o
  * "Fijo" (lo pone la empresa; las compras no lo mueven), con una línea que
  * lo explica con los números de esa fila. En "Con %" solo se escribe el %
@@ -27,9 +27,10 @@ use Filament\Forms\Components\Field;
  * mientras se escribe; al guardar, ActualizarPrecioAction las revisa y
  * ActualizarPrecioProducto las guarda.
  *
- * Estado: array{corregir: bool, costo_base: float, filas: list<array{id: int,
- * modo: string, margen: float|null, precio_base: float|null}>} con el
- * costo por unidad base y los precios SIN ISV; margen en % (14 = 14 %).
+ * Estado: array{corregir: bool, costos: array<int, float>, filas:
+ * list<array{id: int, modo: string, margen: float|null, precio_base:
+ * float|null}>} con el costo de cada presentación y los precios SIN ISV;
+ * margen en % (14 = 14 %).
  *
  * Vista: resources/views/filament/productos/precios-presentaciones.blade.php
  */
@@ -55,29 +56,31 @@ class PreciosPresentaciones extends Field
     }
 
     /**
-     * Lo que abre el modal: el costo de hoy y una fila por presentación.
+     * Lo que abre el modal: el costo de hoy de cada presentación y una fila por cada una.
      *
-     * @return array{corregir: bool, costo_base: float, filas: list<array{id: int, modo: string, margen: float|null, precio_base: float}>}
+     * @return array{corregir: bool, costos: array<int, float>, filas: list<array{id: int, modo: string, margen: float|null, precio_base: float}>}
      */
     public static function estadoInicial(Producto $producto): array
     {
         $filas = [];
+        $costos = [];
 
         foreach (self::presentaciones($producto) as $presentacion) {
             $fijo = $presentacion->precio_fijo;
+            $costos[$presentacion->id] = $presentacion->costo;
 
             $filas[] = [
                 'id'          => $presentacion->id,
                 'modo'        => $fijo ? self::FIJO : self::CALCULADO,
-                'margen'      => $fijo ? self::margenReal($producto->costo_unidad, $presentacion) : self::regla($presentacion, $producto),
+                'margen'      => $fijo ? self::margenReal($presentacion) : self::regla($presentacion, $producto),
                 'precio_base' => $presentacion->precio,
             ];
         }
 
         return [
-            'corregir'   => false,
-            'costo_base' => $producto->costo_unidad,
-            'filas'      => $filas,
+            'corregir' => false,
+            'costos'   => $costos,
+            'filas'    => $filas,
         ];
     }
 
@@ -109,15 +112,18 @@ class PreciosPresentaciones extends Field
         }
 
         $presentaciones = [];
+        $hay = Existencia::porPresentacion(null, $producto->id);
 
         foreach (self::presentaciones($producto) as $presentacion) {
             $presentaciones[$presentacion->id] = [
-                'id'        => $presentacion->id,
-                'sigla'     => $presentacion->sigla(),
-                'nombre'    => $presentacion->nombre(),
-                'contenido' => $presentacion->contenido,
-                'precioHoy' => $presentacion->precio,
-                'regla'     => self::regla($presentacion, $producto),
+                'id'         => $presentacion->id,
+                'sigla'      => $presentacion->sigla(),
+                'nombre'     => $presentacion->nombre(),
+                'contenido'  => $presentacion->contenido,
+                'precioHoy'  => $presentacion->precio,
+                'costoHoy'   => $presentacion->costo,
+                'existencia' => $hay[$presentacion->id] ?? 0,
+                'regla'      => self::regla($presentacion, $producto),
             ];
         }
 
@@ -132,9 +138,8 @@ class PreciosPresentaciones extends Field
             'tasa'           => CalculadoraPrecio::tasaIsv(),
             'simbolo'        => (string) config('honduras.moneda.simbolo', 'L.'),
             'base'           => $producto->presentacionBase()->sigla(),
-            'costoHoy'       => $producto->costo_unidad,
             'presentaciones' => (object) $presentaciones,
-            'existencia'     => $producto->existenciaEnTexto((int) Existencia::query()->where('producto_id', $producto->id)->sum('cantidad')),
+            'existencia'     => $producto->existenciaPorPresentacion($hay),
             'ultima'         => $ultima instanceof CompraItem ? [
                 'monto'     => $ultima->costo_ingresado,
                 'sigla'     => $ultima->presentacion->sigla(),
@@ -155,14 +160,14 @@ class PreciosPresentaciones extends Field
     }
 
     /**
-     * El % que de verdad deja su precio con ese costo; null sin costo o sin precio.
+     * El % que de verdad deja su precio con su costo; null sin costo o sin precio.
      */
-    private static function margenReal(float $costoBase, Presentacion $presentacion): ?float
+    private static function margenReal(Presentacion $presentacion): ?float
     {
-        if ($costoBase <= 0 || $presentacion->precio <= 0) {
+        if ($presentacion->costo <= 0 || $presentacion->precio <= 0) {
             return null;
         }
 
-        return round(CalculadoraPrecio::margenReal(round($costoBase * $presentacion->contenido, 4), $presentacion->precio) * 100, 2);
+        return round(CalculadoraPrecio::margenReal($presentacion->costo, $presentacion->precio) * 100, 2);
     }
 }

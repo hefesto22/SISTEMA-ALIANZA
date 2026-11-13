@@ -67,13 +67,14 @@ test('cada presentación se dice corta y en palabras', function (): void {
         ->and($producto->existenciaEnTexto(29))->toBe('2 CJ12 + 5 UN');
 });
 
-test('al crear un producto se arman sus presentaciones; el costo de la caja se reparte y los precios salen con el %', function (): void {
+test('al crear un producto se arman sus presentaciones; cada una con su costo (las que no lo traen, estimado por unidad) y los precios salen con el %', function (): void {
     $categoria = Categoria::factory()->create(['margen' => 0.16]);
     $this->actingAs($this->admin);
     $undoRepeaterFake = Repeater::fake();
 
-    // CJ8 a L 92 con ISV = L 10 la unidad sin ISV. La UN se vende a L 20 con ISV (escrito);
-    // la CJ8 y la CJ12 salen del costo con 16 %: 80 ÷ 0.84 y 120 ÷ 0.84.
+    // CJ8 a L 92 con ISV = L 80 sin ISV (L 10 la unidad): la UN y la CJ12, sin costo escrito,
+    // quedan con 10 y 120. La UN se vende a L 20 con ISV (escrito); la CJ8 y la CJ12 salen de su
+    // costo con 16 %: 80 ÷ 0.84 y 120 ÷ 0.84.
     Livewire::test(CreateProducto::class)
         ->fillForm([
             'proveedor_id'     => $categoria->proveedor_id,
@@ -97,7 +98,9 @@ test('al crear un producto se arman sus presentaciones; el costo de la caja se r
     $producto = Producto::query()->where('codigo', 'JAB-001')->sole();
 
     expect($producto->descripcion)->toBe('JABON DE TOCADOR 100G')
-        ->and($producto->costo_unidad)->toBe(10.0)
+        ->and(presentacion($producto)->costo)->toBe(10.0)
+        ->and(presentacion($producto, 8)->costo)->toBe(80.0)
+        ->and(presentacion($producto, 12)->costo)->toBe(120.0)
         ->and($producto->presentaciones->map(fn (Presentacion $p): string => $p->sigla())->all())->toBe(['UN', 'CJ8', 'CJ12'])
         ->and(presentacion($producto)->precio)->toBe(17.3913)
         ->and(presentacion($producto, 8)->precio)->toBe(95.2381)
@@ -140,7 +143,7 @@ test('al crear, una presentación repetida o que trae menos de 2 no se acepta', 
     expect(Producto::query()->where('codigo', 'JAB-002')->exists())->toBeFalse();
 });
 
-test('al editar se agrega una presentación (sale del costo con el %) y la UN deja de venderse suelta', function (): void {
+test('al editar se agrega una presentación (con costo estimado por unidad y precio con el %) y la UN deja de venderse suelta', function (): void {
     $producto = Producto::factory()->create();
     $caja = caja($producto);
     $this->actingAs($this->admin);
@@ -160,12 +163,13 @@ test('al editar se agrega una presentación (sale del costo con el %) y la UN de
 
     $undoRepeaterFake();
 
-    // Costo 50 por unidad: FD6 = 300 ÷ 0.84 = 357.1429. La CJ12 no se toca.
+    // Costo estimado con el de la UN (50): FD6 = 300 → 300 ÷ 0.84 = 357.1429. La CJ12 no se toca.
     $fardo = presentacion($producto, 6);
     $cambio = CambioPrecio::query()->where('presentacion_id', $fardo->id)->sole();
 
     expect(presentacion($producto)->activo)->toBeFalse()
         ->and($fardo->sigla())->toBe('FD6')
+        ->and($fardo->costo)->toBe(300.0)
         ->and($fardo->precio)->toBe(357.1429)
         ->and($cambio->motivo)->toBe(MotivoCambioPrecio::Manual)
         ->and($cambio->nota)->toBe('PRESENTACIÓN NUEVA')

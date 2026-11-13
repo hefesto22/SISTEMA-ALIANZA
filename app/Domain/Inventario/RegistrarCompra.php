@@ -24,24 +24,25 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Entra una compra de un proveedor a una bodega. Cada línea es un producto
- * en una de sus presentaciones (CJ de 8, CJ de 12, UN…). Por cada línea:
+ * en una de sus presentaciones (CJ de 48, CJ de 32, UN…); un mismo
+ * producto puede venir en varias en la misma compra. Por cada línea:
  *
  * 1. El costo de la factura (de la presentación completa, con ISV si el
- *    producto es gravado) se pasa a costo por unidad base sin ISV, como se
- *    guarda el producto.
- * 2. El costo nuevo del producto sale según Configuración:
- *      - promedio: (lo que hay en todas las bodegas × costo actual + lo que
- *        entra × costo de compra) ÷ total. Si no había nada, el de compra.
+ *    producto es gravado) se pasa a sin ISV, como se guarda.
+ * 2. El costo nuevo de ESA presentación sale según Configuración:
+ *      - promedio: (lo que hay de ella en todas las bodegas × su costo +
+ *        lo que entra × costo de compra) ÷ total. Si no había, el de compra.
  *      - último: el de compra.
- * 3. El precio de cada presentación se recalcula con el margen del producto
- *    (o de su categoría) por ActualizarPrecioProducto, que deja el historial.
- *    Así el precio siempre cubre el costo. Las de precio fijo (puesto a
- *    mano) se quedan; solo cambia el costo.
- * 4. Suma a la existencia de ESA bodega (en unidades base: 3 CJ de 12 = 36)
- *    y deja el renglón en el kárdex.
+ *    Las otras presentaciones del producto no se tocan: una caja de 48 que
+ *    se compró más barata no le baja el costo a la de 32 ni a las sueltas.
+ * 3. El precio de esa presentación se recalcula con su % de utilidad
+ *    (ActualizarPrecioProducto, que deja el historial): siempre cubre su
+ *    costo. Si es de precio fijo se queda; solo cambia el costo.
+ * 4. Suma a la existencia de esa presentación en ESA bodega y deja el
+ *    renglón en el kárdex.
  *
- * El costo y el precio son uno solo para todas las bodegas; la existencia y
- * las compras son de cada bodega.
+ * El costo y el precio son los mismos para todas las bodegas; la
+ * existencia y las compras son de cada bodega.
  */
 final class RegistrarCompra
 {
@@ -80,9 +81,9 @@ final class RegistrarCompra
             $subtotal = 0.0;
             $isv = 0.0;
 
-            // En orden de producto, como los despachos: así una compra y un
-            // despacho al mismo tiempo bloquean en el mismo orden.
-            usort($lineas, fn (array $a, array $b): int => $a['producto_id'] <=> $b['producto_id']);
+            // En orden de producto y presentación, como los despachos: así una
+            // compra y un despacho al mismo tiempo bloquean en el mismo orden.
+            usort($lineas, fn (array $a, array $b): int => [$a['producto_id'], $a['presentacion_id']] <=> [$b['producto_id'], $b['presentacion_id']]);
 
             foreach ($lineas as $linea) {
                 $item = $this->linea($compra, $bodega, $proveedor, $linea, $metodo, $usuario);
@@ -101,15 +102,18 @@ final class RegistrarCompra
     }
 
     /**
-     * Costo por unidad sin ISV después de la compra.
+     * Costo (sin ISV) con que queda una presentación cuando le entran
+     * $entran a $costoEntra y había $existencia (en todas las bodegas) a
+     * $costoActual. Sirve igual para una compra y para las sueltas que salen
+     * de una caja abierta.
      */
-    public static function costoNuevo(MetodoCosto $metodo, int $existencia, float $costoActual, int $unidades, float $costoCompra): float
+    public static function costoNuevo(MetodoCosto $metodo, int $existencia, float $costoActual, int $entran, float $costoEntra): float
     {
         if ($metodo === MetodoCosto::Ultimo || $existencia <= 0) {
-            return round($costoCompra, 4);
+            return round($costoEntra, 4);
         }
 
-        return round(($existencia * $costoActual + $unidades * $costoCompra) / ($existencia + $unidades), 4);
+        return round(($existencia * $costoActual + $entran * $costoEntra) / ($existencia + $entran), 4);
     }
 
     /**
@@ -141,18 +145,19 @@ final class RegistrarCompra
         }
 
         $unidades = $cantidad * $presentacion->contenido;
-        $costoUnidad = CalculadoraPrecio::aUnidadSinIsv($costoIngresado, $producto->gravado, $presentacion->contenido);
+        $costoCompra = CalculadoraPrecio::aUnidadSinIsv($costoIngresado, $producto->gravado);
 
-        // Lo que hay en todas las bodegas antes de esta línea: el costo es uno solo.
-        $hay = (int) Existencia::query()->where('producto_id', $producto->id)->sum('cantidad');
-        $costoAnterior = $producto->precio_actualizado_at === null ? null : $producto->costo_unidad;
-        $costoNuevo = self::costoNuevo($metodo, $hay, $producto->costo_unidad, $unidades, $costoUnidad);
+        // Lo que hay de ESTA presentación en todas las bodegas antes de esta
+        // línea (su costo es uno solo para todas).
+        $hay = (int) Existencia::query()->where('presentacion_id', $presentacion->id)->sum('cantidad');
+        $costoAnterior = $producto->precio_actualizado_at === null ? null : $presentacion->costo;
+        $costoNuevo = self::costoNuevo($metodo, $hay, $presentacion->costo, $cantidad, $costoCompra);
 
-        $this->precios->ejecutar($producto, $costoNuevo, MotivoCambioPrecio::Compra, $usuario, nota: "COMPRA {$compra->numero} · {$bodega->nombre}");
-        $producto->refresh();
+        $this->precios->ejecutar($producto, MotivoCambioPrecio::Compra, $usuario, nota: "COMPRA {$compra->numero} · {$bodega->nombre}", costos: [$presentacion->id => $costoNuevo]);
         $presentacion->refresh();
+        $presentacion->setRelation('producto', $producto);
 
-        $this->mover->ejecutar($bodega->id, $producto, $unidades, TipoMovimiento::Compra, $usuario, compraId: $compra->id, costoUnidad: $costoUnidad, nota: "COMPRA {$compra->numero}");
+        $this->mover->ejecutar($bodega->id, $presentacion, $cantidad, TipoMovimiento::Compra, $usuario, compraId: $compra->id, costo: $costoCompra, nota: "COMPRA {$compra->numero}");
 
         // El total de la línea es el de la factura; el ISV sale de ahí.
         $total = round($costoIngresado * $cantidad, 2);
@@ -165,13 +170,13 @@ final class RegistrarCompra
             'cantidad'        => $cantidad,
             'unidades'        => $unidades,
             'costo_ingresado' => $costoIngresado,
-            'costo_unidad'    => $costoUnidad,
+            'costo_unidad'    => round($costoCompra / max(1, $presentacion->contenido), 4),
             'gravado'         => $producto->gravado,
             'subtotal'        => $subtotal,
             'isv'             => round($total - $subtotal, 2),
             'total'           => $total,
             'costo_anterior'  => $costoAnterior,
-            'costo_nuevo'     => $producto->costo_unidad,
+            'costo_nuevo'     => $presentacion->costo,
             'precio_nuevo'    => $presentacion->precio,
         ]);
     }

@@ -16,11 +16,13 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
- * Kárdex del producto: cada entrada y salida, en qué bodega, cuánto quedó y
- * de dónde vino (compra, pedido, ajuste). Arriba, lo que hay en cada bodega.
- * El encargado y el vendedor ven solo su bodega.
+ * Kárdex del producto: cada entrada y salida de cada presentación, en qué
+ * bodega, cuánto quedó de ella, a qué costo y de dónde vino (compra,
+ * pedido, ajuste, caja abierta). Arriba, lo que hay de cada presentación en
+ * cada bodega. El encargado y el vendedor ven solo su bodega.
  */
 class MovimientosRelationManager extends RelationManager
 {
@@ -46,7 +48,7 @@ class MovimientosRelationManager extends RelationManager
         return $table
             ->description(fn (): string => self::existencias($producto, $todas ? null : ($bodegaId ?? 0)))
             ->modifyQueryUsing(fn (Builder $query): Builder => ($todas ? $query : $query->where('bodega_id', $bodegaId))
-                ->with(['bodega', 'compra', 'pedido', 'usuario']))
+                ->with(['bodega', 'compra', 'pedido', 'usuario', 'presentacion.unidadMedida']))
             ->columns([
                 TextColumn::make('created_at')
                     ->label('Fecha')
@@ -59,16 +61,17 @@ class MovimientosRelationManager extends RelationManager
                     ->badge(),
                 TextColumn::make('cantidad')
                     ->label('Entró / salió')
-                    ->formatStateUsing(fn (int $state): string => ($state > 0 ? '+' : '').$producto->existenciaEnTexto($state))
+                    ->formatStateUsing(fn (int $state, MovimientoInventario $record): string => ($state > 0 ? '+' : '').$state.' '.$record->presentacion->sigla())
                     ->color(fn (int $state): string => $state > 0 ? 'success' : 'danger')
                     ->weight('semibold'),
                 TextColumn::make('existencia')
                     ->label('Quedó')
-                    ->formatStateUsing(fn (int $state): string => $producto->existenciaEnTexto($state))
+                    ->formatStateUsing(fn (int $state, MovimientoInventario $record): string => $state.' '.$record->presentacion->sigla())
                     ->color(fn (int $state): ?string => $state < 0 ? 'danger' : null),
                 TextColumn::make('costo_unidad')
-                    ->label('Costo unidad')
+                    ->label('Costo')
                     ->formatStateUsing(fn (float $state): string => lempiras(CalculadoraPrecio::conIsv($state, $producto->gravado), 4))
+                    ->description(fn (MovimientoInventario $record): string => 'cada '.$record->presentacion->sigla())
                     ->color('gray')
                     ->visible($verCostos),
                 TextColumn::make('referencia')
@@ -95,7 +98,7 @@ class MovimientosRelationManager extends RelationManager
     }
 
     /**
-     * "Hay: SANTA ROSA DE COPÁN 2 CJ + 5 UN · OCOTEPEQUE 0".
+     * "Hay: SANTA ROSA DE COPÁN 2 CJ48 · 3 CJ32 · 5 UN — OCOTEPEQUE 0".
      */
     private static function existencias(Producto $producto, ?int $soloBodega): string
     {
@@ -106,9 +109,13 @@ class MovimientosRelationManager extends RelationManager
         }
 
         $partes = $query->get()
-            ->map(fn (Existencia $existencia): string => $existencia->bodega->nombre.' '.$producto->existenciaEnTexto($existencia->cantidad))
+            ->groupBy('bodega_id')
+            ->map(fn (Collection $existencias): string => $existencias->first()?->bodega->nombre.' '.$producto->existenciaPorPresentacion(
+                $existencias->mapWithKeys(fn (Existencia $existencia): array => [$existencia->presentacion_id => $existencia->cantidad])->all(),
+            ))
+            ->values()
             ->all();
 
-        return $partes === [] ? 'Todavía no hay existencia registrada.' : 'Hay: '.implode(' · ', $partes);
+        return $partes === [] ? 'Todavía no hay existencia registrada.' : 'Hay: '.implode(' — ', $partes);
     }
 }

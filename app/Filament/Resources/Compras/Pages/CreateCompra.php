@@ -70,7 +70,7 @@ class CreateCompra extends CreateRecord
     }
 
     /**
-     * Las presentaciones de precio fijo no suben con la compra: si el costo
+     * Las presentaciones de precio fijo no suben con la compra: si su costo
      * promedio ya les pasó el precio, se avisa para que lo revisen.
      */
     protected function afterCreate(): void
@@ -83,11 +83,11 @@ class CreateCompra extends CreateRecord
 
         $bajoCosto = Presentacion::query()
             ->with(['producto', 'unidadMedida'])
-            ->whereIn('producto_id', $compra->items()->pluck('producto_id'))
+            ->whereIn('id', $compra->items()->pluck('presentacion_id'))
             ->where('activo', true)
             ->where('precio_fijo', true)
             ->get()
-            ->filter(fn (Presentacion $presentacion): bool => $presentacion->precio < $presentacion->costo())
+            ->filter(fn (Presentacion $presentacion): bool => $presentacion->precio < $presentacion->costo)
             ->sortBy(fn (Presentacion $presentacion): string => $presentacion->producto->descripcion);
 
         if ($bajoCosto->isEmpty()) {
@@ -101,7 +101,7 @@ class CreateCompra extends CreateRecord
                 $presentacion->producto->descripcion,
                 $presentacion->sigla(),
                 lempiras($presentacion->precioConIsv()),
-                lempiras(CalculadoraPrecio::conIsv($presentacion->costo(), $presentacion->producto->gravado)),
+                lempiras(CalculadoraPrecio::conIsv($presentacion->costo, $presentacion->producto->gravado)),
             ))->push('Cámbielos en Productos → Actualizar precio.')->implode(' '))
             ->warning()
             ->persistent()

@@ -229,7 +229,7 @@ class PromocionForm
 
                 $hay = self::existenciaEn(self::bodegasDeExistencia($get($rutaBodegas)), [$producto->id]);
 
-                return self::etiquetaConExistencia($producto, $hay[$producto->id] ?? 0);
+                return self::etiquetaConExistencia($producto, $hay[$producto->id] ?? []);
             })
             ->required()
             ->live();
@@ -256,21 +256,24 @@ class PromocionForm
 
         /** @var array<int, string> $opciones */
         $opciones = $productos
-            ->sortBy(fn (Producto $producto): int => ($hay[$producto->id] ?? 0) > 0 ? 0 : 1)
-            ->mapWithKeys(fn (Producto $producto): array => [$producto->id => self::etiquetaConExistencia($producto, $hay[$producto->id] ?? 0)])
+            ->sortBy(fn (Producto $producto): int => max([0, ...($hay[$producto->id] ?? [])]) > 0 ? 0 : 1)
+            ->mapWithKeys(fn (Producto $producto): array => [$producto->id => self::etiquetaConExistencia($producto, $hay[$producto->id] ?? [])])
             ->all();
 
         return $opciones;
     }
 
     /**
-     * "CÓDIGO · DESCRIPCIÓN" y, a la derecha, "Hay 3 CJ + 2 UN" (verde) o
+     * "CÓDIGO · DESCRIPCIÓN" y, a la derecha, "Hay 3 CJ12 · 2 UN" (verde) o
      * "Sin existencia" (rojo).
+     *
+     * @param array<int, int> $hay [presentacion_id => cantidad]
      */
-    private static function etiquetaConExistencia(Producto $producto, int $hay): string
+    private static function etiquetaConExistencia(Producto $producto, array $hay): string
     {
-        $texto = $hay > 0 ? 'Hay '.$producto->existenciaEnTexto($hay) : 'Sin existencia';
-        $color = $hay > 0 ? 'var(--success-500)' : 'var(--danger-500)';
+        $alguna = max([0, ...$hay]) > 0;
+        $texto = $alguna ? 'Hay '.$producto->existenciaPorPresentacion(array_filter($hay, fn (int $cantidad): bool => $cantidad > 0)) : 'Sin existencia';
+        $color = $alguna ? 'var(--success-500)' : 'var(--danger-500)';
 
         return '<span style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;width:100%">'
             .'<span style="min-width:0">'.e($producto->etiqueta()).'</span>'
@@ -304,12 +307,12 @@ class PromocionForm
     }
 
     /**
-     * [producto_id => unidades] en esas bodegas (null = todas).
+     * [producto_id => [presentacion_id => cantidad]] en esas bodegas (null = todas).
      *
      * @param list<int>|null $bodegas
      * @param array<mixed> $productos
      *
-     * @return array<int, int>
+     * @return array<int, array<int, int>>
      */
     private static function existenciaEn(?array $bodegas, array $productos): array
     {
@@ -317,15 +320,19 @@ class PromocionForm
             return [];
         }
 
-        /** @var array<int, int> $hay */
-        $hay = Existencia::query()
+        $hay = [];
+
+        $filas = Existencia::query()
             ->whereIn('producto_id', $productos)
             ->when($bodegas !== null, fn (Builder $query): Builder => $query->whereIn('bodega_id', $bodegas ?? []))
-            ->groupBy('producto_id')
-            ->selectRaw('producto_id, SUM(cantidad) as total')
-            ->pluck('total', 'producto_id')
-            ->map(fn (mixed $cantidad): int => (int) $cantidad)
-            ->all();
+            ->groupBy('producto_id', 'presentacion_id')
+            ->selectRaw('producto_id, presentacion_id, SUM(cantidad) as total')
+            ->toBase()
+            ->get();
+
+        foreach ($filas as $fila) {
+            $hay[(int) $fila->producto_id][(int) $fila->presentacion_id] = (int) $fila->total;
+        }
 
         return $hay;
     }

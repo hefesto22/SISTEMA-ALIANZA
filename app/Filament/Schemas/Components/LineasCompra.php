@@ -19,11 +19,14 @@ use Livewire\Attributes\Renderless;
  * Productos de una compra como lista tipo carrito, como en la preventa:
  * arriba un buscador con los productos del proveedor escogido; se toca uno
  * y entra a la lista en su presentación más grande. Cada fila: en qué
- * presentación viene (CJ de 12, CJ de 8, UN…), cantidad con − y +, el costo
- * con ISV como viene en la factura (vacío: se escribe el de la factura) y
- * el total de la línea. Abajo de cada una, cómo queda: "Costo CJ12: está a
- * L X → quedará a L Y" y lo mismo del precio de venta (el fijo se queda),
- * con la misma cuenta que RegistrarCompra (promedio o último, según
+ * presentación viene (CJ de 48, CJ de 32, UN…), cantidad con − y +, el
+ * costo con ISV como viene en la factura (vacío: se escribe el de la
+ * factura) y el total de la línea. Si de un producto vienen varias
+ * presentaciones (10 CJ48, 10 CJ32 y 5 UN), "+ Otra presentación" agrega
+ * otra fila del mismo producto. Abajo de cada una, cómo queda ESA
+ * presentación (cada una tiene su costo): "Costo CJ48: está a L X →
+ * quedará a L Y" y lo mismo del precio de venta (el fijo se queda), con la
+ * misma cuenta que RegistrarCompra (promedio o último, según
  * Configuración). Si el costo se aleja mucho del de hoy, avisa (error de
  * dedo). Abajo, la barra con el total y "Registrar compra".
  *
@@ -110,7 +113,7 @@ class LineasCompra extends Field
         $existencias = self::existencias($productos->modelKeys());
 
         return array_values($productos
-            ->map(fn (Producto $producto): array => self::datosDe($producto, $existencias[$producto->id] ?? 0))
+            ->map(fn (Producto $producto): array => self::datosDe($producto, $existencias))
             ->all());
     }
 
@@ -134,7 +137,7 @@ class LineasCompra extends Field
         $existencias = self::existencias(array_values(array_unique($ids)));
 
         foreach (Producto::query()->whereKey(array_unique($ids))->with(['categoria', 'presentaciones.unidadMedida'])->get() as $producto) {
-            $productos[$producto->id] = self::datosDe($producto, $existencias[$producto->id] ?? 0);
+            $productos[$producto->id] = self::datosDe($producto, $existencias);
         }
 
         return $productos;
@@ -173,18 +176,20 @@ class LineasCompra extends Field
      * Lo que el teléfono necesita de un producto: nombre, si es gravado, sus
      * presentaciones que se compran (la más grande primero) con su costo y
      * precio de hoy CON ISV (si es gravado), y lo necesario para sacar cómo
-     * quedan con la compra igual que RegistrarCompra: el costo por unidad
-     * sin ISV, lo que hay en todas las bodegas, el % de utilidad y si el
+     * queda cada una con la compra igual que RegistrarCompra: su costo sin
+     * ISV, lo que hay de ella en todas las bodegas, su % de utilidad y si el
      * precio es fijo.
+     *
+     * @param array<int, int> $existencias [presentacion_id => lo que hay en todas las bodegas]
      *
      * @return array<string, mixed>
      */
-    public static function datosDe(Producto $producto, int $existencia = 0): array
+    public static function datosDe(Producto $producto, array $existencias = []): array
     {
         $presentaciones = [];
 
         foreach ($producto->presentacionesActivas()->sortByDesc('contenido') as $presentacion) {
-            $presentaciones[] = self::presentacionDe($presentacion, $producto);
+            $presentaciones[] = self::presentacionDe($presentacion, $producto, $existencias[$presentacion->id] ?? 0);
         }
 
         return [
@@ -194,8 +199,6 @@ class LineasCompra extends Field
             'gravado'        => $producto->gravado,
             'proveedor_id'   => $producto->proveedor_id,
             'presentaciones' => $presentaciones,
-            'costoUnidad'    => $producto->costo_unidad,
-            'existencia'     => $existencia,
             'margen'         => $producto->margenAplicado(),
         ];
     }
@@ -205,24 +208,26 @@ class LineasCompra extends Field
      *
      * @return array<string, mixed>
      */
-    private static function presentacionDe(Presentacion $presentacion, Producto $producto): array
+    private static function presentacionDe(Presentacion $presentacion, Producto $producto, int $existencia): array
     {
         return [
-            'id'        => $presentacion->id,
-            'sigla'     => $presentacion->sigla(),
-            'nombre'    => $presentacion->nombre(),
-            'plural'    => $presentacion->palabra(2),
-            'contenido' => $presentacion->contenido,
-            'fijo'      => $presentacion->precio_fijo,
-            'margen'    => $presentacion->margen ?? $producto->margenAplicado(),
-            'costoHoy'  => $producto->costo_unidad > 0 ? CalculadoraPrecio::aPantalla($producto->costo_unidad, $producto->gravado, $presentacion->contenido) : 0.0,
-            'precioHoy' => round(CalculadoraPrecio::conIsv($presentacion->precio, $producto->gravado), 2),
+            'id'         => $presentacion->id,
+            'sigla'      => $presentacion->sigla(),
+            'nombre'     => $presentacion->nombre(),
+            'plural'     => $presentacion->palabra(2),
+            'contenido'  => $presentacion->contenido,
+            'fijo'       => $presentacion->precio_fijo,
+            'margen'     => $presentacion->margen ?? $producto->margenAplicado(),
+            'costo'      => $presentacion->costo,
+            'existencia' => $existencia,
+            'costoHoy'   => $presentacion->costo > 0 ? CalculadoraPrecio::aPantalla($presentacion->costo, $producto->gravado) : 0.0,
+            'precioHoy'  => round(CalculadoraPrecio::conIsv($presentacion->precio, $producto->gravado), 2),
         ];
     }
 
     /**
-     * Lo que hay de cada producto en TODAS las bodegas (el costo promedio es
-     * uno solo): [producto_id => unidades base].
+     * Lo que hay de cada presentación de esos productos en TODAS las bodegas
+     * (su costo promedio es uno solo): [presentacion_id => cantidad en ella].
      *
      * @param array<mixed> $ids
      *
@@ -237,9 +242,9 @@ class LineasCompra extends Field
         /** @var array<int, int> $hay */
         $hay = Existencia::query()
             ->whereIn('producto_id', $ids)
-            ->groupBy('producto_id')
-            ->selectRaw('producto_id, SUM(cantidad) as total')
-            ->pluck('total', 'producto_id')
+            ->groupBy('presentacion_id')
+            ->selectRaw('presentacion_id, SUM(cantidad) as total')
+            ->pluck('total', 'presentacion_id')
             ->map(fn (mixed $cantidad): int => (int) $cantidad)
             ->all();
 

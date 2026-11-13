@@ -16,6 +16,7 @@ enum MotivoCambioPrecio: string implements HasColor, HasLabel
     case Margen = 'margen';
     case Manual = 'manual';
     case CargaInicial = 'carga_inicial';
+    case CajaAbierta = 'caja_abierta';
 
     public function getLabel(): string
     {
@@ -24,6 +25,7 @@ enum MotivoCambioPrecio: string implements HasColor, HasLabel
             self::Margen       => 'Cambio de margen',
             self::Manual       => 'Ajuste manual',
             self::CargaInicial => 'Carga inicial',
+            self::CajaAbierta  => 'Caja abierta',
         };
     }
 
@@ -34,6 +36,7 @@ enum MotivoCambioPrecio: string implements HasColor, HasLabel
             self::Margen       => 'warning',
             self::Manual       => 'primary',
             self::CargaInicial => 'gray',
+            self::CajaAbierta  => 'success',
         };
     }
 }

@@ -5,12 +5,14 @@
     Arriba el buscador con los productos del proveedor escogido (al tocarlo
     sin escribir salen los primeros). Al tocar un producto entra en su
     presentación más grande y con el costo vacío: se escribe el de la
-    factura. Cada fila: en qué presentación viene (CJ12, CJ8, UN…), cantidad
+    factura. Cada fila: en qué presentación viene (CJ48, CJ32, UN…), cantidad
     con − y +, costo como viene en la factura (con ISV si es gravado) y el
-    total. Abajo, cómo queda con la compra: "Costo CJ12: está a L X →
+    total. "+ Otra presentación" agrega otra fila del mismo producto (10 CJ48,
+    10 CJ32 y 5 UN en la misma compra). Abajo, cómo queda esa presentación
+    con la compra (cada una tiene su costo): "Costo CJ48: está a L X →
     quedará a L Y" y el precio de venta igual (el fijo se queda), con la
-    misma cuenta que RegistrarCompra (todas las líneas del producto, en
-    orden). Si el costo se aleja mucho del de hoy, avisa.
+    misma cuenta que RegistrarCompra (todas las líneas de esa presentación,
+    en orden). Si el costo se aleja mucho del de hoy, avisa.
 
     Si se cambia el proveedor, se quitan los productos que eran de otro.
     Todo pasa en el teléfono; al servidor solo van la búsqueda y Registrar.
@@ -80,6 +82,10 @@
             .lc-segmento button { padding: 0.45rem 0.75rem; border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; color: var(--gray-600); }
             .dark .lc-segmento button { color: var(--gray-300); }
             .lc-segmento button.lc-activo { color: #fff; background: var(--primary-600); }
+            .lc-otra { justify-self: start; display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; font-weight: 600; color: var(--primary-600); }
+            .dark .lc-otra { color: var(--primary-400); }
+            .lc-otra svg { width: 1rem; height: 1rem; }
+            .lc-otra:hover { text-decoration: underline; }
 
             /* − cantidad + */
             .lc-stepper { display: inline-flex; align-items: center; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.12); }
@@ -319,6 +325,34 @@
                 this.lineas.splice(i, 1)
             },
 
+            {{-- "1 producto", "3 productos" o, si alguno viene en varias presentaciones, "2 productos (4 líneas)". --}}
+            textoCuantos() {
+                const productos = new Set(this.lineas.map((linea) => Number(linea.producto_id))).size
+                const texto = productos === 1 ? '1 producto' : productos + ' productos'
+
+                return this.lineas.length > productos ? texto + ' (' + this.lineas.length + ' líneas)' : texto
+            },
+
+            {{-- Las presentaciones del producto que todavía no tienen fila en la compra. --}}
+            sinFila(linea) {
+                const usadas = this.lineas.filter((otra) => Number(otra.producto_id) === Number(linea.producto_id)).map((otra) => Number(otra.presentacion_id))
+
+                return (this.productos[linea.producto_id]?.presentaciones ?? []).filter((pr) => ! usadas.includes(Number(pr.id)))
+            },
+
+            {{-- Otra fila del mismo producto en la siguiente presentación que no está (10 CJ48 + 10 CJ32 + 5 UN), justo debajo. --}}
+            otraPresentacion(i) {
+                const linea = this.lineas[i]
+                const pr = this.sinFila(linea)[0]
+
+                if (! pr) {
+                    return
+                }
+
+                this.lineas.splice(i + 1, 0, { producto_id: Number(linea.producto_id), presentacion_id: Number(pr.id), cantidad: 1, costo: '' })
+                this.resaltar(i + 1)
+            },
+
             {{-- Otra presentación: el costo escrito era de la otra, así que se vuelve a escribir. --}}
             cambiarPresentacion(linea, pr) {
                 if (Number(linea.presentacion_id) === Number(pr.id)) {
@@ -378,35 +412,33 @@
                 return this.r4(gravado ? monto * (1 + @js($config['tasa'])) : monto)
             },
 
-            {{-- Costo por unidad sin ISV con que queda el producto después de TODAS sus líneas de esta compra, en orden, como RegistrarCompra (promedio con lo que hay en todas las bodegas, o el último). null si todavía no hay costo escrito. --}}
-            costoFinal(id) {
-                const p = this.productos[id]
+            {{-- Costo sin ISV con que queda la presentación de la línea después de TODAS sus líneas de esta compra, en orden, como RegistrarCompra (promedio con lo que hay de ELLA en todas las bodegas, o el último). Cada presentación tiene el suyo. null si todavía no hay costo escrito. --}}
+            costoFinal(linea) {
+                const p = this.productos[linea.producto_id]
+                const pr = this.presentacion(linea)
 
-                if (! p) {
+                if (! p || ! pr) {
                     return null
                 }
 
-                let existencia = Number(p.existencia) || 0
-                let costo = Number(p.costoUnidad) || 0
+                let existencia = Number(pr.existencia) || 0
+                let costo = Number(pr.costo) || 0
                 let alguna = false
 
-                for (const linea of this.lineas.filter((l) => Number(l.producto_id) === Number(id))) {
-                    const pr = this.presentacion(linea)
-                    const cantidad = this.n(linea.cantidad)
-                    const pagado = this.decimal(linea.costo)
+                for (const otra of this.lineas.filter((l) => Number(l.presentacion_id) === Number(pr.id))) {
+                    const cantidad = this.n(otra.cantidad)
+                    const pagado = this.decimal(otra.costo)
 
-                    if (! pr || cantidad < 1 || pagado <= 0) {
+                    if (cantidad < 1 || pagado <= 0) {
                         continue
                     }
 
-                    const contenido = Math.max(1, Number(pr.contenido))
-                    const unidades = cantidad * contenido
-                    const deCompra = this.r4(pagado / (p.gravado ? 1 + @js($config['tasa']) : 1) / contenido)
+                    const deCompra = this.r4(pagado / (p.gravado ? 1 + @js($config['tasa']) : 1))
 
                     costo = @js($config['metodo']) === 'ultimo' || existencia <= 0
                         ? deCompra
-                        : this.r4((existencia * costo + unidades * deCompra) / (existencia + unidades))
-                    existencia += unidades
+                        : this.r4((existencia * costo + cantidad * deCompra) / (existencia + cantidad))
+                    existencia += cantidad
                     alguna = true
                 }
 
@@ -417,18 +449,17 @@
             queda(linea) {
                 const p = this.productos[linea.producto_id]
                 const pr = this.presentacion(linea)
-                const final = this.costoFinal(linea.producto_id)
+                const final = this.costoFinal(linea)
 
                 if (! p || ! pr || final === null) {
                     return null
                 }
 
-                const contenido = Math.max(1, Number(pr.contenido))
-                const costo = this.redondear(this.conIsv(final * contenido, p.gravado))
+                const costo = this.redondear(this.conIsv(final, p.gravado))
                 const fijo = pr.fijo && Number(pr.precioHoy) > 0
                 const precio = fijo
                     ? Number(pr.precioHoy)
-                    : this.redondear(this.conIsv(this.r4(this.r4(final * contenido) / (1 - Number(pr.margen ?? p.margen))), p.gravado))
+                    : this.redondear(this.conIsv(this.r4(final / (1 - Number(pr.margen ?? p.margen))), p.gravado))
 
                 return { costo, precio, fijo }
             },
@@ -531,7 +562,7 @@
         <div class="lc-aviso-proveedor" x-show="avisoProveedor !== ''" x-cloak x-text="avisoProveedor"></div>
 
         {{-- Lista --}}
-        <div class="lc-titulo" x-show="lineas.length > 0" x-text="lineas.length === 1 ? '1 producto en la compra' : lineas.length + ' productos en la compra'"></div>
+        <div class="lc-titulo" x-show="lineas.length > 0" x-text="textoCuantos() + ' en la compra'"></div>
 
         <div class="lc-lista" x-show="lineas.length > 0">
             <template x-for="(linea, i) in lineas" x-bind:key="linea.producto_id + '-' + linea.presentacion_id + '-' + i">
@@ -614,6 +645,11 @@
                     </div>
 
                     <div class="lc-aviso-costo" x-show="avisoCosto(linea) !== ''" x-text="avisoCosto(linea)"></div>
+
+                    <button type="button" class="lc-otra" x-show="sinFila(linea).length > 0 && lineas.findLastIndex((otra) => Number(otra.producto_id) === Number(linea.producto_id)) === i" x-on:click="otraPresentacion(i)">
+                        {{ svg('heroicon-m-plus') }}
+                        <span x-text="'Otra presentación de este producto (' + sinFila(linea).map((pr) => pr.sigla).join(', ') + ')'"></span>
+                    </button>
                 </div>
             </template>
         </div>
@@ -625,7 +661,7 @@
             <div class="lc-barra-total">
                 <span class="lc-barra-etiqueta">Total de la compra</span>
                 <span class="lc-barra-monto" x-text="dinero(total())">{{ lempiras(0) }}</span>
-                <span class="lc-barra-detalle" x-text="(lineas.length === 1 ? '1 producto' : lineas.length + ' productos') + (isv() > 0 ? ' · ISV ' + dinero(isv()) : '')"></span>
+                <span class="lc-barra-detalle" x-text="textoCuantos() + (isv() > 0 ? ' · ISV ' + dinero(isv()) : '')"></span>
             </div>
 
             <x-filament::button type="submit" size="lg" icon="heroicon-m-check" wire:target="create">

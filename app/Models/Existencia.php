@@ -4,22 +4,27 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Cuánto hay de un producto en una bodega, en UNIDADES. Solo se cambia con
+ * Cuánto hay de una presentación de un producto en una bodega, contado en
+ * ESA presentación: 2 (CJ48), 3 (CJ32), 5 (UN sueltas). Solo se cambia con
  * App\Domain\Inventario\MoverExistencia (deja el renglón en el kárdex).
  *
  * @property int $id
  * @property int $bodega_id
  * @property int $producto_id
+ * @property int $presentacion_id
  * @property int $cantidad
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Bodega $bodega
  * @property-read Producto $producto
+ * @property-read Presentacion $presentacion
  */
 class Existencia extends Model
 {
@@ -29,6 +34,7 @@ class Existencia extends Model
     protected $fillable = [
         'bodega_id',
         'producto_id',
+        'presentacion_id',
         'cantidad',
     ];
 
@@ -38,7 +44,10 @@ class Existencia extends Model
     protected function casts(): array
     {
         return [
-            'cantidad' => 'integer',
+            'bodega_id'       => 'integer',
+            'producto_id'     => 'integer',
+            'presentacion_id' => 'integer',
+            'cantidad'        => 'integer',
         ];
     }
 
@@ -59,14 +68,57 @@ class Existencia extends Model
     }
 
     /**
-     * Cuánto hay en la bodega (0 si nunca ha entrado).
+     * @return BelongsTo<Presentacion, $this>
      */
-    public static function en(int $bodegaId, int $productoId): int
+    public function presentacion(): BelongsTo
+    {
+        return $this->belongsTo(Presentacion::class);
+    }
+
+    /**
+     * Cuánto hay de esa presentación en la bodega, en ella (0 si nunca ha entrado).
+     */
+    public static function de(int $bodegaId, int $presentacionId): int
     {
         return (int) self::query()
             ->where('bodega_id', $bodegaId)
-            ->where('producto_id', $productoId)
+            ->where('presentacion_id', $presentacionId)
             ->value('cantidad');
+    }
+
+    /**
+     * Todo lo que hay del producto en la bodega (o en todas), en unidades
+     * base: cada presentación × lo que trae.
+     */
+    public static function en(?int $bodegaId, int $productoId): int
+    {
+        return (int) self::query()
+            ->join('presentaciones', 'presentaciones.id', '=', 'existencias.presentacion_id')
+            ->where('existencias.producto_id', $productoId)
+            ->when($bodegaId !== null, fn (Builder $query): Builder => $query->where('existencias.bodega_id', $bodegaId))
+            ->sum(DB::raw('existencias.cantidad * presentaciones.contenido'));
+    }
+
+    /**
+     * Lo que hay de cada presentación del producto en la bodega (o en
+     * todas): [presentacion_id => cantidad en esa presentación].
+     *
+     * @return array<int, int>
+     */
+    public static function porPresentacion(?int $bodegaId, int $productoId): array
+    {
+        /** @var array<int, int> $hay */
+        $hay = self::query()
+            ->where('producto_id', $productoId)
+            ->when($bodegaId !== null, fn (Builder $query): Builder => $query->where('bodega_id', $bodegaId))
+            ->groupBy('presentacion_id')
+            ->selectRaw('presentacion_id, SUM(cantidad) as total')
+            ->orderBy('presentacion_id')
+            ->pluck('total', 'presentacion_id')
+            ->map(fn (mixed $cantidad): int => (int) $cantidad)
+            ->all();
+
+        return $hay;
     }
 
     /**

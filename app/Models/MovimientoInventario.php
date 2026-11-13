@@ -11,13 +11,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Un renglón del kárdex: qué entró o salió de una bodega, cuánto quedó y
- * de dónde vino (compra, pedido, ajuste). Cantidades en UNIDADES; costo por
- * unidad y sin ISV.
+ * Un renglón del kárdex: qué entró o salió de una bodega de UNA
+ * presentación, cuánto quedó de ella y de dónde vino (compra, pedido,
+ * ajuste, caja abierta). Cantidad y existencia en esa presentación (2 =
+ * dos CJ48); costo de una de ella (una CJ48), sin ISV. Los renglones de
+ * antes de que hubiera existencia por presentación son de la base.
  *
  * @property int $id
  * @property int $bodega_id
  * @property int $producto_id
+ * @property int $presentacion_id
  * @property TipoMovimiento $tipo
  * @property int $cantidad
  * @property int $existencia
@@ -30,6 +33,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  * @property-read Bodega $bodega
  * @property-read Producto $producto
+ * @property-read Presentacion $presentacion
  * @property-read Compra|null $compra
  * @property-read Pedido|null $pedido
  * @property-read User|null $usuario
@@ -44,6 +48,7 @@ class MovimientoInventario extends Model
     protected $fillable = [
         'bodega_id',
         'producto_id',
+        'presentacion_id',
         'tipo',
         'cantidad',
         'existencia',
@@ -60,10 +65,11 @@ class MovimientoInventario extends Model
     protected function casts(): array
     {
         return [
-            'tipo'         => TipoMovimiento::class,
-            'cantidad'     => 'integer',
-            'existencia'   => 'integer',
-            'costo_unidad' => 'float',
+            'tipo'            => TipoMovimiento::class,
+            'presentacion_id' => 'integer',
+            'cantidad'        => 'integer',
+            'existencia'      => 'integer',
+            'costo_unidad'    => 'float',
         ];
     }
 
@@ -81,6 +87,14 @@ class MovimientoInventario extends Model
     public function producto(): BelongsTo
     {
         return $this->belongsTo(Producto::class);
+    }
+
+    /**
+     * @return BelongsTo<Presentacion, $this>
+     */
+    public function presentacion(): BelongsTo
+    {
+        return $this->belongsTo(Presentacion::class);
     }
 
     /**

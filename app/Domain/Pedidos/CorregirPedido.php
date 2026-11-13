@@ -23,8 +23,9 @@ use Illuminate\Support\Facades\DB;
  * (con el motivo) y al reimprimir se emite una nueva que la sustituye.
  * Si no cambió ninguna cantidad no se corrige: no se gasta un número.
  *
- * La existencia de la bodega se ajusta con la diferencia: lo que deja de
- * salir regresa y lo que sale de más se descuenta.
+ * La existencia de la bodega se ajusta con la diferencia, por
+ * presentación: lo que deja de salir regresa y lo que sale de más se
+ * descuenta (si para eso hay que abrir cajas, bodega dice cuáles).
  */
 final class CorregirPedido
 {
@@ -37,10 +38,11 @@ final class CorregirPedido
     /**
      * @param array<int, int|string|null> $sale [id de línea => cantidad que sale]; si falta una línea se queda como estaba
      * @param list<array{presentacion_id: int, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en otra presentación o uno que no venía (ver AjustarLineas)
+     * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener unidades sueltas
      */
-    public function ejecutar(Pedido $pedido, array $sale, User $usuario, ?string $motivo = null, array $nuevas = []): Pedido
+    public function ejecutar(Pedido $pedido, array $sale, User $usuario, ?string $motivo = null, array $nuevas = [], array $abrir = []): Pedido
     {
-        return DB::transaction(function () use ($pedido, $sale, $usuario, $motivo, $nuevas): Pedido {
+        return DB::transaction(function () use ($pedido, $sale, $usuario, $motivo, $nuevas, $abrir): Pedido {
             $pedido = Pedido::query()->lockForUpdate()->findOrFail($pedido->id);
 
             if (! $pedido->estaValidado()) {
@@ -60,7 +62,7 @@ final class CorregirPedido
             // Lo que ya salió se toma del kárdex. Los validados antes de que
             // hubiera inventario no sacaron nada: a esos no se les devuelve.
             if (SalidaDePedido::yaSalio($pedido)) {
-                $this->salida->ejecutar($pedido, TipoMovimiento::Correccion, $usuario, SalidaDePedido::yaSalido($pedido));
+                $this->salida->ejecutar($pedido, TipoMovimiento::Correccion, $usuario, SalidaDePedido::yaSalido($pedido), $abrir);
             }
 
             $factura = $pedido->factura()->first();

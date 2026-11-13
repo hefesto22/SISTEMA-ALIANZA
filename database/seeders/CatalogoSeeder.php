@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\File;
  *  - margen: solo si en el Excel el % estaba puesto a mano en esa fila.
  *
  * Cada producto queda con su UN (a ese precio) y, si la caja trae más de 1,
- * con su CJ (precio = UN × lo que trae). El historial arranca en la UN.
+ * con su CJ (costo y precio = UN × lo que trae). El historial arranca en la UN.
  *
  * Solo CREA lo que no existe: si se vuelve a correr no pisa precios que
  * ya se cambiaron en el sistema.
@@ -86,13 +86,12 @@ class CatalogoSeeder extends Seeder
                         'activo'       => true,
                     ]);
                     $producto->forceFill([
-                        'costo_unidad'          => $p['costo_unidad'],
                         'precio_actualizado_at' => $ahora,
                     ])->save();
 
-                    // La UN nace con el producto; aquí toma su precio y, si hay caja, se agrega.
+                    // La UN nace con el producto; aquí toma su costo y precio y, si hay caja, se agrega (costo y precio × lo que trae).
                     $base = Presentacion::query()->where('producto_id', $producto->id)->where('es_base', true)->firstOrFail();
-                    $base->forceFill(['precio' => $p['precio_unidad']])->save();
+                    $base->forceFill(['precio' => $p['precio_unidad'], 'costo' => $p['costo_unidad']])->save();
 
                     if ($p['unidades_por_caja'] > 1) {
                         Presentacion::query()->create([
@@ -100,6 +99,7 @@ class CatalogoSeeder extends Seeder
                             'unidad_medida_id' => $caja,
                             'contenido'        => $p['unidades_por_caja'],
                             'precio'           => round($p['precio_unidad'] * $p['unidades_por_caja'], 4),
+                            'costo'            => round($p['costo_unidad'] * $p['unidades_por_caja'], 4),
                         ]);
                     }
 

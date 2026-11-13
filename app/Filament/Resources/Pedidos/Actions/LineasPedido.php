@@ -8,6 +8,7 @@ use App\Domain\Inventario\Disponible;
 use App\Domain\Inventario\SalidaDePedido as SalidaDeBodega;
 use App\Filament\Schemas\Components\SalidaDePedido;
 use App\Models\Configuracion;
+use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Presentacion;
@@ -19,8 +20,10 @@ use Illuminate\Database\Eloquent\Builder;
  * Las líneas del pedido en el modal de Validar y de Corregir: cuánto sale
  * de cada producto (SalidaDePedido), en cada una de sus presentaciones. Lo
  * que no hay se marca "No hay" (sale 0). "Hay" es la existencia de la bodega
- * del pedido. Bodega también puede agregar un producto que no venía en el
- * pedido (paraAgregar()).
+ * del pedido, de cada presentación (las cajas cerradas y las sueltas
+ * aparte). Si las sueltas no alcanzan, bodega dice qué caja abre
+ * (aperturas()). Bodega también puede agregar un producto que no venía en
+ * el pedido (paraAgregar()).
  */
 final class LineasPedido
 {
@@ -42,12 +45,12 @@ final class LineasPedido
      * sale ahora. Con eso el modal va diciendo cuánto quedaría en la bodega.
      *
      * Al validar con "controlar existencias" encendido, "Sale" ya viene con
-     * lo que alcanza (repartiendo la existencia entre las presentaciones del
-     * mismo producto, en orden).
+     * lo que alcanza: cada caja de sus cajas y las sueltas de las sueltas y
+     * de las cajas que sobran (se pueden abrir).
      *
-     * Al corregir, "salio_unidades" es lo que este pedido ya sacó de la
-     * bodega (regresa si sale menos). Los validados antes de que hubiera
-     * inventario no sacaron nada y corregirlos no mueve la existencia
+     * Al corregir, "salio_pres" es lo que este pedido ya sacó de la bodega
+     * en esa presentación (regresa si sale menos). Los validados antes de que
+     * hubiera inventario no sacaron nada y corregirlos no mueve la existencia
      * ("mueve" = false).
      *
      * Primero van las líneas del pedido (en orden) y después, de cada
@@ -60,31 +63,31 @@ final class LineasPedido
     public static function datos(Pedido $pedido, bool $segunExistencia = false): array
     {
         $items = $pedido->items()->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida'])->orderBy('id')->get();
-        $hay = Disponible::existencia($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all());
+        $existencias = self::existencias($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all());
         [$mueve, $salio] = self::movimiento($pedido);
 
-        $ajustar = $segunExistencia && Configuracion::actual()->controlar_existencias;
-        $quedan = $hay;
+        $sale = [];
+
+        foreach ($items as $item) {
+            $sale[$item->id] = $item->cantidadFacturable();
+        }
+
+        if ($segunExistencia && Configuracion::actual()->controlar_existencias) {
+            $sale = self::loQueAlcanza($items->all(), $sale, $existencias);
+        }
+
         $filas = [];
 
         /** @var PedidoItem $item */
         foreach ($items as $item) {
-            $sale = $item->cantidadFacturable();
-
-            if ($ajustar) {
-                $contenido = max(1, $item->contenido);
-                $sale = min($sale, intdiv(max(0, $quedan[$item->producto_id] ?? 0), $contenido));
-                $quedan[$item->producto_id] = ($quedan[$item->producto_id] ?? 0) - $sale * $contenido;
-            }
-
-            $filas[] = self::fila($item->id, $item->presentacion, $item->producto, $item->cantidad, $sale, $hay, $salio, $mueve);
+            $filas[] = self::fila($item->id, $item->presentacion, $item->producto, $item->cantidad, $sale[$item->id], $existencias, $salio, $mueve);
         }
 
         // Las otras presentaciones que se venden de cada producto.
         foreach ($items->unique('producto_id') as $item) {
             foreach ($item->producto->presentacionesActivas() as $presentacion) {
                 if (! $items->contains(fn (PedidoItem $otra): bool => $otra->presentacion_id === $presentacion->id)) {
-                    $filas[] = self::fila(null, $presentacion, $item->producto, 0, 0, $hay, $salio, $mueve);
+                    $filas[] = self::fila(null, $presentacion, $item->producto, 0, 0, $existencias, $salio, $mueve);
                 }
             }
         }
@@ -127,25 +130,25 @@ final class LineasPedido
             ->get();
 
         [$mueve, $salio] = self::movimiento($pedido);
+        $existencias = self::existencias($pedido->bodega_id, $productos->modelKeys());
         $resultados = [];
 
         foreach ($productos as $producto) {
             $enBodega = $producto->getAttribute('existencia_bodega');
             $enBodega = is_numeric($enBodega) ? (int) $enBodega : 0;
-            $hay = [$producto->id => $enBodega];
             $activas = $producto->presentacionesActivas();
-            $sale = self::conQueSale($activas->all(), $enBodega);
+            $sale = self::conQueSale($activas->all(), $existencias);
             $filas = [];
 
             foreach ($activas->sortByDesc('contenido') as $presentacion) {
-                $filas[] = self::fila(null, $presentacion, $producto, 0, $presentacion->id === $sale?->id ? 1 : 0, $hay, $salio, $mueve);
+                $filas[] = self::fila(null, $presentacion, $producto, 0, $presentacion->id === $sale?->id ? 1 : 0, $existencias, $salio, $mueve);
             }
 
             $resultados[] = [
                 'producto_id'  => $producto->id,
                 'codigo'       => $producto->codigo,
                 'descripcion'  => $producto->descripcion,
-                'hay'          => $producto->existenciaEnTexto($enBodega),
+                'hay'          => self::hayTexto($producto, $existencias),
                 'hay_unidades' => $enBodega,
                 'filas'        => $filas,
             ];
@@ -156,37 +159,117 @@ final class LineasPedido
 
     /**
      * En qué presentación sale 1 al agregar un producto: la más grande que
-     * alcanza con lo que hay; sin nada en la bodega, la más grande; si hay
-     * algo pero no alcanza para ninguna, la más chica.
+     * tiene existencia en la bodega; sin nada, la más grande.
      *
      * @param array<int, Presentacion> $activas
+     * @param array<int, int> $existencias [presentacion_id => lo que hay en la bodega]
      */
-    private static function conQueSale(array $activas, int $enBodega): ?Presentacion
+    private static function conQueSale(array $activas, array $existencias): ?Presentacion
     {
         usort($activas, fn (Presentacion $a, Presentacion $b): int => $b->contenido <=> $a->contenido);
 
-        if ($activas === []) {
-            return null;
-        }
-
-        if ($enBodega <= 0) {
-            return $activas[0];
-        }
-
         foreach ($activas as $presentacion) {
-            if ($presentacion->contenido <= $enBodega) {
+            if (($existencias[$presentacion->id] ?? 0) > 0) {
                 return $presentacion;
             }
         }
 
-        return $activas[count($activas) - 1];
+        return $activas[0] ?? null;
+    }
+
+    /**
+     * Con "controlar existencias": lo que alcanza a salir de cada línea.
+     * Primero las cajas (cada una de sus cajas, en orden de línea) y después
+     * las sueltas: de las sueltas y, si no alcanzan, de las cajas que
+     * sobraron (se abren al validar).
+     *
+     * @param list<PedidoItem> $items
+     * @param array<int, int> $sale [id de línea => lo que pidió]
+     * @param array<int, int> $existencias [presentacion_id => lo que hay en la bodega]
+     *
+     * @return array<int, int>
+     */
+    private static function loQueAlcanza(array $items, array $sale, array $existencias): array
+    {
+        $quedan = $existencias;
+
+        foreach ($items as $item) {
+            if (! $item->presentacion->es_base) {
+                $sale[$item->id] = min($sale[$item->id], max(0, $quedan[$item->presentacion_id] ?? 0));
+                $quedan[$item->presentacion_id] = ($quedan[$item->presentacion_id] ?? 0) - $sale[$item->id];
+            }
+        }
+
+        foreach ($items as $item) {
+            if ($item->presentacion->es_base) {
+                $sueltas = max(0, $quedan[$item->presentacion_id] ?? 0) + (int) $item->producto->presentaciones
+                    ->filter(fn (Presentacion $caja): bool => ! $caja->es_base)
+                    ->sum(fn (Presentacion $caja): int => max(0, $quedan[$caja->id] ?? 0) * $caja->contenido);
+
+                $sale[$item->id] = min($sale[$item->id], $sueltas);
+                $quedan[$item->presentacion_id] = ($quedan[$item->presentacion_id] ?? 0) - $sale[$item->id];
+
+                // Lo que no hubo suelto sale de abrir cajas: ya no quedan para otra línea.
+                $falta = max(0, -($quedan[$item->presentacion_id] ?? 0));
+
+                foreach ($item->producto->presentaciones->filter(fn (Presentacion $caja): bool => ! $caja->es_base)->sortBy('contenido') as $caja) {
+                    while ($falta > 0 && ($quedan[$caja->id] ?? 0) > 0) {
+                        $quedan[$caja->id]--;
+                        $quedan[$item->presentacion_id] += $caja->contenido;
+                        $falta = max(0, -$quedan[$item->presentacion_id]);
+                    }
+                }
+            }
+        }
+
+        return $sale;
+    }
+
+    /**
+     * [presentacion_id => lo que hay en la bodega] de esos productos.
+     *
+     * @param array<mixed> $productoIds
+     *
+     * @return array<int, int>
+     */
+    private static function existencias(int $bodegaId, array $productoIds): array
+    {
+        if ($productoIds === []) {
+            return [];
+        }
+
+        /** @var array<int, int> $hay */
+        $hay = Existencia::query()
+            ->where('bodega_id', $bodegaId)
+            ->whereIn('producto_id', $productoIds)
+            ->pluck('cantidad', 'presentacion_id')
+            ->map(fn (mixed $cantidad): int => (int) $cantidad)
+            ->all();
+
+        return $hay;
+    }
+
+    /**
+     * "2 CJ48 · 3 CJ32 · 5 UN": lo que hay del producto en la bodega.
+     *
+     * @param array<int, int> $existencias
+     */
+    private static function hayTexto(Producto $producto, array $existencias): string
+    {
+        $suyas = [];
+
+        foreach ($producto->presentaciones as $presentacion) {
+            $suyas[$presentacion->id] = $existencias[$presentacion->id] ?? 0;
+        }
+
+        return $producto->existenciaPorPresentacion($suyas);
     }
 
     /**
      * Si el pedido mueve la existencia de la bodega y lo que ya sacó de cada
-     * producto (en unidades base). Al validar mueve y no ha sacado nada; al
-     * corregir, lo del kárdex. Los validados antes de que hubiera inventario
-     * no sacaron nada y corregirlos no mueve la existencia.
+     * presentación. Al validar mueve y no ha sacado nada; al corregir, lo del
+     * kárdex. Los validados antes de que hubiera inventario no sacaron nada
+     * y corregirlos no mueve la existencia.
      *
      * @return array{0: bool, 1: array<int, int>}
      */
@@ -227,16 +310,47 @@ final class LineasPedido
     }
 
     /**
+     * Las cajas que bodega dijo que se abren para tener sueltas (en la fila
+     * de la base de cada producto): [presentacion_id de la caja => cuántas]
+     * para ValidarDespacho / CorregirPedido.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<int, int>
+     */
+    public static function aperturas(array $data): array
+    {
+        $abrir = [];
+
+        foreach ((array) ($data['items'] ?? []) as $fila) {
+            if (! is_array($fila) || ! is_numeric($fila['abrir_de'] ?? null) || ! is_numeric($fila['abrir_cajas'] ?? null) || (int) $fila['abrir_cajas'] < 1) {
+                continue;
+            }
+
+            $abrir[(int) $fila['abrir_de']] = ($abrir[(int) $fila['abrir_de']] ?? 0) + (int) $fila['abrir_cajas'];
+        }
+
+        return $abrir;
+    }
+
+    /**
      * Una fila del modal: una presentación de un producto.
      *
-     * @param array<int, int> $hay unidades base en la bodega por producto
-     * @param array<int, int> $salio unidades base que ya sacó el pedido por producto
+     * @param array<int, int> $existencias lo que hay en la bodega por presentación
+     * @param array<int, int> $salio lo que ya sacó el pedido por presentación
      *
      * @return array<string, mixed>
      */
-    private static function fila(?int $id, Presentacion $presentacion, Producto $producto, int $cantidad, int $sale, array $hay, array $salio, bool $mueve): array
+    private static function fila(?int $id, Presentacion $presentacion, Producto $producto, int $cantidad, int $sale, array $existencias, array $salio, bool $mueve): array
     {
         $mayor = $producto->presentacionMayor();
+        $unidades = 0;
+        $salioUnidades = 0;
+
+        foreach ($producto->presentaciones as $suya) {
+            $unidades += ($existencias[$suya->id] ?? 0) * $suya->contenido;
+            $salioUnidades += ($salio[$suya->id] ?? 0) * $suya->contenido;
+        }
 
         return [
             'id'              => $id,
@@ -256,11 +370,17 @@ final class LineasPedido
             'mayor_sigla'     => $mayor?->sigla(),
             'mayor_contenido' => $mayor === null ? 1 : $mayor->contenido,
             'cantidad'        => $cantidad,
-            'hay'             => $producto->existenciaEnTexto($hay[$producto->id] ?? 0),
-            'hay_unidades'    => $hay[$producto->id] ?? 0,
-            'salio_unidades'  => $salio[$producto->id] ?? 0,
-            'mueve'           => $mueve,
-            'sale'            => $sale,
+            'hay'             => self::hayTexto($producto, $existencias),
+            'hay_unidades'    => $unidades,
+            'salio_unidades'  => $salioUnidades,
+            // De ESTA presentación: lo que hay en la bodega y lo que ya sacó el pedido.
+            'hay_pres'   => $existencias[$presentacion->id] ?? 0,
+            'salio_pres' => $salio[$presentacion->id] ?? 0,
+            'mueve'      => $mueve,
+            'sale'       => $sale,
+            // Solo en la base: qué caja se abre y cuántas, si las sueltas no alcanzan (lo dice bodega).
+            'abrir_de'    => null,
+            'abrir_cajas' => 0,
         ];
     }
 

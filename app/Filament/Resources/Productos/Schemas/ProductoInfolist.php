@@ -6,6 +6,8 @@ namespace App\Filament\Resources\Productos\Schemas;
 
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Filament\Resources\Productos\ProductoResource;
+use App\Filament\Support\Acceso;
+use App\Models\Existencia;
 use App\Models\Presentacion;
 use App\Models\Producto;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -16,13 +18,17 @@ use Filament\Schemas\Schema;
 
 /**
  * Ver producto: sus datos y, por presentación (UN, CJ12, FD6…), si se
- * vende, el precio de venta (calculado o fijo), el costo y la utilidad.
+ * vende, el precio de venta (calculado o fijo), cuánto hay (en su bodega o
+ * en todas), su costo promedio y la utilidad.
  */
 class ProductoInfolist
 {
     public static function configure(Schema $schema): Schema
     {
         $verCostos = ProductoResource::puedeVerCostos();
+        $usuario = Acceso::usuario();
+        $todas = $usuario === null || $usuario->veTodasLasBodegas();
+        $bodegaId = $usuario?->bodega_id;
 
         return $schema
             ->components([
@@ -64,7 +70,7 @@ class ProductoInfolist
                 Section::make('Presentaciones y precios (todas las bodegas)')
                     ->description(fn (Producto $record): string => ($record->gravado
                         ? 'Precio de venta con ISV incluido. La utilidad es sobre el costo con ISV.'
-                        : 'Producto exento: el precio de venta no lleva ISV.').' El costo es uno solo, por '.$record->presentacionBase()->palabra(1).'; el de cada presentación es ese × lo que trae.')
+                        : 'Producto exento: el precio de venta no lleva ISV.').' Cada presentación lleva su existencia y su costo promedio (lo que se ha comprado de ella); las sueltas también se llenan al abrir una caja.')
                     ->columns(3)
                     ->columnSpanFull()
                     ->schema([
@@ -75,6 +81,7 @@ class ProductoInfolist
                                 TableColumn::make('Presentación'),
                                 TableColumn::make('Se vende'),
                                 TableColumn::make('Precio de venta'),
+                                TableColumn::make('Existencia'),
                                 $verCostos ? TableColumn::make('Costo') : null,
                                 $verCostos ? TableColumn::make('Utilidad') : null,
                             ])))
@@ -92,11 +99,14 @@ class ProductoInfolist
                                     ->helperText(fn (Presentacion $record): string => ($verCostos && $record->precio_fijo ? 'fijo · ' : '').($record->producto->gravado ? 'sin ISV '.lempiras($record->precio) : 'exento'))
                                     ->weight('bold')
                                     ->color(fn (Presentacion $record): string => $record->precio > 0 ? 'primary' : 'danger'),
+                                TextEntry::make('existencia')
+                                    ->state(fn (Presentacion $record): string => (string) $record->existencias->filter(fn (Existencia $existencia): bool => $todas || $existencia->bodega_id === $bodegaId)->sum('cantidad'))
+                                    ->helperText($todas ? 'todas las bodegas' : 'en su bodega'),
                                 $verCostos ? TextEntry::make('costo')
                                     ->state(fn (Presentacion $record): string => lempiras($record->costoConIsv(), 4))
-                                    ->helperText(fn (Presentacion $record): ?string => $record->producto->gravado ? 'neto '.lempiras($record->costo(), 4) : null) : null,
+                                    ->helperText(fn (Presentacion $record): ?string => $record->producto->gravado ? 'sin ISV '.lempiras($record->costo, 4) : null) : null,
                                 $verCostos ? TextEntry::make('utilidad')
-                                    ->state(fn (Presentacion $record): string => self::porcentaje(CalculadoraPrecio::margenReal($record->costo(), $record->precio)))
+                                    ->state(fn (Presentacion $record): string => self::porcentaje(CalculadoraPrecio::margenReal($record->costo, $record->precio)))
                                     ->helperText(fn (Presentacion $record): string => $record->precio_fijo ? 'precio fijo' : 'con '.self::porcentaje($record->margenAplicado()).($record->margen !== null ? ' (de la presentación)' : '')) : null,
                             ]))),
                         TextEntry::make('precio_actualizado_at')
