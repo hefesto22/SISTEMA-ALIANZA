@@ -37,6 +37,8 @@ final class AbrirCaja
 
     public function ejecutar(int $bodegaId, Presentacion $caja, int $cajas, ?User $usuario = null, ?int $pedidoId = null, ?string $nota = null): void
     {
+        // Con su costo de este momento: una compra de hace un rato lo pudo cambiar.
+        $caja->refresh();
         $caja->loadMissing(['producto.categoria', 'producto.presentaciones.unidadMedida', 'unidadMedida']);
         $producto = $caja->producto;
 
