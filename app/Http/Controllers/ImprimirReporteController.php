@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Domain\Reportes\AlcanceReporte;
+use App\Domain\Reportes\ComprasDelPeriodo;
 use App\Domain\Reportes\InventarioValorizado;
 use App\Domain\Reportes\Periodo;
 use App\Domain\Reportes\VentasDelPeriodo;
@@ -24,6 +25,7 @@ use Illuminate\Http\Response;
  * sola la ventana de imprimir.
  *
  * Uso: /reportes/ventas/imprimir?desde=2026-11-01&hasta=2026-11-30&bodega=2&proveedor=5&ver=vendedores
+ *      /reportes/compras/imprimir?desde=2026-11-01&hasta=2026-11-14&proveedor=5&ver=productos
  *      /reportes/inventario/imprimir?bodega=2&proveedor=5&buscar=aceite&todos=1
  */
 class ImprimirReporteController extends Controller
@@ -45,6 +47,31 @@ class ImprimirReporteController extends Controller
             'empresa'   => DatosFiscales::actual()->nombreParaMostrar(),
             'usuario'   => $usuario->name,
             'parte'     => 'reportes.partes.ventas',
+            'd'         => $reporte->datos($ver),
+            'embebido'  => $request->boolean('embebido'),
+        ]);
+    }
+
+    /**
+     * Con un proveedor es la hoja que se le manda: arriba su razón social y su RTN.
+     */
+    public function compras(Request $request): Response
+    {
+        $usuario = self::usuario($request, 'View:ReporteCompras');
+
+        $reporte = new ComprasDelPeriodo(
+            Periodo::de('otro', $request->string('desde')->toString(), $request->string('hasta')->toString()),
+            AlcanceReporte::bodega($usuario, $request->input('bodega')),
+            AlcanceReporte::proveedor($request->input('proveedor')),
+        );
+        $ver = ComprasDelPeriodo::ver($request->input('ver'));
+
+        return response()->view('reportes.imprimir', [
+            'titulo'    => $reporte->titulo($ver),
+            'subtitulo' => collect([$reporte->fichaProveedor(), $reporte->periodo->texto(), $reporte->nombreBodega()])->filter()->implode(' · '),
+            'empresa'   => DatosFiscales::actual()->nombreParaMostrar(),
+            'usuario'   => $usuario->name,
+            'parte'     => 'reportes.partes.compras',
             'd'         => $reporte->datos($ver),
             'embebido'  => $request->boolean('embebido'),
         ]);

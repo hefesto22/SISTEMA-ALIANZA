@@ -41,6 +41,8 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
     // Reportes para imprimir o guardar como PDF (los mismos datos que en pantalla).
     Route::get('reportes/ventas/imprimir', [ImprimirReporteController::class, 'ventas'])
         ->name('reportes.ventas.imprimir');
+    Route::get('reportes/compras/imprimir', [ImprimirReporteController::class, 'compras'])
+        ->name('reportes.compras.imprimir');
     Route::get('reportes/inventario/imprimir', [ImprimirReporteController::class, 'inventario'])
         ->name('reportes.inventario.imprimir');
 });

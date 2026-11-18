@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Reportes;
 
+use App\Domain\Comisiones\PeriodoComision;
+use App\Enums\FrecuenciaComision;
+use App\Models\Configuracion;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Throwable;
@@ -11,8 +14,11 @@ use Throwable;
 /**
  * Días que abarca un reporte, de un día a otro (los dos completos).
  *
- * Se arma con un atajo (hoy, ayer, esta semana, este mes, el mes pasado) o
- * con dos fechas ("otro"). Si vienen al revés se acomodan.
+ * Se arma con un atajo (hoy, ayer, esta semana o la pasada, esta quincena
+ * o la pasada, este mes o el pasado) o con dos fechas ("otro"). Si vienen al
+ * revés se acomodan. Lo que va en curso (semana, quincena, mes) llega hasta
+ * hoy. Las quincenas son las de la empresa: del 1 al día de corte (14) y de
+ * ahí a fin de mes, las mismas de Comisiones.
  */
 final readonly class Periodo
 {
@@ -39,22 +45,37 @@ final readonly class Periodo
     }
 
     /**
-     * @param string $clave hoy, ayer, semana, mes, mes_pasado u otro
+     * @param string $clave hoy, ayer, semana, semana_pasada, quincena, quincena_pasada, mes, mes_pasado u otro
      * @param mixed $desde con "otro": fecha de inicio (Y-m-d)
      * @param mixed $hasta con "otro": fecha final (Y-m-d)
+     * @param int|null $corte último día de la primera quincena (sin darlo, el de la configuración)
      */
-    public static function de(string $clave, mixed $desde = null, mixed $hasta = null, ?CarbonImmutable $hoy = null): self
+    public static function de(string $clave, mixed $desde = null, mixed $hasta = null, ?CarbonImmutable $hoy = null, ?int $corte = null): self
     {
         $hoy = ($hoy ?? CarbonImmutable::now())->startOfDay();
+        $semanaPasada = $hoy->subWeek()->startOfWeek(CarbonInterface::MONDAY);
 
         return match ($clave) {
-            'hoy'        => new self($hoy, $hoy),
-            'ayer'       => new self($hoy->subDay(), $hoy->subDay()),
-            'semana'     => new self($hoy->startOfWeek(CarbonInterface::MONDAY), $hoy),
-            'mes_pasado' => new self($hoy->subMonthNoOverflow()->startOfMonth(), $hoy->subMonthNoOverflow()->endOfMonth()),
-            'otro'       => new self(self::fecha($desde) ?? $hoy->startOfMonth(), self::fecha($hasta) ?? $hoy),
-            default      => new self($hoy->startOfMonth(), $hoy),
+            'hoy'             => new self($hoy, $hoy),
+            'ayer'            => new self($hoy->subDay(), $hoy->subDay()),
+            'semana'          => new self($hoy->startOfWeek(CarbonInterface::MONDAY), $hoy),
+            'semana_pasada'   => new self($semanaPasada, $semanaPasada->addDays(6)),
+            'quincena'        => new self(self::quincena($hoy, $corte)->desde, $hoy),
+            'quincena_pasada' => self::quincena(self::quincena($hoy, $corte)->desde->subDay(), $corte),
+            'mes_pasado'      => new self($hoy->subMonthNoOverflow()->startOfMonth(), $hoy->subMonthNoOverflow()->endOfMonth()),
+            'otro'            => new self(self::fecha($desde) ?? $hoy->startOfMonth(), self::fecha($hasta) ?? $hoy),
+            default           => new self($hoy->startOfMonth(), $hoy),
         };
+    }
+
+    /**
+     * La quincena completa en que cae la fecha.
+     */
+    public static function quincena(CarbonImmutable $fecha, ?int $corte = null): self
+    {
+        $quincena = PeriodoComision::para($fecha, FrecuenciaComision::Quincenal, $corte ?? Configuracion::actual()->comision_corte);
+
+        return new self($quincena->desde, $quincena->hasta);
     }
 
     /**

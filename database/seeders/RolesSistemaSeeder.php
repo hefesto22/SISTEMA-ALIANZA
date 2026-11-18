@@ -26,7 +26,7 @@ class RolesSistemaSeeder extends Seeder
     private const TODO = ['viewAny', 'view', 'create', 'update', 'delete', 'restore', 'forceDelete', 'forceDeleteAny', 'restoreAny', 'replicate', 'reorder'];
 
     /** Páginas de reportes (Shield: "View:Pagina"). Cada quien ve lo de su alcance. */
-    private const REPORTES = ['View:ReporteVentas', 'View:ReporteInventario', 'View:KpisVentas'];
+    private const REPORTES = ['View:ReporteVentas', 'View:ReporteCompras', 'View:ReporteInventario', 'View:KpisVentas'];
 
     public function run(): void
     {

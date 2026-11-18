@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proveedores;
 
+use App\Filament\Pages\ReporteCompras;
 use App\Filament\Resources\Proveedores\Pages\CreateProveedor;
 use App\Filament\Resources\Proveedores\Pages\EditProveedor;
 use App\Filament\Resources\Proveedores\Pages\ListProveedores;
 use App\Filament\Resources\Proveedores\RelationManagers\CategoriasRelationManager;
 use App\Models\Proveedor;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -119,6 +121,13 @@ class ProveedorResource extends Resource
                 TernaryFilter::make('activo'),
             ])
             ->recordActions([
+                // Lo que se le compró: el reporte ya con este proveedor (para mandárselo).
+                Action::make('compras')
+                    ->label('Compras')
+                    ->icon(Heroicon::OutlinedInboxArrowDown)
+                    ->color('gray')
+                    ->url(fn (Proveedor $record): string => ReporteCompras::delProveedor($record))
+                    ->visible(fn (): bool => ReporteCompras::canAccess()),
                 EditAction::make(),
             ]);
     }
