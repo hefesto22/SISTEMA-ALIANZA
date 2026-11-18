@@ -20,9 +20,10 @@ use Filament\Support\Icons\Heroicon;
 
 /**
  * Mis metas (el vendedor): en cada grupo de comisión cuánto lleva vendido
- * en la quincena (o el mes), el escalón en que va, cuánto le falta para el
- * siguiente, lo que lleva ganado y, a este ritmo, cómo cerraría. Además sus
- * clientes atendidos, el ticket promedio y lo que más vende.
+ * en el mes (la meta es del mes; en la segunda quincena se suma la
+ * primera), el escalón en que va, cuánto le falta para el siguiente, lo que
+ * lleva ganado y, a este ritmo, cómo cerraría el mes. Además sus clientes
+ * atendidos, el ticket promedio y lo que más vende.
  *
  * Es lo mismo que ve administración en Comisiones, solo de él.
  *
@@ -107,16 +108,19 @@ class MisMetas extends Page
         $hoy = CarbonImmutable::today();
         $corridos = $periodo->diasCorridos($hoy);
         $enCurso = $calculo->cierre() === null && $periodo->enCurso($hoy);
+        // "A este ritmo" es del mes: desde el día en que empieza a contar hasta fin de mes.
+        $mes = new PeriodoComision($calculo->cuentaDesde(), $periodo->desde->endOfMonth()->startOfDay(), $periodo->frecuencia);
         $kpis = $conKpis ? new KpisVentas(new Periodo($periodo->desde, $periodo->hasta), null, $vendedorId) : null;
         $suFila = $kpis === null ? null : (collect($kpis->vendedores())->firstWhere('id', $vendedorId));
 
         return [
             'periodo'   => $periodo,
             'cierre'    => $calculo->cierre(),
+            'anterior'  => $calculo->cierre() === null ? $calculo->anteriorDelMes() : null,
             'resumen'   => $resumen,
             'enCurso'   => $enCurso,
             'quedan'    => max(0, $periodo->dias() - $corridos),
-            'ritmo'     => $resumen === null ? [] : self::ritmo($resumen->filas, $enCurso ? $corridos : 0, $periodo->dias()),
+            'ritmo'     => $resumen === null ? [] : self::ritmo($resumen->filas, $enCurso ? $mes->diasCorridos($hoy) : 0, $mes->dias()),
             'kpis'      => $kpis?->resumen(),
             'cobertura' => $suFila['cobertura'] ?? null,
             'cartera'   => $suFila['cartera'] ?? null,
@@ -125,8 +129,8 @@ class MisMetas extends Page
     }
 
     /**
-     * A este ritmo: si sigue vendiendo igual lo que queda del periodo,
-     * cuánto vendería en cada grupo, con qué % y cuánto ganaría.
+     * A este ritmo: si sigue vendiendo igual lo que queda del mes, cuánto
+     * vendería en el mes en cada grupo, con qué % y cuánto ganaría en el mes.
      *
      * @param list<FilaComision> $filas
      *
@@ -141,11 +145,11 @@ class MisMetas extends Page
         $ritmo = [];
 
         foreach ($filas as $fila) {
-            if ($fila->base <= 0) {
+            if ($fila->baseMes() <= 0) {
                 continue;
             }
 
-            $venta = round($fila->base / $corridos * $dias, 2);
+            $venta = round($fila->baseMes() / $corridos * $dias, 2);
             $ritmo[$fila->grupoId] = ['venta' => $venta, 'porcentaje' => $fila->escala->porcentaje($venta), 'comision' => $fila->escala->comision($venta)];
         }
 

@@ -12,6 +12,7 @@ use App\Models\ComisionLiquidacion;
 use App\Models\ComisionMeta;
 use App\Models\ComisionPeriodo;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -32,9 +33,22 @@ use stdClass;
  *    después de cerrarlo (rezagadas), y
  *  - descontadas, las facturas que ya se pagaron y después se anularon.
  * Así nada se paga dos veces ni se queda sin pagar.
+ *
+ * La meta y los escalones son del MES. En la segunda quincena se suma lo de
+ * la primera (anteriorDelMes): el escalón sale de lo vendido en el mes y se
+ * paga lo que gana en el mes menos el adelanto de la primera quincena.
  */
 final class ComisionesDelPeriodo
 {
+    /** La quincena anterior del mes ya se cerró: se suma lo que se pagó. */
+    public const ANTERIOR_CERRADA = 'cerrada';
+
+    /** Todavía no se cierra: se suma así como va y hay que cerrarla antes que esta. */
+    public const ANTERIOR_POR_CERRAR = 'por cerrar';
+
+    /** No se cerró y es de antes del primer cierre: no cuenta para el mes ni se paga. */
+    public const ANTERIOR_FUERA = 'fuera';
+
     private bool $buscoCierre = false;
 
     private ?ComisionPeriodo $cierre = null;
@@ -44,6 +58,14 @@ final class ComisionesDelPeriodo
 
     /** @var list<ResumenVendedor>|null */
     private ?array $vendedores = null;
+
+    /** @var array<int, array<int, array{base: float, pagado: float}>>|null [vendedor][grupo] */
+    private ?array $antes = null;
+
+    private bool $buscoAnterior = false;
+
+    /** @var array{periodo: PeriodoComision, estado: string}|null */
+    private ?array $anterior = null;
 
     public function __construct(
         public readonly PeriodoComision $periodo,
@@ -95,6 +117,66 @@ final class ComisionesDelPeriodo
             'facturas'   => array_sum(array_map(fn (ResumenVendedor $v): int => $v->facturas, $vendedores)),
             'vendedores' => count(array_filter($vendedores, fn (ResumenVendedor $v): bool => $v->ventaTotal != 0.0 || $v->comision() > 0)),
         ];
+    }
+
+    /**
+     * Lo que ya se les adelantó en el mes (la primera quincena), de todos.
+     */
+    public function adelantos(): float
+    {
+        $total = 0.0;
+
+        foreach ($this->vendedores() as $vendedor) {
+            foreach ($vendedor->filas as $fila) {
+                $total += $fila->pagadoAntes;
+            }
+        }
+
+        return round($total, 2);
+    }
+
+    /**
+     * La quincena anterior del mismo mes y cómo cuenta para la meta del mes
+     * (ANTERIOR_CERRADA, ANTERIOR_POR_CERRAR o ANTERIOR_FUERA). Null si este
+     * periodo empieza el día 1 (primera quincena o mes completo).
+     *
+     * @return array{periodo: PeriodoComision, estado: string}|null
+     */
+    public function anteriorDelMes(): ?array
+    {
+        if ($this->buscoAnterior) {
+            return $this->anterior;
+        }
+
+        $this->buscoAnterior = true;
+
+        if ($this->periodo->desde->day === 1) {
+            return $this->anterior = null;
+        }
+
+        $inicio = $this->periodo->desde->startOfMonth();
+        $estado = match (true) {
+            ComisionPeriodo::query()->whereDate('desde', '>=', $inicio->toDateString())->whereDate('hasta', '<', $this->periodo->desde->toDateString())->exists() => self::ANTERIOR_CERRADA,
+            // Ya se venían cerrando comisiones: esa quincena se tiene que cerrar (y pagar) antes que esta.
+            ComisionPeriodo::query()->whereDate('hasta', '<', $inicio->toDateString())->exists() => self::ANTERIOR_POR_CERRAR,
+            default                                                                              => self::ANTERIOR_FUERA,
+        };
+
+        return $this->anterior = [
+            'periodo' => new PeriodoComision($inicio, $this->periodo->desde->subDay(), $this->periodo->frecuencia),
+            'estado'  => $estado,
+        ];
+    }
+
+    /**
+     * Desde qué día cuenta la venta del mes (para "a este ritmo"): el 1, o
+     * el inicio de este periodo si la quincena anterior no cuenta.
+     */
+    public function cuentaDesde(): CarbonImmutable
+    {
+        $anterior = $this->anteriorDelMes();
+
+        return $anterior === null || $anterior['estado'] === self::ANTERIOR_FUERA ? $this->periodo->desde : $anterior['periodo']->desde;
     }
 
     /**
@@ -253,8 +335,9 @@ final class ComisionesDelPeriodo
             }
         }
 
+        $antes = $this->antes();
         $grupos = ComisionGrupo::query()->activos()->orderBy('nombre')->get();
-        $usuarios = $this->usuarios(array_keys($total));
+        $usuarios = $this->usuarios(array_values(array_unique([...array_keys($total), ...array_keys($antes)])));
         /** @var array<int, array<int, ComisionMeta>> $metas [vendedor][grupo] */
         $metas = [];
 
@@ -271,6 +354,7 @@ final class ComisionesDelPeriodo
                 $meta = $metas[$id][$grupo->id] ?? null;
                 $propia = $meta !== null && ! $meta->escala()->vacia();
                 $datos = $porGrupo[$id][$grupo->id] ?? [];
+                $delMes = $antes[$id][$grupo->id] ?? null;
 
                 $filas[] = FilaComision::calcular(
                     grupoId: $grupo->id,
@@ -280,6 +364,8 @@ final class ComisionesDelPeriodo
                     facturas: count($datos['facturas'] ?? []),
                     escala: $meta !== null && $propia ? $meta->escala() : $grupo->escala(),
                     propia: $propia,
+                    baseAntes: $delMes['base'] ?? 0.0,
+                    pagadoAntes: $delMes['pagado'] ?? 0.0,
                 );
             }
 
@@ -295,6 +381,57 @@ final class ComisionesDelPeriodo
         }
 
         return $resumenes;
+    }
+
+    /**
+     * Lo que ya llevaba el mes cada vendedor en cada grupo, de la quincena
+     * anterior: lo que se pagó si se cerró, o así como va si falta cerrarla.
+     *
+     * @return array<int, array<int, array{base: float, pagado: float}>> [vendedor][grupo]
+     */
+    private function antes(): array
+    {
+        if ($this->antes !== null) {
+            return $this->antes;
+        }
+
+        $anterior = $this->anteriorDelMes();
+        $antes = [];
+
+        if ($anterior === null || $anterior['estado'] === self::ANTERIOR_FUERA) {
+            return $this->antes = [];
+        }
+
+        if ($anterior['estado'] === self::ANTERIOR_CERRADA) {
+            /** @var list<stdClass> $filas */
+            $filas = $this->conAlcance(
+                DB::table('comision_liquidaciones as cl')
+                    ->join('comision_periodos as cp', 'cp.id', '=', 'cl.comision_periodo_id')
+                    ->where('cp.desde', '>=', $anterior['periodo']->desde->toDateString())
+                    ->where('cp.hasta', '<', $this->periodo->desde->toDateString()),
+                'cl.vendedor_id',
+            )
+                ->groupBy('cl.vendedor_id', 'cl.comision_grupo_id')
+                ->selectRaw('cl.vendedor_id, cl.comision_grupo_id, SUM(cl.base) AS base, SUM(cl.comision) AS pagado')
+                ->get()
+                ->all();
+
+            foreach ($filas as $f) {
+                $antes[self::entero($f->vendedor_id)][self::entero($f->comision_grupo_id)] = ['base' => self::numero($f->base), 'pagado' => self::numero($f->pagado)];
+            }
+
+            return $this->antes = $antes;
+        }
+
+        foreach ((new self($anterior['periodo'], $this->bodegaId, $this->vendedorId))->vendedores() as $vendedor) {
+            foreach ($vendedor->filas as $fila) {
+                if ($fila->base != 0.0 || $fila->comision != 0.0) {
+                    $antes[$vendedor->id][$fila->grupoId] = ['base' => $fila->base, 'pagado' => $fila->comision];
+                }
+            }
+        }
+
+        return $this->antes = $antes;
     }
 
     /**
@@ -344,6 +481,8 @@ final class ComisionesDelPeriodo
                 porcentaje: $l->porcentaje,
                 comision: $l->comision,
                 meta: $l->meta,
+                baseAntes: $l->base_antes,
+                pagadoAntes: $l->pagado_antes,
             ))->all());
 
             $resumenes[] = new ResumenVendedor(

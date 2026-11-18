@@ -6,7 +6,7 @@ namespace App\Domain\Comisiones;
 
 /**
  * Escala de comisión de un grupo: desde cuánto se vende (sin ISV, en el
- * periodo) y qué % se paga. Ej. LIMPIEZA:
+ * mes) y qué % se paga. Ej. LIMPIEZA:
  *
  *   desde L 0       → 0.5 %
  *   desde L 80,000  → 1 %
@@ -14,6 +14,7 @@ namespace App\Domain\Comisiones;
  *
  * Se paga el % del escalón que alcanzó sobre TODA la venta del grupo:
  * L 105,000 → 2 % de 105,000 = L 2,100. La meta es el escalón más alto.
+ * Es del mes aunque se pague por quincena (ver FilaComision).
  *
  * Se guarda en JSON (comision_grupos.escalones, comision_metas.escalones)
  * con el porcentaje en % (2 = 2 %), ordenado de menor a mayor.
@@ -190,6 +191,20 @@ final class Escala
     public function paraGuardar(): array
     {
         return $this->escalones;
+    }
+
+    /**
+     * Para el repetidor del formulario: el "desde" con separador de miles
+     * ("80,000"), como lo muestra el campo.
+     *
+     * @return list<array{desde: string, porcentaje: float}>
+     */
+    public function paraFormulario(): array
+    {
+        return array_map(fn (array $e): array => [
+            'desde'      => number_format($e['desde'], fmod($e['desde'], 1.0) === 0.0 ? 0 : 2, '.', ','),
+            'porcentaje' => $e['porcentaje'],
+        ], $this->escalones);
     }
 
     public function igualA(self $otra): bool

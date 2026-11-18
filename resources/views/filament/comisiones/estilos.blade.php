@@ -22,6 +22,9 @@
     .cm-total { text-align: right; }
     .cm-total span { display: block; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rp-tenue); }
     .cm-total strong { font-size: 1.15rem !important; color: var(--rp-acento); }
+    /* Debajo de un monto: "L 22.00 del mes − L 1.50 adelantado". */
+    .rp td.n small .cm-nw { white-space: nowrap; }
+    .rp td.n small { display: block; max-width: 12rem; margin-inline-start: auto; white-space: normal; font-size: 0.72rem; font-weight: 400; line-height: 1.3; color: var(--rp-tenue); }
 
     .cm-enlace { font-weight: 600; color: var(--primary-600); text-decoration: underline; text-underline-offset: 2px; }
     .dark .cm-enlace { color: var(--primary-400); }

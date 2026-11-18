@@ -13,7 +13,8 @@ use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 /**
  * Las comisiones de un periodo en Excel, para pagar: una hoja con lo de
  * cada vendedor (venta y comisión) y otra con el detalle por grupo
- * (venta, anuladas, base, %, comisión y meta).
+ * (venta, anuladas, base, venta del mes, %, comisión del mes, lo ya
+ * adelantado, lo que se paga y la meta). La meta es del mes.
  */
 final class ComisionesExcel implements Export, WithMultipleSheets
 {
@@ -45,7 +46,7 @@ final class ComisionesExcel implements Export, WithMultipleSheets
                 'Facturas'             => HojaReporte::ENTERO,
                 'Venta neta (sin ISV)' => HojaReporte::DINERO,
                 'Venta en grupos'      => HojaReporte::DINERO,
-                'Comisión'             => HojaReporte::DINERO,
+                'A pagar'              => HojaReporte::DINERO,
             ],
             array_map(fn (ResumenVendedor $v): array => [
                 (string) $v->codigo,
@@ -74,7 +75,10 @@ final class ComisionesExcel implements Export, WithMultipleSheets
                     $f->venta,
                     $f->anulado,
                     $f->base,
+                    $f->baseMes(),
                     $f->porcentaje / 100,
+                    $f->comisionMes(),
+                    $f->pagadoAntes,
                     $f->comision,
                     $f->meta,
                     self::avance($f),
@@ -94,14 +98,17 @@ final class ComisionesExcel implements Export, WithMultipleSheets
                 'Escala'           => HojaReporte::TEXTO,
                 'Venta'            => HojaReporte::DINERO,
                 'Anuladas'         => HojaReporte::DINERO,
-                'Base'             => HojaReporte::DINERO,
+                'Base del periodo' => HojaReporte::DINERO,
+                'Venta del mes'    => HojaReporte::DINERO,
                 '%'                => HojaReporte::PORCENTAJE,
-                'Comisión'         => HojaReporte::DINERO,
-                'Meta'             => HojaReporte::DINERO,
+                'Comisión del mes' => HojaReporte::DINERO,
+                'Ya adelantado'    => HojaReporte::DINERO,
+                'A pagar'          => HojaReporte::DINERO,
+                'Meta del mes'     => HojaReporte::DINERO,
                 'Avance a la meta' => HojaReporte::PORCENTAJE,
             ],
             $filas,
-            ['', 'Total', '', '', null, null, $t['base'], null, $t['comision'], null, null],
+            ['', 'Total', '', '', null, null, $t['base'], null, null, null, $this->calculo->adelantos(), $t['comision'], null, null],
         );
     }
 

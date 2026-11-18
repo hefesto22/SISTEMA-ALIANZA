@@ -20,6 +20,9 @@ use Illuminate\Support\Facades\DB;
  *  - Se cierra el último día del periodo o después.
  *  - No se cierra uno que ya está cerrado ni uno anterior a otro cerrado
  *    (el orden importa: lo rezagado y lo anulado pasan al siguiente).
+ *  - La segunda quincena, después de la primera: la meta es del mes y se
+ *    paga lo del mes menos el adelanto (salvo que la primera sea de antes
+ *    del primer cierre: esa no cuenta).
  *  - De uno en uno (dos cierres al mismo tiempo no pagan doble).
  */
 final class CerrarPeriodoComision
@@ -45,6 +48,12 @@ final class CerrarPeriodoComision
             }
 
             $calculo = new ComisionesDelPeriodo($periodo);
+            $anterior = $calculo->anteriorDelMes();
+
+            if ($anterior !== null && $anterior['estado'] === ComisionesDelPeriodo::ANTERIOR_POR_CERRAR) {
+                throw new ReglaNegocioException('Primero cierre la quincena del '.$anterior['periodo']->texto().': la meta es del mes y lo de esa quincena se suma aquí.');
+            }
+
             $detalle = $calculo->detalle();
             $vendedores = $calculo->vendedores();
             $totales = $calculo->totales();
@@ -64,7 +73,7 @@ final class CerrarPeriodoComision
 
             foreach ($vendedores as $vendedor) {
                 foreach ($vendedor->filas as $fila) {
-                    if ($fila->venta == 0.0 && $fila->anulado == 0.0) {
+                    if ($fila->venta == 0.0 && $fila->anulado == 0.0 && $fila->comision == 0.0) {
                         continue;
                     }
 
@@ -76,6 +85,8 @@ final class CerrarPeriodoComision
                         'venta'               => $fila->venta,
                         'anulado'             => $fila->anulado,
                         'base'                => $fila->base,
+                        'base_antes'          => $fila->baseAntes,
+                        'pagado_antes'        => $fila->pagadoAntes,
                         'porcentaje'          => $fila->porcentaje,
                         'comision'            => $fila->comision,
                         'meta'                => $fila->meta,

@@ -143,7 +143,7 @@ class ComisionGrupoResource extends Resource
                     ->mutateRecordDataUsing(fn (array $data, ComisionGrupo $record): array => [
                         ...$data,
                         'categorias' => $record->categorias->pluck('id')->all(),
-                        'escalones'  => $record->escala()->paraGuardar(),
+                        'escalones'  => $record->escala()->paraFormulario(),
                     ])
                     ->using(fn (array $data, ComisionGrupo $record): ComisionGrupo => self::guardar($record, $data)),
                 DeleteAction::make(),

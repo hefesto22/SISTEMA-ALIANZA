@@ -35,7 +35,7 @@
                                 <span>{{ $fila->grupo }}</span>
                                 <span @class(['cm-pct', 'llego' => $fila->llegoALaMeta()])>{{ $porciento($fila->porcentaje) }}</span>
                             </h3>
-                            <div class="cm-cifra"><strong style="font-size: 1.15rem">{{ lempiras($fila->base) }}</strong><span>gana {{ lempiras($fila->comision) }}</span></div>
+                            <div class="cm-cifra"><strong style="font-size: 1.15rem">{{ lempiras($fila->baseMes()) }}</strong><span>en el mes · gana {{ lempiras($fila->comision) }}</span></div>
                             @include('filament.comisiones.avance', ['fila' => $fila])
                         </div>
                     @endforeach

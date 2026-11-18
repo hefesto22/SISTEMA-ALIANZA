@@ -49,7 +49,8 @@ use Maatwebsite\Excel\Facades\Excel;
  * Comisiones por grupo sobre la venta neta FACTURADA (sin ISV, ya con
  * descuentos): se paga el % del escalón alcanzado sobre toda la venta del
  * grupo. Quincenal (1-14 y 15-fin de mes) o mensual; al cerrar queda lo
- * pagado y lo anulado después se descuenta en el siguiente.
+ * pagado y lo anulado después se descuenta en el siguiente. La meta es del
+ * mes: la primera quincena es adelanto y la segunda completa el mes.
  *
  * LIMPIEZA: 0.5% desde 0, 1% desde 800, 2% desde 1,000 (montos chicos para
  * las cuentas). El jabón (LIMPIEZA, gravado) a L 100 sin ISV; el arroz
@@ -245,6 +246,47 @@ test('al cerrar queda lo pagado; lo que se anula después se descuenta en el sig
     expect((new ComisionesDelPeriodo(quincena('2026-12-01')))->anuladas())->toBe(0);
 });
 
+test('la meta es del mes: la primera quincena se paga como adelanto y a fin de mes se completa con el escalón del mes', function (): void {
+    // Ya se venían cerrando comisiones (octubre cerrado): la primera quincena se tiene que cerrar antes.
+    app(CerrarPeriodoComision::class)->ejecutar(quincena('2026-10-20'), $this->admin);
+
+    // Del 1 al 14 vende 300 (0.5%); del 15 al 30, 800: el mes va en 1,100 → 2%.
+    facturaDeComision($this, $this->ana, [[$this->jabon, 3]]);
+    $this->travelTo(CarbonImmutable::parse('2026-11-20 10:00:00'));
+    facturaDeComision($this, $this->ana, [[$this->jabon, 8]]);
+
+    $q1 = quincena('2026-11-01');
+    $q2 = quincena('2026-11-15');
+    $delMes = comisionDe($q2, $this->ana)->filas[0];
+
+    expect(comisionDe($q1, $this->ana)->filas[0]->comision)->toBe(1.5)
+        // La primera todavía no se cierra: se suma así como va.
+        ->and((new ComisionesDelPeriodo($q2))->anteriorDelMes()['estado'] ?? null)->toBe(ComisionesDelPeriodo::ANTERIOR_POR_CERRAR)
+        ->and([$delMes->base, $delMes->baseMes(), $delMes->porcentaje, $delMes->comisionMes(), $delMes->comision])->toBe([800.0, 1100.0, 2.0, 22.0, 20.5])
+        ->and($delMes->llegoALaMeta())->toBeTrue();
+
+    $this->travelTo(CarbonImmutable::parse('2026-11-30 17:00:00'));
+
+    expect(fn () => app(CerrarPeriodoComision::class)->ejecutar($q2, $this->admin))
+        ->toThrow(ReglaNegocioException::class, 'Primero cierre la quincena del 1 al 14 de noviembre de 2026');
+
+    $primera = app(CerrarPeriodoComision::class)->ejecutar($q1, $this->admin);
+    $segunda = app(CerrarPeriodoComision::class)->ejecutar($q2, $this->admin);
+    $liquidacion = ComisionLiquidacion::query()->where('comision_periodo_id', $segunda->id)->sole();
+
+    expect($primera->comision)->toBe(1.5)
+        ->and($segunda->comision)->toBe(20.5)
+        ->and([$liquidacion->base, $liquidacion->base_antes, $liquidacion->pagado_antes, $liquidacion->porcentaje])->toBe([800.0, 300.0, 1.5, 2.0])
+        // En el mes se le pagó el 2% de 1,100.
+        ->and($primera->comision + $segunda->comision)->toBe(22.0);
+
+    $this->actingAs($this->ana);
+    Livewire::test(MisMetas::class)
+        ->fillForm(['periodo' => $q2->clave()])
+        ->assertSee('L. 1,100.00')
+        ->assertSee('ya se le adelantaron');
+});
+
 test('lo que se factura después de cerrar con fecha de ese periodo pasa al siguiente', function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-11-14 10:00:00'));
     facturaDeComision($this, $this->ana, [[$this->jabon, 10]]);
@@ -354,7 +396,8 @@ test('grupos: se crean con sus categorías y su escala; una categoría va en un 
             'nombre'     => 'Hogar',
             'activo'     => true,
             'categorias' => [$this->detergentes->id],
-            'escalones'  => [['desde' => 0, 'porcentaje' => 1], ['desde' => 5000, 'porcentaje' => 1.5]],
+            // El monto llega con el separador de miles del campo.
+            'escalones' => [['desde' => '0', 'porcentaje' => 1], ['desde' => '5,000', 'porcentaje' => 1.5]],
         ])
         ->assertHasNoActionErrors();
 

@@ -15,6 +15,10 @@ use Illuminate\Support\Carbon;
  * anularon, la base, el % del escalón y la comisión, con la escala que
  * tenía ese día.
  *
+ * El escalón es del mes: en la segunda quincena, base_antes es lo que ya
+ * llevaba el mes y pagado_antes el adelanto de la primera; el % sale de
+ * base + base_antes y comision es lo del mes menos pagado_antes.
+ *
  * @property int $id
  * @property int $comision_periodo_id
  * @property int $vendedor_id
@@ -23,6 +27,8 @@ use Illuminate\Support\Carbon;
  * @property float $venta
  * @property float $anulado
  * @property float $base
+ * @property float $base_antes
+ * @property float $pagado_antes
  * @property float $porcentaje
  * @property float $comision
  * @property float|null $meta
@@ -47,6 +53,8 @@ class ComisionLiquidacion extends Model
         'venta',
         'anulado',
         'base',
+        'base_antes',
+        'pagado_antes',
         'porcentaje',
         'comision',
         'meta',
@@ -64,6 +72,8 @@ class ComisionLiquidacion extends Model
             'venta'         => 'float',
             'anulado'       => 'float',
             'base'          => 'float',
+            'base_antes'    => 'float',
+            'pagado_antes'  => 'float',
             'porcentaje'    => 'float',
             'comision'      => 'float',
             'meta'          => 'float',

@@ -9,6 +9,10 @@
     $cierre = $d['cierre'];
     $t = $d['totales'];
     $porciento = fn (float $p): string => \App\Domain\Comisiones\Escala::porciento($p);
+    /** @var array{periodo: \App\Domain\Comisiones\PeriodoComision, estado: string}|null $anterior */
+    $anterior = $d['anterior'];
+    // La primera quincena todavía no se cierra: su adelanto se paga al cerrarla.
+    $porCerrar = $anterior !== null && $anterior['estado'] === \App\Domain\Comisiones\ComisionesDelPeriodo::ANTERIOR_POR_CERRAR;
 @endphp
 
 <div class="rp" wire:loading.delay.class="rp-cargando">
@@ -39,6 +43,19 @@
         </div>
     @endif
 
+    @if ($anterior !== null && $d['hayGrupos'])
+        @switch($anterior['estado'])
+            @case(\App\Domain\Comisiones\ComisionesDelPeriodo::ANTERIOR_CERRADA)
+                <div class="rp-nota">La meta es del mes: se suma la quincena del {{ $anterior['periodo']->texto() }}, ya pagada. Aquí se paga lo que gana en el mes menos lo que se le adelantó.</div>
+                @break
+            @case(\App\Domain\Comisiones\ComisionesDelPeriodo::ANTERIOR_POR_CERRAR)
+                <div class="rp-aviso">La meta es del mes: se suma la quincena del {{ $anterior['periodo']->texto() }} así como va, porque todavía no se cierra. Ciérrela primero; después se cierra esta.</div>
+                @break
+            @default
+                <div class="rp-aviso">La quincena del {{ $anterior['periodo']->texto() }} no se cerró y es de antes del primer cierre: no cuenta para la meta del mes. Si se debe pagar, ciérrela antes que esta.</div>
+        @endswitch
+    @endif
+
     @if (! $d['hayGrupos'] && $cierre === null)
         <div class="rp-vacio">
             Todavía no hay grupos de comisión.
@@ -64,6 +81,13 @@
                 <strong>{{ lempiras($t['base']) }}</strong>
                 <small>{{ $t['venta'] > 0 ? $porciento(round($t['base'] / $t['venta'] * 100, 1)).' de la venta' : 'sobre esto se paga' }}</small>
             </div>
+            @if ($d['adelantos'] != 0.0)
+                <div class="rp-kpi">
+                    <span>{{ $porCerrar ? 'Adelanto de la 1.ª quincena' : 'Ya adelantado' }}</span>
+                    <strong>{{ lempiras($d['adelantos']) }}</strong>
+                    <small>{{ $porCerrar ? 'se paga al cerrar esa quincena' : 'en la primera quincena del mes' }}</small>
+                </div>
+            @endif
             <div class="rp-kpi">
                 <span>Facturas</span>
                 <strong>{{ number_format($t['facturas']) }}</strong>
@@ -87,6 +111,7 @@
                 @php
                     /** @var \App\Domain\Comisiones\ResumenVendedor $v */
                     $conAnulado = collect($v->filas)->contains(fn ($f) => $f->anulado != 0.0);
+                    $conMes = collect($v->filas)->contains(fn ($f) => $f->sumaElMes());
                 @endphp
                 <section class="cm-vendedor">
                     <header>
@@ -95,7 +120,7 @@
                             <small>{{ $v->bodega ?? 'Sin bodega' }} · {{ $v->facturas === 1 ? '1 factura' : $v->facturas.' facturas' }} · venta {{ lempiras($v->ventaTotal) }} sin ISV</small>
                         </div>
                         <div class="cm-total">
-                            <span>Comisión</span>
+                            <span>{{ $conMes ? 'A pagar' : 'Comisión' }}</span>
                             <strong>{{ lempiras($v->comision()) }}</strong>
                         </div>
                     </header>
@@ -112,7 +137,10 @@
                                         @if ($conAnulado)
                                             <th class="n">Anuladas</th>
                                         @endif
-                                        <th>Avance a la meta</th>
+                                        @if ($conMes)
+                                            <th class="n">En el mes</th>
+                                        @endif
+                                        <th>Avance a la meta del mes</th>
                                         <th class="n">%</th>
                                         <th class="n">Comisión</th>
                                     </tr>
@@ -128,9 +156,22 @@
                                             @if ($conAnulado)
                                                 <td @class(['n', 'neg' => $fila->anulado != 0.0])>{{ $fila->anulado != 0.0 ? '− '.lempiras($fila->anulado) : '—' }}</td>
                                             @endif
+                                            @if ($conMes)
+                                                <td class="n">
+                                                    {{ lempiras($fila->baseMes()) }}
+                                                    @if ($fila->baseAntes != 0.0)
+                                                        <small><span class="cm-nw">{{ lempiras($fila->baseAntes) }}</span> de la quincena anterior</small>
+                                                    @endif
+                                                </td>
+                                            @endif
                                             <td>@include('filament.comisiones.avance', ['fila' => $fila])</td>
                                             <td class="n"><span @class(['cm-pct', 'llego' => $fila->llegoALaMeta()])>{{ $porciento($fila->porcentaje) }}</span></td>
-                                            <td class="n"><strong>{{ lempiras($fila->comision) }}</strong></td>
+                                            <td class="n">
+                                                <strong @class(['neg' => $fila->comision < 0])>{{ lempiras($fila->comision) }}</strong>
+                                                @if ($fila->pagadoAntes != 0.0)
+                                                    <small><span class="cm-nw">{{ lempiras($fila->comisionMes()) }}</span> del mes − <span class="cm-nw">{{ lempiras($fila->pagadoAntes) }}</span> {{ $porCerrar ? 'de adelanto' : 'adelantado' }}</small>
+                                                @endif
+                                            </td>
                                         </tr>
                                     @endforeach
                                 </tbody>

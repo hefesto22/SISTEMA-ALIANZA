@@ -36,7 +36,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 /**
  * Comisiones del periodo (quincena o mes): por vendedor y por grupo, la
  * venta neta facturada (sin ISV), el escalón que alcanzó, cuánto le falta
- * para el siguiente y lo que gana.
+ * para el siguiente y lo que gana. La meta es del mes: en la segunda
+ * quincena se suma la primera y se paga lo del mes menos el adelanto.
  *
  * Abierto, se calcula al momento. Administración lo cierra (paga) el último
  * día o después: desde ahí ya no cambia. Si se cerró por error, se reabre
@@ -186,7 +187,7 @@ class Comisiones extends Page
                 ->color('gray')
                 ->visible(fn (): bool => Acceso::puede('Configurar:Comisiones'))
                 ->modalHeading('Cada cuánto se pagan las comisiones')
-                ->modalDescription('Las metas (escalones) son por periodo: si cambia de quincenal a mensual, revise los montos de los grupos. Lo ya cerrado no cambia.')
+                ->modalDescription('Las metas (escalones) son del mes. Con quincenal, la primera quincena se paga como adelanto con lo que lleva y a fin de mes se completa con el escalón de todo el mes. Lo ya cerrado no cambia.')
                 ->fillForm(fn (): array => [
                     'comision_frecuencia' => Configuracion::actual()->comision_frecuencia->value,
                     'comision_corte'      => Configuracion::actual()->comision_corte,
@@ -264,6 +265,8 @@ class Comisiones extends Page
             'totales'    => $calculo->totales(),
             'rezagadas'  => $calculo->rezagadas(),
             'anuladas'   => $calculo->anuladas(),
+            'anterior'   => $calculo->cierre() === null ? $calculo->anteriorDelMes() : null,
+            'adelantos'  => $calculo->adelantos(),
             'alcance'    => $this->nombreAlcance(),
             'hayGrupos'  => ComisionGrupo::query()->activos()->exists(),
             'urlGrupos'  => Acceso::puede('ViewAny:ComisionGrupo') ? ComisionGrupoResource::getUrl() : null,
@@ -311,10 +314,21 @@ class Comisiones extends Page
      */
     private static function textoCierre(ComisionesDelPeriodo $calculo): string
     {
+        $anterior = $calculo->anteriorDelMes();
+
+        if ($anterior !== null && $anterior['estado'] === ComisionesDelPeriodo::ANTERIOR_POR_CERRAR) {
+            return 'Primero cierre la quincena del '.$anterior['periodo']->texto().': la meta es del mes y lo de esa quincena se suma aquí.';
+        }
+
         $t = $calculo->totales();
+        $adelantos = $calculo->adelantos();
 
         return 'Se pagan '.lempiras($t['comision']).' de comisiones a '.$t['vendedores'].' vendedor(es), sobre '.lempiras($t['venta'])
-            .' de venta neta facturada. Después ya no cambia: lo que se facture con fecha de este periodo o se anule pasa al siguiente.';
+            .' de venta neta facturada'.($adelantos != 0.0 ? ' (lo del mes menos '.lempiras($adelantos).' que ya se adelantó en la primera quincena)' : '').'.'
+            .($anterior !== null && $anterior['estado'] === ComisionesDelPeriodo::ANTERIOR_FUERA
+                ? ' La quincena del '.$anterior['periodo']->texto().' no se cerró: no cuenta para la meta del mes ni se paga.'
+                : '')
+            .' Después ya no cambia: lo que se facture con fecha de este periodo o se anule pasa al siguiente.';
     }
 
     /**

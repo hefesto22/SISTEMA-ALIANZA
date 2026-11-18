@@ -78,7 +78,7 @@ class ComisionMetaResource extends Resource
                         $grupo = is_numeric($state) ? ComisionGrupo::query()->find((int) $state) : null;
 
                         if ($grupo !== null && self::sinEscribir($get('escalones'))) {
-                            $set('escalones', $grupo->escala()->paraGuardar());
+                            $set('escalones', $grupo->escala()->paraFormulario());
                         }
                     })
                     ->helperText(function (Get $get): ?string {
@@ -151,7 +151,7 @@ class ComisionMetaResource extends Resource
                 EditAction::make()
                     ->modalHeading(fn (ComisionMeta $record): string => 'Meta de '.$record->vendedor->name.' en '.$record->grupo->nombre)
                     ->modalWidth(Width::ThreeExtraLarge)
-                    ->mutateRecordDataUsing(fn (array $data, ComisionMeta $record): array => [...$data, 'escalones' => $record->escala()->paraGuardar()])
+                    ->mutateRecordDataUsing(fn (array $data, ComisionMeta $record): array => [...$data, 'escalones' => $record->escala()->paraFormulario()])
                     ->using(fn (array $data, ComisionMeta $record): ComisionMeta => self::guardar($record, $data)),
                 DeleteAction::make()
                     ->modalDescription('El vendedor vuelve a la escala de todos. Lo ya pagado no cambia.'),
