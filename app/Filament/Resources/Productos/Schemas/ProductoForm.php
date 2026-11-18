@@ -167,6 +167,8 @@ class ProductoForm
                                 TextInput::make('contenido')
                                     ->label(fn (Get $get): string => 'Trae ('.self::codigo($get('../../unidad_medida_id')).')')
                                     ->hiddenLabel()
+                                    // Solo de guía (gris), para que se vea dónde se escribe; el campo queda vacío.
+                                    ->placeholder('0')
                                     ->numeric()
                                     ->integer()
                                     ->minValue(2)
