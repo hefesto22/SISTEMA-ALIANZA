@@ -149,7 +149,7 @@
                                     @foreach ($v->filas as $fila)
                                         <tr>
                                             <td class="nombre">
-                                                {{ $fila->grupo }}@if ($fila->propia)<span class="cm-tag" title="{{ $fila->escala->texto() }}">meta propia</span>@endif
+                                                {{ $fila->grupo }}@if ($fila->propia)<span class="cm-tag" title="{{ $fila->escala->texto() }}">meta propia</span>@elseif ($fila->deBodega)<span class="cm-tag" title="{{ $fila->escala->texto() }}">escala de bodega</span>@endif
                                                 <small>{{ $fila->facturas === 1 ? '1 factura' : $fila->facturas.' facturas' }}</small>
                                             </td>
                                             <td class="n">{{ lempiras($fila->venta) }}</td>

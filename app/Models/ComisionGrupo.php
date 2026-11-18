@@ -13,8 +13,9 @@ use Illuminate\Support\Carbon;
 
 /**
  * Grupo de comisión ("LIMPIEZA"): junta categorías de cualquier proveedor
- * y tiene la escala de comisión para todos los vendedores (escalones con
- * "desde" y %). Un vendedor puede tener la suya (ComisionMeta).
+ * y tiene la escala de comisión para todas las bodegas (escalones con
+ * "desde" y %). Cada bodega puede poner sus montos (ComisionEscalaBodega) y
+ * un vendedor puede tener los suyos (ComisionMeta).
  *
  * Desactivado deja de pagar comisión (lo vendido de sus categorías cuenta
  * como venta sin comisión). Si ya se pagó alguna vez no se borra.
@@ -71,6 +72,24 @@ class ComisionGrupo extends Model
     public function metas(): HasMany
     {
         return $this->hasMany(ComisionMeta::class);
+    }
+
+    /**
+     * @return HasMany<ComisionEscalaBodega, $this>
+     */
+    public function escalasBodega(): HasMany
+    {
+        return $this->hasMany(ComisionEscalaBodega::class);
+    }
+
+    /**
+     * La escala en esa bodega: la suya si la puso, si no la del grupo.
+     */
+    public function escalaEn(?int $bodegaId): Escala
+    {
+        $propia = $bodegaId === null ? null : $this->escalasBodega->firstWhere('bodega_id', $bodegaId);
+
+        return $propia instanceof ComisionEscalaBodega && ! $propia->escala()->vacia() ? $propia->escala() : $this->escala();
     }
 
     /**

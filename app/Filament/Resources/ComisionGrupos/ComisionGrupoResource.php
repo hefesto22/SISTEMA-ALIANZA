@@ -4,20 +4,28 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\ComisionGrupos;
 
+use App\Domain\Comisiones\GuardarEscalaBodega;
 use App\Domain\Comisiones\GuardarGrupoComision;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Filament\Resources\ComisionGrupos\Pages\ManageComisionGrupos;
+use App\Filament\Support\Acceso;
+use App\Models\Bodega;
 use App\Models\Categoria;
+use App\Models\ComisionEscalaBodega;
 use App\Models\ComisionGrupo;
 use App\Support\Texto;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
 use Filament\Support\Exceptions\Halt;
@@ -33,8 +41,10 @@ use Illuminate\Database\Eloquent\Builder;
  * tiene su escala (0.5% desde 0, 1% desde 80,000, 2% desde 100,000). Lo
  * que no está en un grupo no paga comisión.
  *
- * Administración los arma; el encargado de bodega los ve (las metas propias
- * de sus vendedores se ponen en Metas por vendedor).
+ * Los grupos son de todas las bodegas. Administración los arma; cada bodega
+ * puede poner sus propios montos ("Por bodega": el encargado, solo los de la
+ * suya) y si no, usa la escala del grupo. Las metas propias de un vendedor
+ * se ponen en Metas por vendedor.
  *
  * @extends \Filament\Resources\Resource<ComisionGrupo>
  */
@@ -90,13 +100,14 @@ class ComisionGrupoResource extends Resource
                     ->helperText('De cualquier proveedor. Una categoría va en un solo grupo: si escoge una que está en otro, se pasa a este.')
                     ->columnSpanFull(),
                 CampoEscalones::make()
+                    ->label('Escala para todas las bodegas')
                     ->columnSpanFull(),
             ]);
     }
 
     public static function getEloquentQuery(): Builder
     {
-        return ComisionGrupo::query()->with('categorias.proveedor')->withCount('metas');
+        return ComisionGrupo::query()->with(['categorias.proveedor', 'escalasBodega.bodega'])->withCount('metas');
     }
 
     public static function table(Table $table): Table
@@ -110,8 +121,14 @@ class ComisionGrupoResource extends Resource
                     ->weight('bold')
                     ->description(fn (ComisionGrupo $record): ?string => $record->descripcion),
                 TextColumn::make('escala')
-                    ->label('Escala para todos')
+                    ->label('Escala para todas')
                     ->state(fn (ComisionGrupo $record): string => $record->escala()->texto())
+                    ->wrap(),
+                TextColumn::make('por_bodega')
+                    ->label(fn (): string => Acceso::veTodo() ? 'En cada bodega' : 'En su bodega')
+                    ->state(fn (ComisionGrupo $record): array => self::escalasPorBodega($record))
+                    ->listWithLineBreaks()
+                    ->placeholder('La misma para todas')
                     ->wrap(),
                 TextColumn::make('categorias')
                     ->label('Categorías')
@@ -137,6 +154,7 @@ class ComisionGrupoResource extends Resource
             ->emptyStateHeading('Sin grupos de comisión')
             ->emptyStateDescription('Cree un grupo (ej. Limpieza), escoja sus categorías y ponga la escala: desde cuánto vende y qué % gana.')
             ->recordActions([
+                self::accionBodega(),
                 EditAction::make()
                     ->modalHeading(fn (ComisionGrupo $record): string => 'Grupo '.$record->nombre)
                     ->modalWidth(Width::FourExtraLarge)
@@ -171,6 +189,100 @@ class ComisionGrupoResource extends Resource
 
             throw new Halt;
         }
+    }
+
+    /**
+     * Los montos del grupo en una bodega: administración escoge la bodega; el
+     * encargado, la suya. Apagado "propios montos", la bodega usa los del grupo.
+     */
+    private static function accionBodega(): Action
+    {
+        return Action::make('bodega')
+            ->label(fn (): string => Acceso::veTodo() ? 'Por bodega' : 'Mi bodega')
+            ->icon(Heroicon::OutlinedBuildingStorefront)
+            ->color('gray')
+            ->visible(fn (): bool => Acceso::puede('EscalaBodega:ComisionGrupo') && (Acceso::veTodo() || Acceso::usuario()?->bodega_id !== null))
+            ->modalHeading(fn (ComisionGrupo $record): string => Acceso::veTodo() ? $record->nombre.' por bodega' : $record->nombre.' en '.(Acceso::usuario()->bodega->nombre ?? 'su bodega'))
+            ->modalDescription(fn (ComisionGrupo $record): string => 'Para todas las bodegas: '.$record->escala()->texto().'. La bodega que no ponga sus montos usa esta.')
+            ->modalWidth(Width::ThreeExtraLarge)
+            ->modalSubmitActionLabel('Guardar')
+            ->fillForm(fn (ComisionGrupo $record): array => self::datosBodega($record, Acceso::veTodo() ? null : Acceso::usuario()?->bodega_id))
+            ->schema([
+                Hidden::make('grupo_id'),
+                Select::make('bodega_id')
+                    ->label('Bodega')
+                    ->options(fn (): array => Bodega::query()->orderBy('nombre')->pluck('nombre', 'id')->all())
+                    ->required()
+                    ->live()
+                    ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
+                        $grupo = is_numeric($get('grupo_id')) ? ComisionGrupo::query()->find((int) $get('grupo_id')) : null;
+
+                        if ($grupo !== null) {
+                            $datos = self::datosBodega($grupo, is_numeric($state) ? (int) $state : null);
+                            $set('propia', $datos['propia']);
+                            $set('escalones', $datos['escalones']);
+                        }
+                    })
+                    ->visible(fn (): bool => Acceso::veTodo()),
+                Toggle::make('propia')
+                    ->label('Esta bodega pone sus propios montos')
+                    ->helperText('Apagado, usa la escala del grupo.')
+                    ->live(),
+                CampoEscalones::make()
+                    ->label('Escala en la bodega')
+                    ->visible(fn (Get $get): bool => (bool) $get('propia')),
+            ])
+            ->action(function (array $data, ComisionGrupo $record): void {
+                $usuario = Acceso::usuario() ?? abort(403);
+                $bodegaId = $usuario->veTodasLasBodegas() ? ($data['bodega_id'] ?? null) : $usuario->bodega_id;
+
+                try {
+                    app(GuardarEscalaBodega::class)->ejecutar($record->id, $bodegaId, ($data['propia'] ?? false) ? ($data['escalones'] ?? []) : null, $usuario);
+                } catch (ReglaNegocioException $e) {
+                    Notification::make()->title($e->getMessage())->danger()->send();
+
+                    throw new Halt;
+                }
+
+                Notification::make()->title(($data['propia'] ?? false) ? 'Escala de la bodega guardada' : 'La bodega usa la escala del grupo')->success()->send();
+            });
+    }
+
+    /**
+     * Para llenar el formulario de "Por bodega": sus montos si los puso; si
+     * no, los del grupo (para empezar a cambiarlos desde ahí).
+     *
+     * @return array{grupo_id: int, bodega_id: int|null, propia: bool, escalones: list<array{desde: string, porcentaje: float}>}
+     */
+    private static function datosBodega(ComisionGrupo $grupo, ?int $bodegaId): array
+    {
+        $propia = $bodegaId === null ? null : ComisionEscalaBodega::query()->where('comision_grupo_id', $grupo->id)->where('bodega_id', $bodegaId)->first();
+
+        return [
+            'grupo_id'  => $grupo->id,
+            'bodega_id' => $bodegaId,
+            'propia'    => $propia !== null,
+            'escalones' => ($propia?->escala() ?? $grupo->escala())->paraFormulario(),
+        ];
+    }
+
+    /**
+     * "BODEGA COPÁN: 0.5% · 1% desde L. 30,000" de cada bodega con sus
+     * montos (el encargado, solo la suya).
+     *
+     * @return list<string>
+     */
+    private static function escalasPorBodega(ComisionGrupo $grupo): array
+    {
+        $usuario = Acceso::usuario();
+        $todas = $usuario?->veTodasLasBodegas() ?? false;
+
+        return $grupo->escalasBodega
+            ->filter(fn (ComisionEscalaBodega $e): bool => $todas || ($usuario !== null && $e->bodega_id === $usuario->bodega_id))
+            ->sortBy(fn (ComisionEscalaBodega $e): string => $e->bodega->nombre)
+            ->map(fn (ComisionEscalaBodega $e): string => ($todas ? $e->bodega->nombre.': ' : '').$e->escala()->texto())
+            ->values()
+            ->all();
     }
 
     /**

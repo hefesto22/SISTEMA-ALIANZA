@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\ComisionMetas;
 
+use App\Domain\Comisiones\Escala;
 use App\Domain\Comisiones\GuardarMetaComision;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\Rol;
@@ -33,7 +34,8 @@ use Illuminate\Database\Eloquent\Builder;
 /**
  * Metas por vendedor: la escala propia de un vendedor en un grupo de
  * comisión (una ruta más chica, alguien que empieza…). Sin meta propia,
- * el vendedor usa la escala del grupo (la de todos).
+ * el vendedor usa la escala de su bodega, y si su bodega no puso montos, la
+ * del grupo.
  *
  * Administración, de cualquier vendedor; el encargado, de los de su bodega.
  *
@@ -67,24 +69,25 @@ class ComisionMetaResource extends Resource
                     ->label('Vendedor')
                     ->options(fn (): array => self::vendedores())
                     ->searchable()
-                    ->required(),
+                    ->required()
+                    ->live(),
                 Select::make('comision_grupo_id')
                     ->label('Grupo de comisión')
                     ->options(fn (): array => ComisionGrupo::query()->activos()->orderBy('nombre')->pluck('nombre', 'id')->all())
                     ->required()
                     ->live()
                     ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
-                        // Para empezar: la escala del grupo, y se cambia lo que haga falta.
+                        // Para empezar: la que ya tiene (la de su bodega o la del grupo), y se cambia lo que haga falta.
                         $grupo = is_numeric($state) ? ComisionGrupo::query()->find((int) $state) : null;
 
                         if ($grupo !== null && self::sinEscribir($get('escalones'))) {
-                            $set('escalones', $grupo->escala()->paraFormulario());
+                            $set('escalones', self::escalaSinMeta($grupo, $get('vendedor_id'))->paraFormulario());
                         }
                     })
                     ->helperText(function (Get $get): ?string {
                         $grupo = is_numeric($get('comision_grupo_id')) ? ComisionGrupo::query()->find((int) $get('comision_grupo_id')) : null;
 
-                        return $grupo === null ? null : 'La de todos: '.$grupo->escala()->texto();
+                        return $grupo === null ? null : 'Sin meta propia usa '.self::deDonde($grupo, $get('vendedor_id')).': '.self::escalaSinMeta($grupo, $get('vendedor_id'))->texto();
                     }),
                 CampoEscalones::make()
                     ->label('Su escala')
@@ -98,7 +101,7 @@ class ComisionMetaResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $usuario = Acceso::usuario();
-        $query = ComisionMeta::query()->with(['grupo', 'vendedor.bodega']);
+        $query = ComisionMeta::query()->with(['grupo.escalasBodega', 'vendedor.bodega']);
 
         if ($usuario === null) {
             return $query->whereRaw('1 = 0');
@@ -130,8 +133,9 @@ class ComisionMetaResource extends Resource
                     ->state(fn (ComisionMeta $record): string => $record->escala()->texto())
                     ->wrap(),
                 TextColumn::make('de_todos')
-                    ->label('La de todos')
-                    ->state(fn (ComisionMeta $record): string => $record->grupo->escala()->texto())
+                    ->label('Sin meta propia')
+                    ->state(fn (ComisionMeta $record): string => $record->grupo->escalaEn($record->vendedor->bodega_id)->texto())
+                    ->description(fn (ComisionMeta $record): string => $record->grupo->escalasBodega->contains('bodega_id', $record->vendedor->bodega_id) ? 'la de su bodega' : 'la de todos')
                     ->color('gray')
                     ->wrap(),
             ])
@@ -201,6 +205,32 @@ class ComisionMetaResource extends Resource
             ->get()
             ->mapWithKeys(fn (User $u): array => [$u->id => filled($u->codigo) ? "{$u->codigo} · {$u->name}" : $u->name])
             ->all();
+    }
+
+    /**
+     * Con lo que se le paga si no tiene meta propia: la escala de su bodega
+     * o la del grupo.
+     */
+    private static function escalaSinMeta(ComisionGrupo $grupo, mixed $vendedorId): Escala
+    {
+        return $grupo->escalaEn(self::bodegaDe($vendedorId));
+    }
+
+    /**
+     * "la de su bodega" o "la de todos".
+     */
+    private static function deDonde(ComisionGrupo $grupo, mixed $vendedorId): string
+    {
+        $bodegaId = self::bodegaDe($vendedorId);
+
+        return $bodegaId !== null && $grupo->escalasBodega->contains('bodega_id', $bodegaId) ? 'la de su bodega' : 'la de todos';
+    }
+
+    private static function bodegaDe(mixed $vendedorId): ?int
+    {
+        $bodegaId = is_numeric($vendedorId) ? User::query()->whereKey((int) $vendedorId)->value('bodega_id') : null;
+
+        return is_numeric($bodegaId) ? (int) $bodegaId : null;
     }
 
     /**

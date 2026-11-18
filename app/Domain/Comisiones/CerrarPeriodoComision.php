@@ -92,6 +92,7 @@ final class CerrarPeriodoComision
                         'meta'                => $fila->meta,
                         'escalones'           => $fila->escala->paraGuardar(),
                         'escala_propia'       => $fila->propia,
+                        'escala_bodega'       => $fila->deBodega,
                         'facturas'            => $fila->facturas,
                     ]);
                 }

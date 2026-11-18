@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Domain\Comisiones;
 
 /**
- * Lo de un vendedor en un grupo de comisión en un periodo.
+ * Lo de un vendedor en un grupo de comisión en un periodo, con su escala:
+ * su meta propia (propia), la de su bodega (deBodega) o la del grupo.
  *
  *  venta       = facturas del periodo (y las que se facturaron con fecha de
  *                un periodo ya cerrado, después del cierre), sin ISV y ya
@@ -43,6 +44,7 @@ final class FilaComision
         public readonly ?float $meta,
         public readonly float $baseAntes = 0.0,
         public readonly float $pagadoAntes = 0.0,
+        public readonly bool $deBodega = false,
     ) {}
 
     public static function calcular(
@@ -55,6 +57,7 @@ final class FilaComision
         bool $propia,
         float $baseAntes = 0.0,
         float $pagadoAntes = 0.0,
+        bool $deBodega = false,
     ): self {
         $base = round($venta - $anulado, 2);
         $baseMes = round($base + $baseAntes, 2);
@@ -73,6 +76,7 @@ final class FilaComision
             meta: $escala->meta(),
             baseAntes: round($baseAntes, 2),
             pagadoAntes: round($pagadoAntes, 2),
+            deBodega: $deBodega,
         );
     }
 

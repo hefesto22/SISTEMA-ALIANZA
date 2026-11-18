@@ -336,7 +336,7 @@ final class ComisionesDelPeriodo
         }
 
         $antes = $this->antes();
-        $grupos = ComisionGrupo::query()->activos()->orderBy('nombre')->get();
+        $grupos = ComisionGrupo::query()->activos()->with('escalasBodega')->orderBy('nombre')->get();
         $usuarios = $this->usuarios(array_values(array_unique([...array_keys($total), ...array_keys($antes)])));
         /** @var array<int, array<int, ComisionMeta>> $metas [vendedor][grupo] */
         $metas = [];
@@ -353,6 +353,8 @@ final class ComisionesDelPeriodo
             foreach ($grupos as $grupo) {
                 $meta = $metas[$id][$grupo->id] ?? null;
                 $propia = $meta !== null && ! $meta->escala()->vacia();
+                // Sin meta propia: la escala de su bodega, si la puso; si no, la del grupo.
+                $deBodega = ! $propia && $usuario->bodega_id !== null && $grupo->escalasBodega->contains('bodega_id', $usuario->bodega_id);
                 $datos = $porGrupo[$id][$grupo->id] ?? [];
                 $delMes = $antes[$id][$grupo->id] ?? null;
 
@@ -362,10 +364,11 @@ final class ComisionesDelPeriodo
                     venta: $datos['venta'] ?? 0.0,
                     anulado: $datos['anulado'] ?? 0.0,
                     facturas: count($datos['facturas'] ?? []),
-                    escala: $meta !== null && $propia ? $meta->escala() : $grupo->escala(),
+                    escala: $meta !== null && $propia ? $meta->escala() : $grupo->escalaEn($usuario->bodega_id),
                     propia: $propia,
                     baseAntes: $delMes['base'] ?? 0.0,
                     pagadoAntes: $delMes['pagado'] ?? 0.0,
+                    deBodega: $deBodega,
                 );
             }
 
@@ -483,6 +486,7 @@ final class ComisionesDelPeriodo
                 meta: $l->meta,
                 baseAntes: $l->base_antes,
                 pagadoAntes: $l->pagado_antes,
+                deBodega: $l->escala_bodega,
             ))->all());
 
             $resumenes[] = new ResumenVendedor(

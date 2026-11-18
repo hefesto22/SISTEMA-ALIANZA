@@ -34,6 +34,7 @@ use Illuminate\Support\Carbon;
  * @property float|null $meta
  * @property list<array{desde: float, porcentaje: float}> $escalones
  * @property bool $escala_propia
+ * @property bool $escala_bodega
  * @property int $facturas
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -60,6 +61,7 @@ class ComisionLiquidacion extends Model
         'meta',
         'escalones',
         'escala_propia',
+        'escala_bodega',
         'facturas',
     ];
 
@@ -79,6 +81,7 @@ class ComisionLiquidacion extends Model
             'meta'          => 'float',
             'escalones'     => 'array',
             'escala_propia' => 'boolean',
+            'escala_bodega' => 'boolean',
             'facturas'      => 'integer',
         ];
     }

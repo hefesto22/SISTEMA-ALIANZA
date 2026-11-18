@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Domain\Comisiones\CerrarPeriodoComision;
 use App\Domain\Comisiones\ComisionesDelPeriodo;
 use App\Domain\Comisiones\Escala;
+use App\Domain\Comisiones\GuardarEscalaBodega;
 use App\Domain\Comisiones\GuardarGrupoComision;
 use App\Domain\Comisiones\GuardarMetaComision;
 use App\Domain\Comisiones\PeriodoComision;
@@ -29,6 +30,7 @@ use App\Filament\Widgets\MisMetasWidget;
 use App\Models\Bodega;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\ComisionEscalaBodega;
 use App\Models\ComisionGrupo;
 use App\Models\ComisionLiquidacion;
 use App\Models\ComisionPeriodo;
@@ -188,6 +190,46 @@ test('un vendedor puede tener su propia escala; el encargado solo se la pone a l
     expect($beto->filas[0]->propia)->toBeTrue()
         ->and($beto->filas[0]->porcentaje)->toBe(3.0)
         ->and($beto->filas[0]->comision)->toBe(21.0);
+});
+
+test('cada bodega pone sus montos del grupo (si no, usa los del grupo); el encargado solo los de su bodega; la meta propia manda', function (): void {
+    // Copán: 1% desde 0 y 3% desde 500 (allí se vende menos). Ocotepeque usa la del grupo.
+    $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
+
+    Livewire::test(ManageComisionGrupos::class)
+        ->callTableAction('bodega', $this->limpieza, data: [
+            'propia'    => true,
+            'escalones' => [['desde' => '0', 'porcentaje' => 1], ['desde' => '500', 'porcentaje' => 3]],
+        ])
+        ->assertHasNoTableActionErrors();
+
+    $undoRepeaterFake();
+
+    expect(ComisionEscalaBodega::query()->sole()->bodega_id)->toBe($this->copan->id)
+        ->and(fn () => app(GuardarEscalaBodega::class)->ejecutar($this->limpieza->id, $this->ocote->id, [['desde' => 0, 'porcentaje' => 9]], $this->encargado))
+        ->toThrow(ReglaNegocioException::class, 'su bodega');
+
+    // ANA (Copán), CARLA (Ocotepeque) y BETO (Copán, con meta propia) venden 700 cada uno.
+    app(GuardarMetaComision::class)->ejecutar(null, $this->limpieza->id, $this->beto->id, [['desde' => 0, 'porcentaje' => 2]], $this->admin);
+    facturaDeComision($this, $this->ana, [[$this->jabon, 7]]);
+    facturaDeComision($this, $this->carla, [[$this->jabon, 7]]);
+    facturaDeComision($this, $this->beto, [[$this->jabon, 7]]);
+
+    $periodo = PeriodoComision::actual();
+    $ana = comisionDe($periodo, $this->ana)->filas[0];
+    $carla = comisionDe($periodo, $this->carla)->filas[0];
+    $beto = comisionDe($periodo, $this->beto)->filas[0];
+
+    expect([$ana->porcentaje, $ana->comision, $ana->deBodega, $ana->meta])->toBe([3.0, 21.0, true, 500.0])
+        ->and([$carla->porcentaje, $carla->deBodega])->toBe([0.5, false])
+        ->and([$beto->porcentaje, $beto->propia, $beto->deBodega])->toBe([2.0, true, false]);
+
+    // Administración la quita: Copán vuelve a la del grupo.
+    app(GuardarEscalaBodega::class)->ejecutar($this->limpieza->id, $this->copan->id, null, $this->admin);
+
+    expect(ComisionEscalaBodega::query()->count())->toBe(0)
+        ->and(comisionDe($periodo, $this->ana)->filas[0]->porcentaje)->toBe(0.5);
 });
 
 test('quincenas del 1 al 14 y del 15 a fin de mes (por la fecha de la factura); o mensual', function (): void {

@@ -71,7 +71,7 @@ final class ComisionesExcel implements Export, WithMultipleSheets
                     (string) $v->codigo,
                     $v->nombre,
                     $f->grupo,
-                    $f->propia ? 'Propia' : 'Del grupo',
+                    $f->propia ? 'Propia' : ($f->deBodega ? 'De la bodega' : 'Del grupo'),
                     $f->venta,
                     $f->anulado,
                     $f->base,

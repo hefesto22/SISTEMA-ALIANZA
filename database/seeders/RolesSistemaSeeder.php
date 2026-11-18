@@ -49,7 +49,7 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Cai', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Factura', ['viewAny', 'view']),
                 ...self::REPORTES,
-                ...$this->permisos('ComisionGrupo', ['viewAny', 'view', 'create', 'update', 'delete']),
+                ...$this->permisos('ComisionGrupo', ['viewAny', 'view', 'create', 'update', 'delete', 'escalaBodega']),
                 ...$this->permisos('ComisionMeta', ['viewAny', 'view', 'create', 'update', 'delete']),
                 'View:Comisiones',
                 'Cerrar:Comisiones',
@@ -68,7 +68,8 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Cai', ['viewAny', 'view']),
                 ...$this->permisos('Factura', ['viewAny', 'view']),
                 ...self::REPORTES,
-                ...$this->permisos('ComisionGrupo', ['viewAny', 'view']),
+                // Ve los grupos y pone los montos de su bodega.
+                ...$this->permisos('ComisionGrupo', ['viewAny', 'view', 'escalaBodega']),
                 ...$this->permisos('ComisionMeta', ['viewAny', 'view', 'create', 'update', 'delete']),
                 'View:Comisiones',
             ],
