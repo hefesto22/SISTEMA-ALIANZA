@@ -5,14 +5,20 @@
     Arriba el buscador con los productos del proveedor escogido (al tocarlo
     sin escribir salen los primeros). Al tocar un producto entra en su
     presentación más grande y con el costo vacío: se escribe el de la
-    factura. Cada fila: en qué presentación viene (CJ48, CJ32, UN…), cantidad
-    con − y +, costo como viene en la factura (con ISV si es gravado) y el
-    total. "+ Otra presentación" agrega otra fila del mismo producto (10 CJ48,
-    10 CJ32 y 5 UN en la misma compra). Abajo, cómo queda esa presentación
-    con la compra (cada una tiene su costo): "Costo CJ48: está a L X →
-    quedará a L Y" y el precio de venta igual (el fijo se queda), con la
-    misma cuenta que RegistrarCompra (todas las líneas de esa presentación,
-    en orden). Si el costo se aleja mucho del de hoy, avisa.
+    factura. Compacta para compras de muchos productos: en pantalla ancha
+    cada fila es un renglón de tabla (producto | viene en | cantidad | costo
+    | total) y debajo, en letra chica, el código y cómo queda esa
+    presentación con la compra (cada una tiene su costo): "Costo L X →
+    L Y · Precio L X → L Y" (el fijo se queda), con la misma cuenta que
+    RegistrarCompra. En el teléfono la misma fila en dos o tres renglones.
+    "+ Otra presentación" agrega otra fila del mismo producto justo debajo
+    (10 CJ48, 10 CJ32 y 5 UN en la misma compra); esas filas no repiten el
+    nombre. Si el costo se aleja mucho del de hoy, avisa.
+
+    En la computadora el buscador y la barra del total se quedan a la vista
+    al bajar, y con el teclado: Enter en el buscador agrega y pasa a la
+    cantidad; Enter en la cantidad pasa al costo; Enter en el costo vuelve
+    al buscador.
 
     Si se cambia el proveedor, se quitan los productos que eran de otro.
     Todo pasa en el teléfono; al servidor solo van la búsqueda y Registrar.
@@ -37,7 +43,7 @@
 <x-dynamic-component :component="$getFieldWrapperView()" :field="$field">
     @once
         <style>
-            .lc { --lc-tenue: var(--gray-500); --lc-linea: var(--gray-100); --lc-borde: rgb(3 7 18 / 0.08); display: grid; gap: 1rem; font-size: 0.875rem; }
+            .lc { --lc-tenue: var(--gray-500); --lc-linea: var(--gray-100); --lc-borde: rgb(3 7 18 / 0.08); display: grid; gap: 0.75rem; font-size: 0.875rem; }
             .dark .lc { --lc-tenue: var(--gray-400); --lc-linea: rgb(255 255 255 / 0.06); --lc-borde: rgb(255 255 255 / 0.1); }
 
             /* ── Buscador ── */
@@ -59,70 +65,93 @@
             .dark .lc-aviso-proveedor { color: var(--warning-300); }
 
             /* ── Lista ── */
-            .lc-titulo { font-size: 0.8rem; font-weight: 600; color: var(--lc-tenue); }
+            .lc-tabla { container: lc / inline-size; }
             .lc-lista { display: grid; border-radius: 0.75rem; outline: 1px solid var(--lc-borde); overflow: hidden; }
-            .lc-linea { display: grid; gap: 0.6rem; padding: 0.8rem 0.875rem; border-bottom: 1px solid var(--lc-linea); transition: background-color 0.6s ease; }
-            .lc-linea:last-child { border-bottom: 0; }
+            .lc-cabeza { display: none; }
+            .lc-linea { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.4rem 0.5rem; padding: 0.6rem 0.75rem; border-top: 1px solid var(--lc-linea); transition: background-color 0.6s ease; }
+            .lc-linea.lc-primera { border-top: 0; }
+            .lc-linea.lc-sigue { border-top-color: transparent; padding-top: 0.15rem; }
             .lc-linea.lc-resaltada { background: color-mix(in oklab, var(--primary-500) 12%, transparent); transition: none; }
-            .lc-arriba { display: flex; align-items: flex-start; gap: 0.5rem; }
-            .lc-producto { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.15rem; }
-            .lc-nombre { font-size: 0.875rem; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-            .lc-meta { font-size: 0.75rem; color: var(--lc-tenue); font-variant-numeric: tabular-nums; }
-            .lc-quitar { flex-shrink: 0; display: grid; place-items: center; width: 2rem; height: 2rem; margin: -0.35rem -0.4rem 0 0; border-radius: 0.5rem; color: var(--gray-400); }
+            .lc-producto { order: 0; grid-column: 1; min-width: 0; }
+            .lc-sigue .lc-producto { display: none; }
+            .lc-nombre { font-size: 0.85rem; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+            .lc-quitar { order: 1; grid-column: 2; display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 0.5rem; color: var(--gray-400); }
+            .lc-sigue .lc-quitar { order: 3; }
             .lc-quitar:hover { color: var(--danger-600); background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
-            .lc-quitar svg, .lc-paso svg { width: 1.1rem; height: 1.1rem; }
-
-            .lc-controles { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6rem 1rem; }
-            .lc-campo { display: grid; gap: 0.25rem; }
-            .lc-etiqueta { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--lc-tenue); }
+            .lc-quitar svg, .lc-paso svg { width: 1rem; height: 1rem; }
+            .lc-control { order: 2; grid-column: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+            .lc-monto { order: 4; grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+            .lc-total { font-size: 0.9rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+            .lc-sub { order: 5; grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.9rem; font-size: 0.74rem; line-height: 1.35; color: var(--lc-tenue); font-variant-numeric: tabular-nums; }
+            .lc-sub b { font-weight: 600; color: var(--gray-600); }
+            .dark .lc-sub b { color: var(--gray-300); }
+            .lc-sub strong { font-weight: 700; color: var(--gray-900); }
+            .dark .lc-sub strong { color: #fff; }
+            .lc-sub .lc-sube { color: var(--danger-600); }
+            .lc-sub .lc-baja { color: var(--success-600); }
+            .dark .lc-sub .lc-sube { color: var(--danger-400); }
+            .dark .lc-sub .lc-baja { color: var(--success-400); }
+            .lc-aviso-costo { font-weight: 600; color: var(--warning-600); }
+            .dark .lc-aviso-costo { color: var(--warning-400); }
+            .lc-otra { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 0.25rem; font-weight: 600; color: var(--primary-600); }
+            .dark .lc-otra { color: var(--primary-400); }
+            .lc-otra svg { width: 0.85rem; height: 0.85rem; }
+            .lc-otra:hover { text-decoration: underline; }
 
             /* CJ12 | CJ8 | UN */
-            .lc-segmento { display: inline-flex; flex-wrap: wrap; padding: 0.2rem; border-radius: 0.5rem; background: var(--gray-100); }
+            .lc-segmento { display: inline-flex; flex-wrap: wrap; padding: 0.15rem; border-radius: 0.5rem; background: var(--gray-100); }
             .dark .lc-segmento { background: rgb(255 255 255 / 0.06); }
-            .lc-segmento button { padding: 0.45rem 0.75rem; border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; color: var(--gray-600); }
+            .lc-segmento button { padding: 0.3rem 0.55rem; border-radius: 0.375rem; font-size: 0.75rem; font-weight: 600; line-height: 1.1rem; color: var(--gray-600); }
             .dark .lc-segmento button { color: var(--gray-300); }
             .lc-segmento button.lc-activo { color: #fff; background: var(--primary-600); }
-            .lc-otra { justify-self: start; display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; font-weight: 600; color: var(--primary-600); }
-            .dark .lc-otra { color: var(--primary-400); }
-            .lc-otra svg { width: 1rem; height: 1rem; }
-            .lc-otra:hover { text-decoration: underline; }
+            .lc-segmento button:disabled { opacity: 0.35; text-decoration: line-through; cursor: not-allowed; }
+            .lc-sigla { display: inline-block; padding: 0.3rem 0.55rem; font-size: 0.75rem; font-weight: 700; color: var(--gray-600); }
+            .dark .lc-sigla { color: var(--gray-300); }
 
             /* − cantidad + */
             .lc-stepper { display: inline-flex; align-items: center; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.12); }
             .dark .lc-stepper { outline-color: rgb(255 255 255 / 0.15); }
             .lc-stepper:focus-within { outline: 2px solid var(--primary-600); }
-            .lc-paso { display: grid; place-items: center; width: 2.4rem; height: 2.4rem; color: var(--gray-600); }
+            .lc-paso { display: grid; place-items: center; width: 2rem; height: 2rem; color: var(--gray-600); }
             .dark .lc-paso { color: var(--gray-300); }
             .lc-paso:disabled { opacity: 0.3; cursor: not-allowed; }
-            .lc-stepper input { width: 3.5rem; padding: 0; border: 0; background: transparent; text-align: center; font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+            .lc-stepper input { width: 3.25rem; padding: 0; border: 0; background: transparent; text-align: center; font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
             .lc-stepper input:focus, .lc-costo input:focus { outline: none; box-shadow: none; }
             .lc-stepper input::-webkit-outer-spin-button, .lc-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
             /* L. costo */
-            .lc-costo { display: inline-flex; align-items: center; height: 2.4rem; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.12); }
+            .lc-costo { display: inline-flex; align-items: center; height: 2rem; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.12); }
             .dark .lc-costo { outline-color: rgb(255 255 255 / 0.15); }
             .lc-costo:focus-within { outline: 2px solid var(--primary-600); }
             .lc-costo.lc-falta { outline: 2px solid var(--danger-500); }
-            .lc-costo span { padding-inline-start: 0.6rem; font-size: 0.85rem; color: var(--lc-tenue); }
-            .lc-costo input { width: 7rem; padding: 0 0.6rem 0 0.35rem; border: 0; background: transparent; font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-            .lc-hoy { font-size: 0.72rem; color: var(--lc-tenue); font-variant-numeric: tabular-nums; }
-            .lc-total { margin-inline-start: auto; justify-items: end; }
-            .lc-total strong { font-size: 1rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 2.4rem; }
-            .lc-aviso-costo { font-size: 0.78rem; font-weight: 600; color: var(--warning-600); }
-            .dark .lc-aviso-costo { color: var(--warning-400); }
+            .lc-costo span { padding-inline-start: 0.55rem; font-size: 0.8rem; color: var(--lc-tenue); }
+            .lc-costo input { width: 6.25rem; padding: 0 0.55rem 0 0.3rem; border: 0; background: transparent; font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+            .lc-costo input::placeholder { font-weight: 500; font-size: 0.8rem; }
 
-            /* Está a → quedará a */
-            .lc-queda { display: grid; gap: 0.2rem; padding: 0.5rem 0.65rem; border-radius: 0.5rem; font-size: 0.78rem; color: var(--lc-tenue); background: var(--gray-50); font-variant-numeric: tabular-nums; }
-            .dark .lc-queda { background: rgb(255 255 255 / 0.03); }
-            .lc-queda div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.4rem; }
-            .lc-queda b { font-weight: 700; color: var(--gray-700); }
-            .dark .lc-queda b { color: var(--gray-200); }
-            .lc-queda strong { font-weight: 800; color: var(--gray-950); }
-            .dark .lc-queda strong { color: #fff; }
-            .lc-queda .lc-sube { color: var(--danger-600); }
-            .lc-queda .lc-baja { color: var(--success-600); }
-            .dark .lc-queda .lc-sube { color: var(--danger-400); }
-            .dark .lc-queda .lc-baja { color: var(--success-400); }
+            /* Pantalla ancha: un renglón de tabla por fila, las columnas alineadas. */
+            @container lc (min-width: 46rem) {
+                .lc-lista { grid-template-columns: minmax(9rem, 1fr) auto auto auto minmax(6rem, auto) 2rem; column-gap: 0.85rem; }
+                .lc-cabeza, .lc-linea { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; }
+                .lc-cabeza { padding: 0.45rem 0.75rem; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--lc-tenue); background: var(--gray-50); }
+                .dark .lc-cabeza { background: rgb(255 255 255 / 0.03); }
+                .lc-linea { row-gap: 0.2rem; padding: 0.45rem 0.75rem; }
+                .lc-control, .lc-monto { display: contents; }
+                .lc-linea.lc-primera { border-top: 1px solid var(--lc-linea); }
+                .lc-linea.lc-sigue { padding-top: 0; }
+                .lc-producto { grid-column: 1; grid-row: 1; }
+                .lc-pres { grid-column: 2; grid-row: 1; }
+                .lc-cant { grid-column: 3; grid-row: 1; }
+                .lc-precio { grid-column: 4; grid-row: 1; }
+                .lc-total, .lc-cabeza .lc-der { grid-column: 5; grid-row: 1; justify-self: end; }
+                .lc-quitar { grid-column: 6; grid-row: 1; order: 0; }
+                .lc-sub { grid-column: 1 / -1; grid-row: 2; }
+            }
+
+            @supports not (grid-template-columns: subgrid) {
+                @container lc (min-width: 46rem) {
+                    .lc-cabeza, .lc-linea { grid-template-columns: minmax(9rem, 1fr) 11rem 7.5rem 8.5rem 6.5rem 2rem; column-gap: 0.85rem; }
+                }
+            }
 
             .lc-vacio { padding: 1.5rem 1rem; text-align: center; font-size: 0.875rem; color: var(--lc-tenue); border-radius: 0.75rem; outline: 1px dashed rgb(3 7 18 / 0.15); }
             .dark .lc-vacio { outline-color: rgb(255 255 255 / 0.15); }
@@ -140,8 +169,6 @@
             @media (max-width: 639.98px) {
                 .fi-main .pv > .fi-section:not(.fi-section-not-contained):not(.fi-aside) > .fi-section-header { padding: 0.875rem 1rem; }
                 .fi-main .pv > .fi-section:not(.fi-section-not-contained):not(.fi-divided) > .fi-section-content-ctn > .fi-section-content { padding: 1rem; }
-                .lc-linea { padding: 0.75rem; }
-                .lc-costo input { width: 6rem; }
             }
 
             /* Teléfono y tableta: la barra fija abajo; con el teclado abierto se esconde. */
@@ -150,6 +177,14 @@
                 .dark .lc-barra { border-top-color: rgb(255 255 255 / 0.1); }
                 .fi-main:has(.lc-barra) { padding-bottom: 6.5rem; }
                 .fi-main:has(:is(input:not([type=radio]):not([type=checkbox]), textarea):focus) .lc-barra { transform: translateY(110%); }
+            }
+
+            /* Computadora: con muchos productos, el buscador y el total se quedan a la vista al bajar. */
+            @media (min-width: 1024px) {
+                .lc-buscador { position: sticky; top: calc(var(--topbar-height, 4rem) + 0.5rem); z-index: 12; border-radius: 0.5rem; background: #fff; box-shadow: 0 0 0 0.5rem #fff; }
+                .dark .lc-buscador { background: var(--gray-900); box-shadow: 0 0 0 0.5rem var(--gray-900); }
+                .lc-barra { position: sticky; bottom: 0.75rem; z-index: 11; padding: 0.75rem 1rem 0.75rem 1.25rem; outline-color: rgb(3 7 18 / 0.1); box-shadow: 0 6px 20px rgb(0 0 0 / 0.1); }
+                .dark .lc-barra { outline-color: rgb(255 255 255 / 0.12); box-shadow: 0 6px 20px rgb(0 0 0 / 0.4); }
             }
         </style>
     @endonce
@@ -170,6 +205,7 @@
             espera: null,
             resaltada: null,
             avisoProveedor: '',
+            silencio: false,
 
             init() {
                 if (! Array.isArray(this.lineas)) {
@@ -217,6 +253,13 @@
 
             {{-- ── Buscador ── --}}
             alEnfocar() {
+                {{-- Volvió aquí con Enter desde el costo: espera a que escriba. --}}
+                if (this.silencio) {
+                    this.silencio = false
+
+                    return
+                }
+
                 if (this.proveedor && this.buscar.trim() === '' && ! this.buscado) {
                     this.pedir('')
                 }
@@ -280,14 +323,25 @@
                 return Number(this.presentacion(linea)?.costoHoy) || 0
             },
 
-            {{-- "Cajas de 12", "Unidades". --}}
-            titulo(pr) {
-                const plural = String(pr?.plural ?? 'unidades')
-
-                return plural.charAt(0).toUpperCase() + plural.slice(1)
+            presentaciones(linea) {
+                return this.productos[linea.producto_id]?.presentaciones ?? []
             },
 
-            {{-- Tocar un producto: entra en su presentación más grande con el costo vacío (se escribe el de la factura). Si ya estaba en esa presentación, le suma 1. --}}
+            {{-- La fila es otra presentación del producto de arriba: no repite el nombre. --}}
+            sigue(i) {
+                return i > 0 && Number(this.lineas[i - 1]?.producto_id) === Number(this.lineas[i]?.producto_id)
+            },
+
+            {{-- Computadora con teclado y ratón: el foco va solo de un campo al otro. En el teléfono no, para no abrir el teclado. --}}
+            conTeclado() {
+                return window.matchMedia('(min-width: 1024px) and (pointer: fine)').matches
+            },
+
+            enfocar(i, campo) {
+                this.$nextTick(() => this.$root.querySelectorAll('.lc-linea')[i]?.querySelector(campo)?.focus())
+            },
+
+            {{-- Tocar un producto: entra en su presentación más grande con el costo vacío (se escribe el de la factura), debajo de las otras filas de ese producto. Si ya estaba en esa presentación, le suma 1. --}}
             agregar(p) {
                 const pr = (p.presentaciones ?? [])[0]
 
@@ -302,14 +356,34 @@
                 if (i >= 0) {
                     this.lineas[i].cantidad = Math.min(this.n(this.lineas[i].cantidad) + 1, @js($config['maximo']))
                 } else {
-                    this.lineas.push({ producto_id: Number(p.id), presentacion_id: Number(pr.id), cantidad: 1, costo: '' })
-                    i = this.lineas.length - 1
+                    const ultima = this.lineas.findLastIndex((linea) => Number(linea.producto_id) === Number(p.id))
+                    i = ultima >= 0 ? ultima + 1 : this.lineas.length
+                    this.lineas.splice(i, 0, { producto_id: Number(p.id), presentacion_id: Number(pr.id), cantidad: 1, costo: '' })
                 }
 
                 this.avisoProveedor = ''
                 this.cerrarBusqueda()
                 this.$refs.buscador.blur()
                 this.resaltar(i)
+
+                if (this.conTeclado()) {
+                    this.enfocar(i, '.lc-cant input')
+                }
+            },
+
+            {{-- Enter en la cantidad: al costo de esa fila. --}}
+            alCantidadEnter(evento) {
+                evento.target.closest('.lc-linea')?.querySelector('.lc-precio input')?.focus()
+            },
+
+            {{-- Enter en el costo: listo; en la computadora, de vuelta al buscador por el siguiente producto. --}}
+            alCostoEnter(evento) {
+                evento.target.blur()
+
+                if (this.conTeclado() && this.proveedor) {
+                    this.silencio = true
+                    this.$refs.buscador.focus({ preventScroll: true })
+                }
             },
 
             resaltar(i) {
@@ -353,9 +427,18 @@
                 this.resaltar(i + 1)
             },
 
+            {{-- Esa presentación ya tiene otra fila de este producto: no se escoge dos veces (se suma en la que ya está). --}}
+            ocupada(i, pr) {
+                const linea = this.lineas[i]
+
+                return this.lineas.some((otra, j) => j !== i && Number(otra.producto_id) === Number(linea?.producto_id) && Number(otra.presentacion_id) === Number(pr.id))
+            },
+
             {{-- Otra presentación: el costo escrito era de la otra, así que se vuelve a escribir. --}}
-            cambiarPresentacion(linea, pr) {
-                if (Number(linea.presentacion_id) === Number(pr.id)) {
+            cambiarPresentacion(i, pr) {
+                const linea = this.lineas[i]
+
+                if (! linea || Number(linea.presentacion_id) === Number(pr.id) || this.ocupada(i, pr)) {
                     return
                 }
 
@@ -464,15 +547,13 @@
                 return { costo, precio, fijo }
             },
 
-            {{-- "está a L 867.10 → quedará a L 880.00"; sin costo escrito, solo "está a". --}}
-            cambioTexto(antes, despues, sinAntes) {
-                const desde = antes > 0 ? 'está a ' + this.dinero(antes) : sinAntes
-
+            {{-- "L 147.20 →" (y en negrita a cuánto queda); sin costo escrito todavía, "hoy L 147.20". --}}
+            desde(antes, despues) {
                 if (despues === null) {
-                    return desde
+                    return antes > 0 ? 'hoy ' + this.dinero(antes) : 'sin definir'
                 }
 
-                return desde + ' → quedará a '
+                return (antes > 0 ? this.dinero(antes) : 'nuevo') + ' →'
             },
 
             claseCambio(antes, despues) {
@@ -495,7 +576,7 @@
                 const diferencia = (costo - hoy) / hoy
 
                 return Math.abs(diferencia) >= 0.25
-                    ? 'Ojo: ' + Math.round(Math.abs(diferencia) * 100) + '% ' + (diferencia > 0 ? 'más caro' : 'más barato') + ' que hoy (' + this.dinero(hoy) + '). ¿Está bien escrito?'
+                    ? 'Ojo: ' + Math.round(Math.abs(diferencia) * 100) + '% ' + (diferencia > 0 ? 'más caro' : 'más barato') + ' que hoy. ¿Está bien escrito?'
                     : ''
             },
 
@@ -562,96 +643,103 @@
         <div class="lc-aviso-proveedor" x-show="avisoProveedor !== ''" x-cloak x-text="avisoProveedor"></div>
 
         {{-- Lista --}}
-        <div class="lc-titulo" x-show="lineas.length > 0" x-text="textoCuantos() + ' en la compra'"></div>
+        <div class="lc-tabla" x-show="lineas.length > 0">
+            <div class="lc-lista">
+                <div class="lc-cabeza" aria-hidden="true">
+                    <span>Producto</span>
+                    <span>Viene en</span>
+                    <span>Cantidad</span>
+                    <span>Costo factura</span>
+                    <span class="lc-der">Total</span>
+                </div>
 
-        <div class="lc-lista" x-show="lineas.length > 0">
-            <template x-for="(linea, i) in lineas" x-bind:key="linea.producto_id + '-' + linea.presentacion_id + '-' + i">
-                <div class="lc-linea" x-bind:class="{ 'lc-resaltada': resaltada === i }" x-effect="if (resaltada === i) $nextTick(() => $el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))">
-                    <div class="lc-arriba">
+                <template x-for="(linea, i) in lineas" x-bind:key="linea.producto_id + '-' + linea.presentacion_id + '-' + i">
+                    <div class="lc-linea" x-bind:class="{ 'lc-primera': i === 0, 'lc-sigue': sigue(i), 'lc-resaltada': resaltada === i }" x-effect="if (resaltada === i) $nextTick(() => $el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))">
                         <div class="lc-producto">
                             <div class="lc-nombre" x-text="productos[linea.producto_id]?.descripcion ?? ('Producto ' + linea.producto_id)"></div>
-                            <div class="lc-meta" x-text="meta(linea)"></div>
                         </div>
-                        <button type="button" class="lc-quitar" x-on:click="quitar(i)" aria-label="Quitar de la compra" title="Quitar">
+
+                        <button type="button" class="lc-quitar" x-on:click="quitar(i)" tabindex="-1" aria-label="Quitar de la compra" title="Quitar">
                             {{ svg('heroicon-m-x-mark') }}
                         </button>
-                    </div>
 
-                    <div class="lc-controles">
-                        <div class="lc-campo" x-show="(productos[linea.producto_id]?.presentaciones ?? []).length > 1">
-                            <span class="lc-etiqueta">Viene en</span>
-                            <div class="lc-segmento">
-                                <template x-for="pr in (productos[linea.producto_id]?.presentaciones ?? [])" x-bind:key="'pres-' + pr.id">
-                                    <button type="button" x-bind:class="{ 'lc-activo': Number(linea.presentacion_id) === Number(pr.id) }" x-bind:title="pr.nombre" x-on:click="cambiarPresentacion(linea, pr)" x-text="pr.sigla"></button>
-                                </template>
+                        <div class="lc-control">
+                            {{-- En qué presentación viene --}}
+                            <div class="lc-pres">
+                                <div class="lc-segmento" x-show="presentaciones(linea).length > 1">
+                                    <template x-for="pr in presentaciones(linea)" x-bind:key="'pres-' + pr.id">
+                                        <button type="button" tabindex="-1" x-bind:class="{ 'lc-activo': Number(linea.presentacion_id) === Number(pr.id) }" x-bind:disabled="ocupada(i, pr)" x-bind:title="ocupada(i, pr) ? pr.nombre + ': ya está en otra fila' : pr.nombre" x-on:click="cambiarPresentacion(i, pr)" x-text="pr.sigla"></button>
+                                    </template>
+                                </div>
+                                <span class="lc-sigla" x-show="presentaciones(linea).length <= 1" x-bind:title="presentacion(linea)?.nombre ?? ''" x-text="presentacion(linea)?.sigla ?? ''"></span>
+                            </div>
+
+                            <div class="lc-cant">
+                                <div class="lc-stepper">
+                                    <button type="button" class="lc-paso" tabindex="-1" x-on:click="mover(linea, -1)" x-bind:disabled="n(linea.cantidad) <= 1" aria-label="Uno menos">{{ svg('heroicon-m-minus') }}</button>
+                                    <input
+                                        type="number"
+                                        inputmode="numeric"
+                                        min="1"
+                                        enterkeyhint="next"
+                                        x-bind:aria-label="'Cantidad de ' + (presentacion(linea)?.plural ?? 'unidades')"
+                                        x-bind:value="linea.cantidad"
+                                        x-on:focus="$event.target.select()"
+                                        x-on:change="fijarCantidad(linea, $event.target.value); $event.target.value = linea.cantidad"
+                                        x-on:keydown.enter.prevent="alCantidadEnter($event)"
+                                    >
+                                    <button type="button" class="lc-paso" tabindex="-1" x-on:click="mover(linea, 1)" aria-label="Uno más">{{ svg('heroicon-m-plus') }}</button>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="lc-campo">
-                            <span class="lc-etiqueta" x-text="titulo(presentacion(linea))"></span>
-                            <div class="lc-stepper">
-                                <button type="button" class="lc-paso" x-on:click="mover(linea, -1)" x-bind:disabled="n(linea.cantidad) <= 1" aria-label="Uno menos">{{ svg('heroicon-m-minus') }}</button>
-                                <input
-                                    type="number"
-                                    inputmode="numeric"
-                                    min="1"
-                                    aria-label="Cantidad"
-                                    x-bind:value="linea.cantidad"
-                                    x-on:focus="$event.target.select()"
-                                    x-on:change="fijarCantidad(linea, $event.target.value); $event.target.value = linea.cantidad"
-                                    x-on:keydown.enter.prevent="$event.target.blur()"
-                                >
-                                <button type="button" class="lc-paso" x-on:click="mover(linea, 1)" aria-label="Uno más">{{ svg('heroicon-m-plus') }}</button>
+                        <div class="lc-monto">
+                            <div class="lc-precio">
+                                <div class="lc-costo" x-bind:class="{ 'lc-falta': linea.costo === '' }">
+                                    <span>{{ $config['simbolo'] }}</span>
+                                    <input
+                                        type="text"
+                                        inputmode="decimal"
+                                        enterkeyhint="done"
+                                        x-bind:placeholder="productos[linea.producto_id]?.gravado ? 'con ISV' : 'exento'"
+                                        x-bind:aria-label="'Costo de ' + (presentacion(linea)?.sigla ?? '') + ' como viene en la factura' + (productos[linea.producto_id]?.gravado ? ', con ISV' : '')"
+                                        x-bind:value="mostrarCosto(linea.costo)"
+                                        x-on:focus="$event.target.select()"
+                                        x-on:change="fijarCosto(linea, $event.target.value); $event.target.value = mostrarCosto(linea.costo)"
+                                        x-on:keydown.enter.prevent="alCostoEnter($event)"
+                                    >
+                                </div>
                             </div>
+
+                            <div class="lc-total" x-text="dinero(totalLinea(linea))"></div>
                         </div>
 
-                        <div class="lc-campo">
-                            <span class="lc-etiqueta" x-text="'Costo ' + (presentacion(linea)?.sigla ?? '') + (productos[linea.producto_id]?.gravado ? ' con ISV' : '')"></span>
-                            <div class="lc-costo" x-bind:class="{ 'lc-falta': linea.costo === '' }">
-                                <span>{{ $config['simbolo'] }}</span>
-                                <input
-                                    type="text"
-                                    inputmode="decimal"
-                                    placeholder="0.00"
-                                    aria-label="Costo como viene en la factura"
-                                    x-bind:value="mostrarCosto(linea.costo)"
-                                    x-on:focus="$event.target.select()"
-                                    x-on:change="fijarCosto(linea, $event.target.value); $event.target.value = mostrarCosto(linea.costo)"
-                                    x-on:keydown.enter.prevent="$event.target.blur()"
-                                >
-                            </div>
-                            <span class="lc-hoy" x-show="linea.costo === ''" x-text="'Escriba el de la factura'"></span>
-                        </div>
-
-                        <div class="lc-campo lc-total">
-                            <span class="lc-etiqueta">Total</span>
-                            <strong x-text="dinero(totalLinea(linea))"></strong>
+                        {{-- Código y cómo quedan el costo y el precio de esta presentación con la compra --}}
+                        <div class="lc-sub">
+                            <span x-show="! sigue(i)" x-text="meta(linea)"></span>
+                            <span x-show="presentacion(linea)">
+                                <b>Costo</b>
+                                <span x-text="desde(hoy(linea), queda(linea)?.costo ?? null)"></span>
+                                <strong x-show="queda(linea)" x-bind:class="claseCambio(hoy(linea), queda(linea)?.costo ?? null)" x-text="dinero(queda(linea)?.costo ?? 0)"></strong>
+                            </span>
+                            <span x-show="presentacion(linea) && ! queda(linea)?.fijo">
+                                <b>Precio</b>
+                                <span x-text="desde(Number(presentacion(linea)?.precioHoy ?? 0), queda(linea)?.precio ?? null)"></span>
+                                <strong x-show="queda(linea)" x-bind:class="claseCambio(Number(presentacion(linea)?.precioHoy ?? 0), queda(linea)?.precio ?? null)" x-text="dinero(queda(linea)?.precio ?? 0)"></strong>
+                            </span>
+                            <span x-show="queda(linea)?.fijo" x-cloak>
+                                <b>Precio</b>
+                                <span x-text="dinero(Number(presentacion(linea)?.precioHoy ?? 0)) + ' fijo, no cambia'"></span>
+                            </span>
+                            <span class="lc-aviso-costo" x-show="avisoCosto(linea) !== ''" x-text="avisoCosto(linea)"></span>
+                            <button type="button" class="lc-otra" tabindex="-1" x-show="sinFila(linea).length > 0 && lineas.findLastIndex((otra) => Number(otra.producto_id) === Number(linea.producto_id)) === i" x-on:click="otraPresentacion(i)">
+                                {{ svg('heroicon-m-plus') }}
+                                <span x-text="'Otra presentación (' + sinFila(linea).map((pr) => pr.sigla).join(', ') + ')'"></span>
+                            </button>
                         </div>
                     </div>
-
-                    {{-- Cómo queda con la compra --}}
-                    <div class="lc-queda" x-show="presentacion(linea)">
-                        <div>
-                            <b x-text="'Costo ' + (presentacion(linea)?.sigla ?? '') + ':'"></b>
-                            <span x-text="cambioTexto(hoy(linea), queda(linea)?.costo ?? null, 'sin costo todavía')"></span>
-                            <strong x-show="queda(linea)" x-bind:class="claseCambio(hoy(linea), queda(linea)?.costo ?? null)" x-text="dinero(queda(linea)?.costo ?? 0)"></strong>
-                        </div>
-                        <div>
-                            <b x-text="'Precio de venta ' + (presentacion(linea)?.sigla ?? '') + ':'"></b>
-                            <span x-text="cambioTexto(Number(presentacion(linea)?.precioHoy ?? 0), queda(linea)?.precio ?? null, 'sin precio todavía')"></span>
-                            <strong x-show="queda(linea)" x-bind:class="claseCambio(Number(presentacion(linea)?.precioHoy ?? 0), queda(linea)?.precio ?? null)" x-text="dinero(queda(linea)?.precio ?? 0)"></strong>
-                            <span x-show="queda(linea)?.fijo" x-cloak>(fijo, no cambia)</span>
-                        </div>
-                    </div>
-
-                    <div class="lc-aviso-costo" x-show="avisoCosto(linea) !== ''" x-text="avisoCosto(linea)"></div>
-
-                    <button type="button" class="lc-otra" x-show="sinFila(linea).length > 0 && lineas.findLastIndex((otra) => Number(otra.producto_id) === Number(linea.producto_id)) === i" x-on:click="otraPresentacion(i)">
-                        {{ svg('heroicon-m-plus') }}
-                        <span x-text="'Otra presentación de este producto (' + sinFila(linea).map((pr) => pr.sigla).join(', ') + ')'"></span>
-                    </button>
-                </div>
-            </template>
+                </template>
+            </div>
         </div>
 
         <div class="lc-vacio" x-show="lineas.length === 0" x-text="proveedor ? 'Todavía no hay productos. Búsquelos arriba y tóquelos para agregarlos.' : 'Escoja el proveedor y después busque sus productos arriba.'"></div>

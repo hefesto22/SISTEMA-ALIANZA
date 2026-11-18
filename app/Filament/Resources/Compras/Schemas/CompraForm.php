@@ -25,6 +25,10 @@ use Filament\Support\Icons\Heroicon;
  * viene en la factura; abajo dice a cuánto está y a cuánto quedará el
  * costo y el precio de venta. Si el costo se aleja mucho del de hoy, avisa
  * antes de guardar. "Registrar compra" va en la barra del total.
+ *
+ * Compacta: los datos de la factura en un renglón en la computadora y las
+ * secciones con menos relleno, para que una compra de muchos productos no
+ * se haga larga.
  */
 final class CompraForm
 {
@@ -37,7 +41,8 @@ final class CompraForm
             ->components([
                 Section::make('Compra')
                     ->icon(Heroicon::OutlinedTruck)
-                    ->columns(['default' => 1, 'md' => $veTodo ? 4 : 3])
+                    ->compact()
+                    ->columns(['default' => 1, 'sm' => 2, 'lg' => $veTodo ? 5 : 4])
                     ->extraAttributes(['class' => 'pv'])
                     ->schema([
                         Select::make('proveedor_id')
@@ -47,7 +52,7 @@ final class CompraForm
                             ->required()
                             // Los productos que se buscan abajo son de este proveedor.
                             ->live()
-                            ->columnSpan(['md' => $veTodo ? 2 : 1]),
+                            ->columnSpan(['sm' => 2]),
                         Select::make('bodega_id')
                             ->label('Entra a la bodega')
                             ->options(fn (): array => Bodega::query()->activas()->orderBy('nombre')->pluck('nombre', 'id')->all())
@@ -56,7 +61,7 @@ final class CompraForm
                             ->visible($veTodo),
                         TextInput::make('factura_proveedor')
                             ->label('Factura del proveedor')
-                            ->placeholder('Ej. 000-001-01-00012345')
+                            ->placeholder('000-001-01-00012345')
                             ->maxLength(60),
                         DatePicker::make('fecha')
                             ->label('Fecha de la factura')
@@ -65,8 +70,9 @@ final class CompraForm
                             ->required(),
                     ]),
                 Section::make('Productos')
-                    ->description('Toque el producto para agregarlo y escoja en qué presentación viene. Costo como viene en la factura, con ISV si es gravado. Al registrar sube la existencia y se recalculan costo y precios de venta.')
+                    ->description('Busque el producto y tóquelo. Costo como viene en la factura (con ISV si es gravado).')
                     ->icon(Heroicon::OutlinedArchiveBox)
+                    ->compact()
                     ->extraAttributes(['class' => 'pv'])
                     ->schema([
                         LineasCompra::make('lineas')
