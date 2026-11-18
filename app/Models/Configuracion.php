@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\FrecuenciaComision;
 use App\Enums\MetodoCosto;
 use App\Enums\PrecioAlDespachar;
 use Illuminate\Database\Eloquent\Model;
@@ -19,11 +20,15 @@ use Illuminate\Support\Facades\Cache;
  *   el despacho (el del día o el del pedido, sin vender a pérdida).
  * - controlar_existencias: si está encendido, no se despacha más de lo que
  *   hay en la bodega. Se enciende cuando ya está cargado el inventario.
+ * - comision_frecuencia y comision_corte: cada cuánto se pagan las
+ *   comisiones; con quincenal, la primera quincena va del 1 al día de corte.
  *
  * @property int $id
  * @property MetodoCosto $metodo_costo
  * @property PrecioAlDespachar $precio_al_despachar
  * @property bool $controlar_existencias
+ * @property FrecuenciaComision $comision_frecuencia
+ * @property int $comision_corte
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -38,6 +43,8 @@ class Configuracion extends Model
         'metodo_costo',
         'precio_al_despachar',
         'controlar_existencias',
+        'comision_frecuencia',
+        'comision_corte',
     ];
 
     /**
@@ -49,6 +56,8 @@ class Configuracion extends Model
             'metodo_costo'          => MetodoCosto::class,
             'precio_al_despachar'   => PrecioAlDespachar::class,
             'controlar_existencias' => 'boolean',
+            'comision_frecuencia'   => FrecuenciaComision::class,
+            'comision_corte'        => 'integer',
         ];
     }
 
@@ -59,6 +68,8 @@ class Configuracion extends Model
             'metodo_costo'          => MetodoCosto::Promedio,
             'precio_al_despachar'   => PrecioAlDespachar::Despacho,
             'controlar_existencias' => false,
+            'comision_frecuencia'   => FrecuenciaComision::Quincenal,
+            'comision_corte'        => 14,
         ]));
 
         return $configuracion;

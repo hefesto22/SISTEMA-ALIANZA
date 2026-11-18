@@ -14,9 +14,9 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * Roles de trabajo con sus permisos (formato Shield "Accion:Modelo").
  *
- *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI), compras e inventario de todas las bodegas, reportes de todas, y usuarios.
- *  bodega        → actualiza precios, ve historial, arma las rutas y las promociones de su bodega, valida e imprime (factura), registra compras, ajusta la existencia y saca los reportes de su bodega.
- *  vendedor      → consulta precios y promociones vigentes, maneja los clientes de sus rutas y su preventa.
+ *  administrador → todo el catálogo, precios, márgenes, promociones, rutas, pedidos, facturación (CAI), compras e inventario de todas las bodegas, reportes y KPIs de todas, comisiones (grupos, metas, cierre y periodo de pago), y usuarios.
+ *  bodega        → actualiza precios, ve historial, arma las rutas y las promociones de su bodega, valida e imprime (factura), registra compras, ajusta la existencia, saca los reportes y KPIs de su bodega, ve las comisiones de sus vendedores y les pone metas.
+ *  vendedor      → consulta precios y promociones vigentes, maneja los clientes de sus rutas, su preventa y ve sus metas.
  *
  * Ojo: al correrlo de nuevo, los permisos de estos tres roles vuelven a
  * estos valores. Los cambios finos se hacen después desde Roles en el panel.
@@ -26,7 +26,7 @@ class RolesSistemaSeeder extends Seeder
     private const TODO = ['viewAny', 'view', 'create', 'update', 'delete', 'restore', 'forceDelete', 'forceDeleteAny', 'restoreAny', 'replicate', 'reorder'];
 
     /** Páginas de reportes (Shield: "View:Pagina"). Cada quien ve lo de su alcance. */
-    private const REPORTES = ['View:ReporteVentas', 'View:ReporteInventario'];
+    private const REPORTES = ['View:ReporteVentas', 'View:ReporteInventario', 'View:KpisVentas'];
 
     public function run(): void
     {
@@ -49,6 +49,11 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Cai', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Factura', ['viewAny', 'view']),
                 ...self::REPORTES,
+                ...$this->permisos('ComisionGrupo', ['viewAny', 'view', 'create', 'update', 'delete']),
+                ...$this->permisos('ComisionMeta', ['viewAny', 'view', 'create', 'update', 'delete']),
+                'View:Comisiones',
+                'Cerrar:Comisiones',
+                'Configurar:Comisiones',
             ],
             Rol::Bodega->value => [
                 ...$this->permisos('Producto', ['viewAny', 'view', 'update', 'ajustarExistencia']),
@@ -63,12 +68,16 @@ class RolesSistemaSeeder extends Seeder
                 ...$this->permisos('Cai', ['viewAny', 'view']),
                 ...$this->permisos('Factura', ['viewAny', 'view']),
                 ...self::REPORTES,
+                ...$this->permisos('ComisionGrupo', ['viewAny', 'view']),
+                ...$this->permisos('ComisionMeta', ['viewAny', 'view', 'create', 'update', 'delete']),
+                'View:Comisiones',
             ],
             Rol::Vendedor->value => [
                 ...$this->permisos('Producto', ['viewAny', 'view']),
                 ...$this->permisos('Cliente', ['viewAny', 'view', 'create', 'update']),
                 ...$this->permisos('Pedido', ['viewAny', 'view', 'create', 'update', 'delete']),
                 ...$this->permisos('Promocion', ['viewAny', 'view']),
+                'View:MisMetas',
             ],
         ];
 

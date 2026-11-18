@@ -18,13 +18,18 @@ use Illuminate\Support\Carbon;
  * Ej.: MERHONSA → ACEITES 13%, SUAVIZANTES 18%. Unilever → GENERAL 16%.
  * El margen se guarda como fracción: 0.13 = 13%.
  *
+ * Puede ir en un grupo de comisión ("LIMPIEZA" junta categorías de varios
+ * proveedores): lo que se vende de ella paga la comisión de ese grupo.
+ *
  * @property int $id
  * @property int $proveedor_id
  * @property string $nombre
  * @property float $margen
+ * @property int|null $comision_grupo_id
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Proveedor $proveedor
+ * @property-read ComisionGrupo|null $comisionGrupo
  */
 class Categoria extends Model
 {
@@ -40,6 +45,7 @@ class Categoria extends Model
         'proveedor_id',
         'nombre',
         'margen',
+        'comision_grupo_id',
     ];
 
     /**
@@ -58,6 +64,22 @@ class Categoria extends Model
     public function proveedor(): BelongsTo
     {
         return $this->belongsTo(Proveedor::class);
+    }
+
+    /**
+     * @return BelongsTo<ComisionGrupo, $this>
+     */
+    public function comisionGrupo(): BelongsTo
+    {
+        return $this->belongsTo(ComisionGrupo::class);
+    }
+
+    /**
+     * "MERHONSA · DETERGENTES": la categoría con su proveedor (hay nombres repetidos entre proveedores).
+     */
+    public function etiqueta(): string
+    {
+        return $this->proveedor->etiqueta().' · '.$this->nombre;
     }
 
     /**
