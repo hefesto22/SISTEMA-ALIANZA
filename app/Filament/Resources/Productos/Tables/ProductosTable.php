@@ -65,7 +65,7 @@ class ProductosTable
                     ->state(fn (Producto $record): array => self::costos($record))
                     ->listWithLineBreaks()
                     ->description(fn (Producto $record): string => self::porcentaje($record->margenAplicado()).' util.')
-                    ->tooltip(fn (Producto $record): ?string => $record->gravado ? 'Costo promedio de cada presentación, con ISV' : 'Costo promedio de cada presentación')
+                    ->tooltip(fn (Producto $record): string => $record->gravado ? 'Costo promedio de cada presentación, con ISV' : 'Costo promedio de cada presentación')
                     ->alignEnd()
                     ->color('gray')
                     ->visible($verCostos),

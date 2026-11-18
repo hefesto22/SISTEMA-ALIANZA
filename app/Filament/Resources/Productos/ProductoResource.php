@@ -22,7 +22,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\Relation;
 
 class ProductoResource extends Resource
 {
@@ -94,7 +94,12 @@ class ProductoResource extends Resource
                 'categoria',
                 'presentaciones.unidadMedida',
                 'unidadMedida',
-                'existencias' => fn (HasMany $existencias): HasMany => $todas ? $existencias : $existencias->where('bodega_id', $bodegaId),
+                // Al cargar la relación llega la relación (no un Builder); se filtra en ella.
+                'existencias' => function (Relation $existencias) use ($todas, $bodegaId): void {
+                    if (! $todas) {
+                        $existencias->where('bodega_id', $bodegaId);
+                    }
+                },
             ])
             ->addSelect(['existencia' => $total]);
     }

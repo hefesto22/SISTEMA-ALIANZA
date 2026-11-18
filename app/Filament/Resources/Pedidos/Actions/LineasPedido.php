@@ -73,7 +73,7 @@ final class LineasPedido
         }
 
         if ($segunExistencia && Configuracion::actual()->controlar_existencias) {
-            $sale = self::loQueAlcanza($items->all(), $sale, $existencias);
+            $sale = self::loQueAlcanza(array_values($items->all()), $sale, $existencias);
         }
 
         $filas = [];
