@@ -144,7 +144,7 @@ class KpisVentas extends Page
 
         return [
             'periodo'    => $kpis->periodo->texto(),
-            'alcance'    => $kpis->bodega?->nombre ?? 'Todas las bodegas',
+            'alcance'    => $kpis->bodega->nombre ?? 'Todas las bodegas',
             'resumen'    => $kpis->resumen(),
             'vendedores' => $kpis->vendedorId === null ? $kpis->vendedores() : [],
             'grupos'     => $kpis->grupos(),

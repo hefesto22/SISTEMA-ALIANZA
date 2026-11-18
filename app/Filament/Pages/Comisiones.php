@@ -245,7 +245,7 @@ class Comisiones extends Page
     {
         $usuario = Acceso::usuario() ?? abort(403);
 
-        return AlcanceReporte::bodega($usuario, $this->filtros['bodega_id'] ?? null)?->nombre ?? 'Todas las bodegas';
+        return AlcanceReporte::bodega($usuario, $this->filtros['bodega_id'] ?? null)->nombre ?? 'Todas las bodegas';
     }
 
     /**

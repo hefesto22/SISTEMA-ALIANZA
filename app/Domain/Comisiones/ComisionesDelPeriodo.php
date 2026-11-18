@@ -332,7 +332,7 @@ final class ComisionesDelPeriodo
         $resumenes = [];
 
         foreach (self::ordenar($usuarios->all()) as $id => $usuario) {
-            $filas = ($liquidaciones->get($id) ?? collect())->map(fn (ComisionLiquidacion $l): FilaComision => new FilaComision(
+            $filas = array_values(($liquidaciones->get($id) ?? collect())->map(fn (ComisionLiquidacion $l): FilaComision => new FilaComision(
                 grupoId: $l->comision_grupo_id,
                 grupo: $l->grupo,
                 venta: $l->venta,
@@ -344,7 +344,7 @@ final class ComisionesDelPeriodo
                 porcentaje: $l->porcentaje,
                 comision: $l->comision,
                 meta: $l->meta,
-            ))->values()->all();
+            ))->all());
 
             $resumenes[] = new ResumenVendedor(
                 id: $id,
