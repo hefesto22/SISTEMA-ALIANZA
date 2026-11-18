@@ -19,6 +19,7 @@ class ManageComisionMetas extends ManageRecords
         return [
             CreateAction::make()
                 ->label('Nueva meta')
+                ->modalHeading('Nueva meta de vendedor')
                 ->modalWidth(Width::ThreeExtraLarge)
                 ->using(fn (array $data): ComisionMeta => ComisionMetaResource::guardar(null, $data)),
         ];

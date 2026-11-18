@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Models\Configuracion;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -32,6 +34,9 @@ return new class extends Migration
             $table->string('comision_frecuencia', 10)->default('quincenal');
             $table->unsignedSmallInteger('comision_corte')->default(14);
         });
+
+        // La configuración en caché todavía no trae las columnas nuevas.
+        Cache::forget(Configuracion::CACHE);
 
         Schema::create('comision_grupos', function (Blueprint $table): void {
             $table->id();
@@ -129,5 +134,7 @@ return new class extends Migration
         Schema::table('configuracion', function (Blueprint $table): void {
             $table->dropColumn(['comision_frecuencia', 'comision_corte']);
         });
+
+        Cache::forget(Configuracion::CACHE);
     }
 };

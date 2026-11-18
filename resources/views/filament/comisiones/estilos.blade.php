@@ -23,6 +23,8 @@
     .cm-total span { display: block; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rp-tenue); }
     .cm-total strong { font-size: 1.15rem !important; color: var(--rp-acento); }
 
+    .cm-enlace { font-weight: 600; color: var(--primary-600); text-decoration: underline; text-underline-offset: 2px; }
+    .dark .cm-enlace { color: var(--primary-400); }
     .cm-tag { display: inline-block; margin-inline-start: 0.35rem; padding: 0 0.35rem; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--rp-tenue); border: 1px solid var(--rp-borde); border-radius: 0.25rem; vertical-align: middle; }
     .cm-pct { display: inline-block; min-width: 3rem; padding: 0.1rem 0.45rem; border-radius: 999px; text-align: center; font-weight: 700; font-size: 0.8rem; background: var(--rp-suave); border: 1px solid var(--rp-borde); }
     .cm-pct.llego { color: #fff; background: var(--cm-bien); border-color: transparent; }

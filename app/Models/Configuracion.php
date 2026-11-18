@@ -34,7 +34,11 @@ use Illuminate\Support\Facades\Cache;
  */
 class Configuracion extends Model
 {
-    private const CACHE = 'configuracion';
+    /**
+     * Va con versión: lo que quedó en caché antes de agregar columnas (con una
+     * migración) no las trae. Súbale el número al agregar una columna.
+     */
+    public const CACHE = 'configuracion:v2';
 
     protected $table = 'configuracion';
 

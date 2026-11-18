@@ -49,6 +49,8 @@ class ComisionMetaResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Metas por vendedor';
 
+    protected static bool $hasTitleCaseModelLabel = false;
+
     protected static ?int $navigationSort = 2;
 
     public static function getNavigationGroup(): ?string
@@ -147,6 +149,7 @@ class ComisionMetaResource extends Resource
             ->emptyStateDescription('Ponga una meta propia a un vendedor cuando su ruta necesite otra escala (más chica, alguien que empieza…).')
             ->recordActions([
                 EditAction::make()
+                    ->modalHeading(fn (ComisionMeta $record): string => 'Meta de '.$record->vendedor->name.' en '.$record->grupo->nombre)
                     ->modalWidth(Width::ThreeExtraLarge)
                     ->mutateRecordDataUsing(fn (array $data, ComisionMeta $record): array => [...$data, 'escalones' => $record->escala()->paraGuardar()])
                     ->using(fn (array $data, ComisionMeta $record): ComisionMeta => self::guardar($record, $data)),

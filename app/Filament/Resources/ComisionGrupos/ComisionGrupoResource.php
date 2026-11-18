@@ -50,6 +50,8 @@ class ComisionGrupoResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Grupos de comisión';
 
+    protected static bool $hasTitleCaseModelLabel = false;
+
     protected static ?int $navigationSort = 3;
 
     public static function getNavigationGroup(): ?string
@@ -136,6 +138,7 @@ class ComisionGrupoResource extends Resource
             ->emptyStateDescription('Cree un grupo (ej. Limpieza), escoja sus categorías y ponga la escala: desde cuánto vende y qué % gana.')
             ->recordActions([
                 EditAction::make()
+                    ->modalHeading(fn (ComisionGrupo $record): string => 'Grupo '.$record->nombre)
                     ->modalWidth(Width::FourExtraLarge)
                     ->mutateRecordDataUsing(fn (array $data, ComisionGrupo $record): array => [
                         ...$data,

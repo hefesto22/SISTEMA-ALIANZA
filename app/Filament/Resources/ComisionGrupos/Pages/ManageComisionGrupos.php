@@ -19,6 +19,7 @@ class ManageComisionGrupos extends ManageRecords
         return [
             CreateAction::make()
                 ->label('Nuevo grupo')
+                ->modalHeading('Nuevo grupo de comisión')
                 ->modalWidth(Width::FourExtraLarge)
                 ->using(fn (array $data): ComisionGrupo => ComisionGrupoResource::guardar(null, $data)),
         ];

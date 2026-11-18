@@ -56,9 +56,12 @@ class MisMetas extends Page
         return 'Ventas';
     }
 
+    /**
+     * Solo quien vende (administración ve las de todos en Comisiones).
+     */
     public static function canAccess(): bool
     {
-        return Acceso::puede('View:MisMetas');
+        return Acceso::esVendedor() && Acceso::puede('View:MisMetas');
     }
 
     public function mount(): void

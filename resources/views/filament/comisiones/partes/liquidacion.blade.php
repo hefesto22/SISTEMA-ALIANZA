@@ -43,7 +43,7 @@
         <div class="rp-vacio">
             Todavía no hay grupos de comisión.
             @if ($d['urlGrupos'] !== null)
-                <a href="{{ $d['urlGrupos'] }}" class="text-primary-600 underline dark:text-primary-400">Cree el primero</a>
+                <a href="{{ $d['urlGrupos'] }}" class="cm-enlace">Cree el primero</a>
                 (ej. Limpieza): escoja sus categorías y ponga desde cuánto vende y qué % gana.
             @endif
         </div>
