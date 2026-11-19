@@ -15,37 +15,43 @@
 @once
     <style>
         .gc { --gc-tenue: var(--gray-500); --gc-borde: var(--gray-200); --gc-suave: var(--gray-50); --gc-bien: var(--success-600); --gc-acento: var(--primary-600);
-            display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; width: 100%; min-width: 0; text-align: start; white-space: normal; }
-        .dark .gc { --gc-tenue: var(--gray-400); --gc-borde: rgb(255 255 255 / 0.1); --gc-suave: rgb(255 255 255 / 0.04); --gc-bien: var(--success-400); --gc-acento: var(--primary-400); }
+            display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.7rem; width: 100%; min-width: 0; text-align: start; white-space: normal; }
+        .dark .gc { --gc-tenue: var(--gray-400); --gc-borde: rgb(255 255 255 / 0.1); --gc-suave: rgb(255 255 255 / 0.05); --gc-bien: var(--success-400); --gc-acento: var(--primary-400); }
         .gc.apagado { opacity: 0.6; }
 
-        .gc-cabeza { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
-        .gc-nombre { font-size: 1.1rem; font-weight: 700; line-height: 1.3; letter-spacing: 0.01em; overflow-wrap: anywhere; }
-        .gc-desc { margin-top: 0.2rem; font-size: 0.85rem; line-height: 1.45; color: var(--gc-tenue); }
-        .gc-pill { flex-shrink: 0; font-size: 0.72rem; font-weight: 600; line-height: 1.4; padding: 0.1rem 0.55rem; border-radius: 999px; border: 1px solid var(--gc-borde); color: var(--gc-tenue); }
+        .gc-cabeza { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+        .gc-nombre { font-size: 1rem; font-weight: 700; line-height: 1.3; letter-spacing: 0.01em; overflow-wrap: anywhere; }
+        .gc-desc { margin-top: 0.1rem; font-size: 0.8rem; line-height: 1.4; color: var(--gc-tenue); }
+        .gc-pill { flex-shrink: 0; font-size: 0.7rem; font-weight: 600; line-height: 1.4; padding: 0.05rem 0.5rem; border-radius: 999px; border: 1px solid var(--gc-borde); color: var(--gc-tenue); }
 
-        .gc-titulo { margin-bottom: 0.4rem; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gc-tenue); }
-        .gc-vacio { font-size: 0.85rem; color: var(--gc-tenue); }
+        .gc-titulo { margin-bottom: 0.3rem; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gc-tenue); }
+        .gc-vacio { font-size: 0.8rem; color: var(--gc-tenue); }
 
-        /* La escala: un escalón por renglón, el % a la derecha; la meta resaltada. */
-        .gc-escala { display: grid; gap: 0.25rem; margin: 0; padding: 0; list-style: none; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
-        .gc-escala li { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0.65rem; border-radius: 0.5rem; background: var(--gc-suave); }
-        .gc-escala li small { margin-inline-start: 0.4rem; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--gc-bien); }
-        .gc-escala li b { min-width: 3.25rem; padding: 0.05rem 0.5rem; border-radius: 999px; text-align: center; font-weight: 700; border: 1px solid var(--gc-borde); }
-        .gc-escala li.meta { background: color-mix(in oklab, var(--gc-bien) 9%, transparent); }
-        .gc-escala li.meta b { color: #fff; border-color: transparent; background: var(--gc-bien); }
-        .dark .gc-escala li.meta b { color: var(--gray-950); }
+        /* La escala en una fila: cada escalón con su % arriba y desde cuánto abajo; la meta en verde. */
+        .gc-escala { display: grid; grid-template-columns: repeat(auto-fit, minmax(6.25rem, 1fr)); gap: 0.3rem; margin: 0; padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
+        .gc-escala li { display: grid; gap: 0.05rem; padding: 0.35rem 0.55rem; border-radius: 0.5rem; background: var(--gc-suave); border: 1px solid transparent; }
+        .gc-escala li b { display: flex; align-items: baseline; justify-content: space-between; gap: 0.3rem; font-size: 1rem; font-weight: 700; line-height: 1.25; }
+        .gc-escala li b small { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+        .gc-escala li span { font-size: 0.72rem; line-height: 1.3; color: var(--gc-tenue); white-space: nowrap; }
+        .gc-escala li.meta { border-color: color-mix(in oklab, var(--gc-bien) 40%, transparent); background: color-mix(in oklab, var(--gc-bien) 10%, transparent); }
+        .gc-escala li.meta b { color: var(--gc-bien); }
+        .gc-escala li.meta span { color: var(--gc-bien); }
 
-        .gc-bodega { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.5rem; padding: 0.35rem 0; font-size: 0.85rem; border-bottom: 1px dashed var(--gc-borde); }
-        .gc-bodega:last-child { border-bottom: 0; }
+        /* Por bodega: una línea si ninguna puso sus montos. */
+        .gc-linea { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.5rem; }
+        .gc-linea .gc-titulo { margin: 0; }
+        .gc-bodegas { display: grid; gap: 0.2rem; }
+        .gc-bodega { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.45rem; font-size: 0.8rem; }
         .gc-bodega span { font-weight: 600; }
         .gc-bodega em { font-style: normal; color: var(--gc-tenue); font-variant-numeric: tabular-nums; }
 
-        .gc-cats { display: grid; gap: 0.35rem; font-size: 0.8rem; line-height: 1.45; }
-        .gc-cats div b { margin-inline-end: 0.35rem; font-weight: 700; color: var(--gc-acento); }
-        .gc-cats div span { color: var(--gc-tenue); }
+        /* Categorías: un renglón por proveedor (el nombre a la izquierda, alineado) y sus categorías como etiquetas. */
+        .gc-cats { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 0.35rem 0.65rem; }
+        .gc-cats > b { padding-top: 0.12rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; color: var(--gc-acento); }
+        .gc-cats > ul { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+        .gc-cats > ul li { padding: 0.05rem 0.45rem; font-size: 0.68rem; line-height: 1.5; border-radius: 0.35rem; border: 1px solid var(--gc-borde); background: var(--gc-suave); white-space: nowrap; }
 
-        .gc-pie { padding-top: 0.75rem; border-top: 1px solid var(--gc-borde); font-size: 0.8rem; color: var(--gc-tenue); }
+        .gc-pie { padding-top: 0.55rem; border-top: 1px solid var(--gc-borde); font-size: 0.76rem; color: var(--gc-tenue); }
 
         /* Las tarjetas no se estiran con los textos largos. */
         .grupos-tarjetas .fi-ta-content-grid .fi-ta-record,
@@ -80,31 +86,38 @@
         @else
             <ol class="gc-escala">
                 @foreach ($t['escalones'] as $escalon)
-                    <li @class(['meta' => $escalon['meta']])>
-                        <span>
-                            {{ $escalon['desde'] > 0 ? 'Desde '.lempiras($escalon['desde'], 0) : 'Desde el primer lempira' }}
+                    <li @class(['meta' => $escalon['meta']]) title="{{ $porciento($escalon['porcentaje']) }} {{ $escalon['desde'] > 0 ? 'desde '.lempiras($escalon['desde'], 0) : 'desde el primer lempira' }}">
+                        <b>
+                            {{ $porciento($escalon['porcentaje']) }}
                             @if ($escalon['meta'])
                                 <small>Meta</small>
                             @endif
-                        </span>
-                        <b>{{ $porciento($escalon['porcentaje']) }}</b>
+                        </b>
+                        <span>{{ $escalon['desde'] > 0 ? 'desde '.lempiras($escalon['desde'], 0) : 'desde 0' }}</span>
                     </li>
                 @endforeach
             </ol>
         @endif
     </div>
 
-    <div>
-        <div class="gc-titulo">{{ $t['todas'] ? 'Montos propios por bodega' : 'En su bodega' }}</div>
-        @forelse ($t['bodegas'] as $bodega)
-            <div class="gc-bodega">
-                <span>{{ $t['todas'] ? $bodega['nombre'] : 'Su bodega' }}</span>
-                <em>{{ $bodega['escala'] }}</em>
+    @if ($t['bodegas'] === [])
+        <div class="gc-linea">
+            <span class="gc-titulo">{{ $t['todas'] ? 'Por bodega' : 'Su bodega' }}</span>
+            <span class="gc-vacio">{{ $t['todas'] ? 'todas usan esta escala' : 'usa esta escala' }}</span>
+        </div>
+    @else
+        <div>
+            <div class="gc-titulo">{{ $t['todas'] ? 'Montos propios por bodega' : 'En su bodega' }}</div>
+            <div class="gc-bodegas">
+                @foreach ($t['bodegas'] as $bodega)
+                    <div class="gc-bodega">
+                        <span>{{ $t['todas'] ? $bodega['nombre'] : 'Su bodega' }}</span>
+                        <em>{{ $bodega['escala'] }}</em>
+                    </div>
+                @endforeach
             </div>
-        @empty
-            <div class="gc-vacio">{{ $t['todas'] ? 'Ninguna: todas usan la escala de arriba.' : 'Usa la escala de arriba.' }}</div>
-        @endforelse
-    </div>
+        </div>
+    @endif
 
     <div>
         <div class="gc-titulo">{{ $t['cuantas'] === 1 ? '1 categoría' : $t['cuantas'].' categorías' }}</div>
@@ -113,7 +126,12 @@
         @else
             <div class="gc-cats">
                 @foreach ($t['categorias'] as $proveedor => $nombres)
-                    <div><b>{{ $proveedor }}</b><span>{{ implode(' · ', $nombres) }}</span></div>
+                    <b>{{ $proveedor }}</b>
+                    <ul>
+                        @foreach ($nombres as $nombre)
+                            <li>{{ $nombre }}</li>
+                        @endforeach
+                    </ul>
                 @endforeach
             </div>
         @endif
