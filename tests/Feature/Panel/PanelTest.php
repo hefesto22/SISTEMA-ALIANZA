@@ -29,7 +29,6 @@ use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\Ruta;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
@@ -39,7 +38,6 @@ use Livewire\Livewire;
  * principales (actualizar precio y preventa → despacho) funcionen de punta a punta.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);

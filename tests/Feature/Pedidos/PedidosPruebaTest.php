@@ -15,7 +15,6 @@ use Database\Seeders\BodegaSeeder;
 use Database\Seeders\ClientesPruebaSeeder;
 use Database\Seeders\DivisionPoliticaSeeder;
 use Database\Seeders\PedidosPruebaSeeder;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,7 +24,7 @@ use Livewire\Livewire;
  * Pedidos de prueba (seeder) y la lista de pedidos en tarjetas.
  */
 beforeEach(function (): void {
-    $this->seed([RolesSistemaSeeder::class, DivisionPoliticaSeeder::class, BodegaSeeder::class, ClientesPruebaSeeder::class]);
+    $this->seed([DivisionPoliticaSeeder::class, BodegaSeeder::class, ClientesPruebaSeeder::class]);
     Filament::setCurrentPanel('admin');
 
     foreach (['COP', 'OCO', 'SB'] as $codigo) {

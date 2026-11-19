@@ -4,10 +4,19 @@ declare(strict_types=1);
 
 namespace Tests;
 
+use Database\Seeders\RolesSistemaSeeder;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Testing\Attributes\Seeder;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use RuntimeException;
 
+/**
+ * Los roles y permisos (RolesSistemaSeeder) se cargan UNA vez por corrida,
+ * cuando RefreshDatabase deja la base nueva; cada prueba corre en una
+ * transacción que se deshace, así que todas los encuentran sin volver a
+ * sembrarlos (sembrarlos en cada prueba costaba medio segundo por prueba).
+ */
+#[Seeder(RolesSistemaSeeder::class)]
 abstract class TestCase extends BaseTestCase
 {
     /**

@@ -14,13 +14,11 @@ use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\Ruta;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);

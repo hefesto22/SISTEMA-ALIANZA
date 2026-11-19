@@ -13,7 +13,6 @@ use App\Models\Producto;
 use App\Models\Proveedor;
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Support\Carbon;
 use Livewire\Livewire;
@@ -34,7 +33,6 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
  */
 beforeEach(function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-11-18 10:00:00'));
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->copan = Bodega::factory()->create(['codigo' => 'COP', 'nombre' => 'BODEGA COPÁN']);

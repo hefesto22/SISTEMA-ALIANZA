@@ -22,7 +22,6 @@ use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
 
@@ -31,7 +30,6 @@ use Livewire\Livewire;
  * compartido, anulación al corregir y datos fiscales.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->cop = Bodega::factory()->create(['codigo' => 'COP', 'nombre' => 'Santa Rosa']);

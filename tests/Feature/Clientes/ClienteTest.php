@@ -11,7 +11,6 @@ use App\Models\Municipio;
 use App\Models\Producto;
 use App\Models\Ruta;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
 
@@ -21,7 +20,6 @@ use Livewire\Livewire;
  * llevar otro nombre.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create();

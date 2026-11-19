@@ -12,7 +12,6 @@ use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
@@ -26,7 +25,6 @@ use Spatie\Permission\Models\Role;
  * admin activo, y quien tiene pedidos no se elimina (se desactiva).
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->super = User::factory()->create(['name' => 'DUEÑO']);

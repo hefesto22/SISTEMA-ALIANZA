@@ -41,7 +41,6 @@ use App\Models\Producto;
 use App\Models\Ruta;
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
@@ -59,7 +58,6 @@ use Maatwebsite\Excel\Facades\Excel;
  * (sin grupo, exento) a L 50.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
     $this->travelTo(CarbonImmutable::parse('2026-11-10 09:00:00'));
     facturacionLista();

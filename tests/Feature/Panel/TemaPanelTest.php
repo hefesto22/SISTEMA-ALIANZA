@@ -8,7 +8,6 @@ use App\Models\BrandingSetting;
 use App\Models\User;
 use App\Providers\Filament\AdminPanelProvider;
 use BezhanSalleh\FilamentShield\Support\Utils;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Panel;
 use Filament\Support\Colors\Color;
@@ -25,7 +24,6 @@ test('cada tema trae su paleta shadcn completa', function (): void {
 });
 
 test('el super admin cambia el tema desde Configuración', function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     // El panel lee BrandingSetting::current() al arrancar y lo deja en caché,

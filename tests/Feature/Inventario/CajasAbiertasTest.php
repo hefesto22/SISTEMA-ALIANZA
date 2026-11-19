@@ -22,7 +22,6 @@ use App\Models\MovimientoInventario;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 
 /**
  * Cada presentación con su existencia y su costo: la CJ48 no se mezcla con
@@ -30,8 +29,6 @@ use Database\Seeders\RolesSistemaSeeder;
  * a las sueltas con el costo de esa caja y se promedian ahí.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
-
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);
     $this->admin = User::factory()->create();
     $this->admin->assignRole(Rol::Administrador->value);

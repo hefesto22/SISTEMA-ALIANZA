@@ -25,7 +25,6 @@ use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
 use Maatwebsite\Excel\Excel as FormatoExcel;
@@ -42,7 +41,6 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
  * (costo 80, precio 100).
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->copan = Bodega::factory()->create(['codigo' => 'COP', 'nombre' => 'BODEGA COPÁN']);

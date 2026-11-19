@@ -15,7 +15,6 @@ use App\Models\PedidoItem;
 use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
 
@@ -25,7 +24,6 @@ use Livewire\Livewire;
  * las líneas al crear y al editar.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);

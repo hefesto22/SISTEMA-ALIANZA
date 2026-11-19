@@ -20,7 +20,6 @@ use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
@@ -30,7 +29,6 @@ use Livewire\Livewire;
  * vendedor) y que nadie pise lo que bodega ya validó.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);

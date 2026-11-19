@@ -19,7 +19,6 @@ use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Database\Seeders\BodegaSeeder;
 use Database\Seeders\DivisionPoliticaSeeder;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
@@ -30,7 +29,7 @@ use Livewire\Livewire;
  * otro cliente, el pedido queda marcado fuera de ruta con el motivo.
  */
 beforeEach(function (): void {
-    $this->seed([RolesSistemaSeeder::class, DivisionPoliticaSeeder::class]);
+    $this->seed(DivisionPoliticaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create();

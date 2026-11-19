@@ -36,7 +36,6 @@ use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
@@ -47,7 +46,6 @@ use Livewire\Livewire;
  * existencia en cada bodega. El despacho saca cada presentación de la suya.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);

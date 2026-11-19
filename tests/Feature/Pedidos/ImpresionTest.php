@@ -22,7 +22,6 @@ use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Illuminate\Support\Facades\Cache;
@@ -36,7 +35,6 @@ use Livewire\Livewire;
  * reimprimir sale una nueva que la sustituye.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);

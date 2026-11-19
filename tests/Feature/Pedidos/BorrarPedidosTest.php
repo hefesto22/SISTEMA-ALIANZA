@@ -24,7 +24,6 @@ use App\Models\PedidoItem;
 use App\Models\Presentacion;
 use App\Models\Producto;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 
 /**
  * php artisan pedidos:borrar: borra pedidos de prueba como si nunca se
@@ -34,8 +33,6 @@ use Database\Seeders\RolesSistemaSeeder;
  * periodo de comisiones cerrado no se borran.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
-
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);
     $this->admin = User::factory()->create();
     $this->admin->assignRole(Rol::Administrador->value);
@@ -90,8 +87,9 @@ test('borra impresos y pendientes: lo que salió regresa, el kárdex cuadra y el
         ->and(Factura::query()->orderBy('id')->pluck('estado')->all())->toBe([EstadoFactura::Anulada, EstadoFactura::Vigente])
         ->and($this->cai->fresh()?->siguiente)->toBe($this->cai->rango_desde + 2);
 
+    // Cada texto esperado no debe caber dentro de otro: el primero que coincide se queda con la línea.
     $this->artisan('pedidos:borrar')
-        ->expectsOutputToContain('2 facturas')
+        ->expectsOutputToContain('2 facturas: '.Factura::query()->orderBy('numero')->pluck('numero')->implode(', '))
         ->expectsConfirmation('¿Borrar los 2 pedidos? No se puede deshacer.', 'yes')
         ->expectsOutputToContain('Listo. Borrados: 2 pedidos, 2 facturas y 4 renglones del kárdex.')
         ->assertSuccessful();

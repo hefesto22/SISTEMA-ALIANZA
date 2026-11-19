@@ -17,7 +17,6 @@ use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\UnidadMedida;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
@@ -28,7 +27,6 @@ use Livewire\Livewire;
  * 6…), cada una con su precio.
  */
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
     Filament::setCurrentPanel('admin');
 
     $this->admin = User::factory()->create();

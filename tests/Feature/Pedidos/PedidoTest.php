@@ -17,11 +17,8 @@ use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
-use Database\Seeders\RolesSistemaSeeder;
 
 beforeEach(function (): void {
-    $this->seed(RolesSistemaSeeder::class);
-
     $this->bodega = Bodega::factory()->create(['codigo' => 'COP']);
     $this->vendedor = User::factory()->create(['bodega_id' => $this->bodega->id]);
     $this->vendedor->assignRole(Rol::Vendedor->value);
