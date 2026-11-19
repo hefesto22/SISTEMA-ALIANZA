@@ -52,6 +52,9 @@ class Cai extends Model
 
     public const CORRELATIVO_MAXIMO = 99999999;
 
+    /** El CAI de prueba (FacturacionPruebaSeeder): sus facturas no valen ante el SAR. */
+    public const PRUEBA = '000000-000000-000000-000000-000000-00';
+
     protected $table = 'cais';
 
     /** @var list<string> */
@@ -215,6 +218,11 @@ class Cai extends Model
     public function enRango(int $correlativo): bool
     {
         return $correlativo >= $this->rango_desde && $correlativo <= $this->rango_hasta;
+    }
+
+    public function esDePrueba(): bool
+    {
+        return $this->cai === self::PRUEBA;
     }
 
     public function estaVigente(): bool

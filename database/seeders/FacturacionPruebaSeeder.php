@@ -17,7 +17,7 @@ use Illuminate\Database\Seeder;
  */
 class FacturacionPruebaSeeder extends Seeder
 {
-    public const CAI_PRUEBA = '000000-000000-000000-000000-000000-00';
+    public const CAI_PRUEBA = Cai::PRUEBA;
 
     public function run(): void
     {
