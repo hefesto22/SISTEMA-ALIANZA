@@ -15,8 +15,10 @@ use App\Enums\Rol;
 use App\Enums\TipoMovimiento;
 use App\Exports\InventarioValorizadoExcel;
 use App\Exports\ReporteVentasExcel;
+use App\Filament\Pages\ReporteCompras;
 use App\Filament\Pages\ReporteInventario;
 use App\Filament\Pages\ReporteVentas;
+use App\Filament\Resources\Proveedores\Pages\ListProveedores;
 use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
 use App\Models\Cliente;
@@ -400,4 +402,35 @@ test('ventas de un proveedor: solo cuentan sus productos, en una bodega o en cad
         ->assertOk()
         ->assertSee('Proveedor: '.$deOtro->etiqueta())
         ->assertDontSee('L. 1,700.00');
+});
+
+test('desde Proveedores, Reportes abre sus compras o sus ventas de la semana, la quincena o el mes, ya con el proveedor', function (): void {
+    // Otro proveedor vende L 100: entre los dos, L 1,700; el del gravado, L 1,600.
+    $otro = Producto::factory()->exento()->precio(20.0, 25.0)->conCaja(1)->create();
+    app(AjustarExistencia::class)->ejecutar($this->copan->id, presentacion($otro), 10, $this->admin, 'conteo');
+    pedidoDeReporte($this->copan, $this->vendedor, [[$otro, 1, 4]], $this->admin);
+    ventasDeReporte($this);
+    $proveedor = $this->gravado->proveedor;
+
+    $this->actingAs($this->admin);
+
+    Livewire::test(ListProveedores::class)
+        ->assertTableActionVisible('reportes', $proveedor)
+        ->callTableAction('reportes', $proveedor, data: ['reporte' => 'ventas', 'periodo' => 'semana'])
+        ->assertRedirect(ReporteVentas::delProveedor($proveedor, 'semana'));
+
+    Livewire::test(ListProveedores::class)
+        ->callTableAction('reportes', $proveedor, data: ['reporte' => 'compras', 'periodo' => 'quincena_pasada'])
+        ->assertRedirect(ReporteCompras::delProveedor($proveedor, 'quincena_pasada'));
+
+    Livewire::withQueryParams(['proveedor' => $proveedor->id, 'periodo' => 'semana'])
+        ->test(ReporteVentas::class)
+        ->assertFormSet(['proveedor_id' => $proveedor->id, 'periodo' => 'semana'])
+        ->assertSee('L. 1,600.00')
+        ->assertDontSee('L. 1,700.00');
+
+    // Un periodo que no existe queda en este mes.
+    expect(ReporteVentas::delProveedor($proveedor, 'siglo'))->toContain('periodo=mes')
+        ->and(Periodo::de('quincena_pasada', hoy: CarbonImmutable::parse('2026-11-19'), corte: 14)->texto())->toBe('01/11/2026 al 14/11/2026')
+        ->and(Periodo::de('semana_pasada', hoy: CarbonImmutable::parse('2026-11-19'))->texto())->toBe('09/11/2026 al 15/11/2026');
 });

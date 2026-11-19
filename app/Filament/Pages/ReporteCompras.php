@@ -11,7 +11,6 @@ use App\Exports\ReporteComprasExcel;
 use App\Filament\Support\Acceso;
 use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
-use App\Models\Configuracion;
 use App\Models\Proveedor;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -76,11 +75,11 @@ class ReporteCompras extends Page
     }
 
     /**
-     * Enlace al reporte con el proveedor ya escogido (desde Proveedores).
+     * Enlace al reporte con el proveedor y el periodo ya escogidos (desde Proveedores).
      */
-    public static function delProveedor(Proveedor $proveedor): string
+    public static function delProveedor(Proveedor $proveedor, string $periodo = 'mes'): string
     {
-        return self::getUrl(['proveedor' => $proveedor->id]);
+        return self::getUrl(['proveedor' => $proveedor->id, 'periodo' => ComprasDelPeriodo::periodo($periodo)]);
     }
 
     public function mount(): void
@@ -88,7 +87,7 @@ class ReporteCompras extends Page
         $proveedor = request()->query('proveedor');
 
         $this->form->fill([
-            'periodo'      => 'mes',
+            'periodo'      => ComprasDelPeriodo::periodo(request()->query('periodo')),
             'desde'        => now()->startOfMonth()->toDateString(),
             'hasta'        => now()->toDateString(),
             'bodega_id'    => null,
@@ -108,7 +107,7 @@ class ReporteCompras extends Page
                         ->options(ComprasDelPeriodo::PERIODOS)
                         ->inline()
                         ->live()
-                        ->helperText(fn (Get $get): ?string => in_array($get('periodo'), ['quincena', 'quincena_pasada'], true) ? self::quincenas() : null)
+                        ->helperText(fn (Get $get): ?string => in_array($get('periodo'), ['quincena', 'quincena_pasada'], true) ? Periodo::ayudaQuincenas() : null)
                         ->columnSpanFull(),
                     DatePicker::make('desde')
                         ->label('Desde')
@@ -205,15 +204,5 @@ class ReporteCompras extends Page
     private function ver(): string
     {
         return ComprasDelPeriodo::ver($this->filtros['ver'] ?? null);
-    }
-
-    /**
-     * "Quincenas del 1 al 14 y del 15 a fin de mes (las de Comisiones)."
-     */
-    private static function quincenas(): string
-    {
-        $corte = Configuracion::actual()->comision_corte;
-
-        return 'Quincenas del 1 al '.$corte.' y del '.($corte + 1).' a fin de mes (las mismas de Comisiones).';
     }
 }

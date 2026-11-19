@@ -24,12 +24,25 @@ final readonly class Periodo
 {
     /** Atajos que se ofrecen en pantalla. */
     public const OPCIONES = [
-        'hoy'        => 'Hoy',
-        'ayer'       => 'Ayer',
-        'semana'     => 'Esta semana',
-        'mes'        => 'Este mes',
-        'mes_pasado' => 'Mes pasado',
-        'otro'       => 'Otras fechas',
+        'hoy'             => 'Hoy',
+        'ayer'            => 'Ayer',
+        'semana'          => 'Esta semana',
+        'semana_pasada'   => 'Semana pasada',
+        'quincena'        => 'Esta quincena',
+        'quincena_pasada' => 'Quincena pasada',
+        'mes'             => 'Este mes',
+        'mes_pasado'      => 'Mes pasado',
+        'otro'            => 'Otras fechas',
+    ];
+
+    /** Los de semana, quincena y mes (los reportes de un proveedor, desde Proveedores). */
+    public const SEMANA_QUINCENA_MES = [
+        'semana'          => 'Esta semana',
+        'semana_pasada'   => 'Semana pasada',
+        'quincena'        => 'Esta quincena',
+        'quincena_pasada' => 'Quincena pasada',
+        'mes'             => 'Este mes',
+        'mes_pasado'      => 'Mes pasado',
     ];
 
     public CarbonImmutable $desde;
@@ -66,6 +79,16 @@ final readonly class Periodo
             'otro'            => new self(self::fecha($desde) ?? $hoy->startOfMonth(), self::fecha($hasta) ?? $hoy),
             default           => new self($hoy->startOfMonth(), $hoy),
         };
+    }
+
+    /**
+     * Para debajo del periodo cuando se escoge una quincena.
+     */
+    public static function ayudaQuincenas(): string
+    {
+        $corte = Configuracion::actual()->comision_corte;
+
+        return 'Quincenas del 1 al '.$corte.' y del '.($corte + 1).' a fin de mes (las mismas de Comisiones).';
     }
 
     /**

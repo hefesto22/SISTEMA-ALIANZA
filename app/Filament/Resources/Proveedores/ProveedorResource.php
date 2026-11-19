@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proveedores;
 
+use App\Domain\Reportes\Periodo;
 use App\Filament\Pages\ReporteCompras;
+use App\Filament\Pages\ReporteVentas;
 use App\Filament\Resources\Proveedores\Pages\CreateProveedor;
 use App\Filament\Resources\Proveedores\Pages\EditProveedor;
 use App\Filament\Resources\Proveedores\Pages\ListProveedores;
@@ -15,14 +17,17 @@ use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Livewire\Component;
 
 class ProveedorResource extends Resource
 {
@@ -121,15 +126,57 @@ class ProveedorResource extends Resource
                 TernaryFilter::make('activo'),
             ])
             ->recordActions([
-                // Lo que se le compró: el reporte ya con este proveedor (para mandárselo).
-                Action::make('compras')
-                    ->label('Compras')
-                    ->icon(Heroicon::OutlinedInboxArrowDown)
+                // Sus compras o sus ventas de la semana, la quincena o el mes: el
+                // reporte se abre ya con este proveedor (para mandárselo).
+                Action::make('reportes')
+                    ->label('Reportes')
+                    ->icon(Heroicon::OutlinedDocumentChartBar)
                     ->color('gray')
-                    ->url(fn (Proveedor $record): string => ReporteCompras::delProveedor($record))
-                    ->visible(fn (): bool => ReporteCompras::canAccess()),
+                    ->modalHeading(fn (Proveedor $record): string => 'Reportes · '.$record->etiqueta())
+                    ->modalDescription('Sale solo lo de sus productos. Ahí mismo se cambia el periodo o la bodega, se descarga en Excel o se imprime.')
+                    ->modalWidth(Width::TwoExtraLarge)
+                    ->modalSubmitActionLabel('Ver reporte')
+                    ->fillForm(fn (): array => ['reporte' => array_key_first(self::reportes()), 'periodo' => 'mes'])
+                    ->schema([
+                        ToggleButtons::make('reporte')
+                            ->label('Reporte')
+                            ->options(fn (): array => self::reportes())
+                            ->icons([
+                                'compras' => Heroicon::OutlinedInboxArrowDown,
+                                'ventas'  => Heroicon::OutlinedPresentationChartLine,
+                            ])
+                            ->inline()
+                            ->required(),
+                        ToggleButtons::make('periodo')
+                            ->label('Periodo')
+                            ->options(Periodo::SEMANA_QUINCENA_MES)
+                            ->inline()
+                            ->required()
+                            ->helperText(fn (): string => Periodo::ayudaQuincenas()),
+                    ])
+                    ->action(function (array $data, Proveedor $record, Component $livewire): void {
+                        $periodo = is_string($data['periodo'] ?? null) ? $data['periodo'] : 'mes';
+
+                        $livewire->redirect(($data['reporte'] ?? null) === 'ventas'
+                            ? ReporteVentas::delProveedor($record, $periodo)
+                            : ReporteCompras::delProveedor($record, $periodo));
+                    })
+                    ->visible(fn (): bool => self::reportes() !== []),
                 EditAction::make(),
             ]);
+    }
+
+    /**
+     * Los reportes de un proveedor que puede ver el usuario.
+     *
+     * @return array<string, string>
+     */
+    private static function reportes(): array
+    {
+        return array_filter([
+            'compras' => ReporteCompras::canAccess() ? 'Compras (lo que se le compró)' : null,
+            'ventas'  => ReporteVentas::canAccess() ? 'Ventas (lo que se vendió de sus productos)' : null,
+        ]);
     }
 
     public static function getRelations(): array

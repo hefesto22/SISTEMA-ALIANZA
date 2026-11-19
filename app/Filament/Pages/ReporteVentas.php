@@ -33,7 +33,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  *
  * Administración saca el de todas las bodegas o el de una; el encargado,
  * solo el de su bodega. Con un proveedor escogido sale solo lo que se vendió
- * de sus productos (y, con todas las bodegas, cuánto en cada una). Las cuentas: App\Domain\Reportes\VentasDelPeriodo.
+ * de sus productos (y, con todas las bodegas, cuánto en cada una); desde
+ * Proveedores se abre ya con el proveedor y el periodo (delProveedor()). Las
+ * cuentas: App\Domain\Reportes\VentasDelPeriodo.
  *
  * @property Schema $form
  */
@@ -73,14 +75,24 @@ class ReporteVentas extends Page
         return AlcanceReporte::puedeVer(Acceso::usuario(), 'View:ReporteVentas');
     }
 
+    /**
+     * Enlace al reporte con el proveedor y el periodo ya escogidos (desde Proveedores).
+     */
+    public static function delProveedor(Proveedor $proveedor, string $periodo = 'mes'): string
+    {
+        return self::getUrl(['proveedor' => $proveedor->id, 'periodo' => self::periodo($periodo)]);
+    }
+
     public function mount(): void
     {
+        $proveedor = request()->query('proveedor');
+
         $this->form->fill([
-            'periodo'      => 'mes',
+            'periodo'      => self::periodo(request()->query('periodo')),
             'desde'        => now()->startOfMonth()->toDateString(),
             'hasta'        => now()->toDateString(),
             'bodega_id'    => null,
-            'proveedor_id' => null,
+            'proveedor_id' => is_numeric($proveedor) && Proveedor::query()->whereKey((int) $proveedor)->exists() ? (int) $proveedor : null,
             'ver'          => 'todo',
         ]);
     }
@@ -96,6 +108,7 @@ class ReporteVentas extends Page
                         ->options(Periodo::OPCIONES)
                         ->inline()
                         ->live()
+                        ->helperText(fn (Get $get): ?string => in_array($get('periodo'), ['quincena', 'quincena_pasada'], true) ? Periodo::ayudaQuincenas() : null)
                         ->columnSpanFull(),
                     DatePicker::make('desde')
                         ->label('Desde')
@@ -154,7 +167,7 @@ class ReporteVentas extends Page
         $usuario = Acceso::usuario() ?? abort(403);
 
         return new VentasDelPeriodo(
-            Periodo::de(self::texto($this->filtros['periodo'] ?? null), $this->filtros['desde'] ?? null, $this->filtros['hasta'] ?? null),
+            Periodo::de(self::periodo($this->filtros['periodo'] ?? null), $this->filtros['desde'] ?? null, $this->filtros['hasta'] ?? null),
             AlcanceReporte::bodega($usuario, $this->filtros['bodega_id'] ?? null),
             AlcanceReporte::proveedor($this->filtros['proveedor_id'] ?? null),
         );
@@ -193,8 +206,11 @@ class ReporteVentas extends Page
         return VentasDelPeriodo::ver($this->filtros['ver'] ?? null);
     }
 
-    private static function texto(mixed $valor): string
+    /**
+     * Uno de los atajos de Periodo (sin uno válido, este mes).
+     */
+    private static function periodo(mixed $valor): string
     {
-        return is_string($valor) ? $valor : '';
+        return is_string($valor) && array_key_exists($valor, Periodo::OPCIONES) ? $valor : 'mes';
     }
 }

@@ -88,6 +88,7 @@ class KpisVentas extends Page
                         ->options(Periodo::OPCIONES)
                         ->inline()
                         ->live()
+                        ->helperText(fn (Get $get): ?string => in_array($get('periodo'), ['quincena', 'quincena_pasada'], true) ? Periodo::ayudaQuincenas() : null)
                         ->columnSpanFull(),
                     DatePicker::make('desde')
                         ->label('Desde')
