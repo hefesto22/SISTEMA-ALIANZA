@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             BodegaSeeder::class,
             ProveedorSeeder::class,
             CatalogoSeeder::class,
+            ComisionGruposSeeder::class,
             PersonalSeeder::class,
         ]);
     }
