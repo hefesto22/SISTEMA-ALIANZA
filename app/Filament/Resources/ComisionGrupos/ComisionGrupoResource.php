@@ -30,8 +30,8 @@ use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
 use Filament\Support\Exceptions\Halt;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
-use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\Layout\Stack;
+use Filament\Tables\Columns\ViewColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -113,39 +113,20 @@ class ComisionGrupoResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            // Una tarjeta por grupo: su escala en escalones, cómo va en cada bodega y sus categorías por proveedor.
             ->columns([
-                TextColumn::make('nombre')
-                    ->label('Grupo')
-                    ->searchable()
-                    ->sortable()
-                    ->weight('bold')
-                    ->description(fn (ComisionGrupo $record): ?string => $record->descripcion),
-                TextColumn::make('escala')
-                    ->label('Escala para todas')
-                    ->state(fn (ComisionGrupo $record): string => $record->escala()->texto())
-                    ->wrap(),
-                TextColumn::make('por_bodega')
-                    ->label(fn (): string => Acceso::veTodo() ? 'En cada bodega' : 'En su bodega')
-                    ->state(fn (ComisionGrupo $record): array => self::escalasPorBodega($record))
-                    ->listWithLineBreaks()
-                    ->placeholder('La misma para todas')
-                    ->wrap(),
-                TextColumn::make('categorias')
-                    ->label('Categorías')
-                    ->state(fn (ComisionGrupo $record): array => $record->categorias->map(fn (Categoria $c): string => $c->etiqueta())->sort()->values()->all())
-                    ->badge()
-                    ->color('gray')
-                    ->limitList(4)
-                    ->expandableLimitedList()
-                    ->placeholder('Sin categorías'),
-                TextColumn::make('metas_count')
-                    ->label('Metas propias')
-                    ->state(fn (ComisionGrupo $record): string => self::conMetaPropia((int) $record->getAttribute('metas_count')))
-                    ->color('gray'),
-                IconColumn::make('activo')
-                    ->label('Paga')
-                    ->boolean(),
+                Stack::make([
+                    ViewColumn::make('tarjeta')
+                        ->view('filament.comisiones.tarjeta-grupo')
+                        ->state(fn (ComisionGrupo $record): string => $record->nombre)
+                        ->searchable(query: fn (Builder $query, string $search): Builder => $query->where(fn (Builder $q): Builder => $q
+                            ->where('nombre', 'ilike', '%'.$search.'%')
+                            ->orWhereHas('categorias', fn (Builder $c): Builder => $c->where('nombre', 'ilike', '%'.$search.'%')))),
+                ]),
             ])
+            ->contentGrid(['md' => 2, '2xl' => 3])
+            ->extraAttributes(['class' => 'grupos-tarjetas'])
+            ->searchPlaceholder('Grupo o categoría')
             ->defaultSort('nombre')
             ->filters([
                 TernaryFilter::make('activo')
@@ -156,6 +137,8 @@ class ComisionGrupoResource extends Resource
             ->recordActions([
                 self::accionBodega(),
                 EditAction::make()
+                    ->button()
+                    ->outlined()
                     ->modalHeading(fn (ComisionGrupo $record): string => 'Grupo '.$record->nombre)
                     ->modalWidth(Width::FourExtraLarge)
                     ->mutateRecordDataUsing(fn (array $data, ComisionGrupo $record): array => [
@@ -164,7 +147,9 @@ class ComisionGrupoResource extends Resource
                         'escalones'  => $record->escala()->paraFormulario(),
                     ])
                     ->using(fn (array $data, ComisionGrupo $record): ComisionGrupo => self::guardar($record, $data)),
-                DeleteAction::make(),
+                DeleteAction::make()
+                    ->iconButton()
+                    ->tooltip('Borrar el grupo'),
             ]);
     }
 
@@ -200,6 +185,8 @@ class ComisionGrupoResource extends Resource
         return Action::make('bodega')
             ->label(fn (): string => Acceso::veTodo() ? 'Por bodega' : 'Mi bodega')
             ->icon(Heroicon::OutlinedBuildingStorefront)
+            ->button()
+            ->outlined()
             ->color('gray')
             ->visible(fn (): bool => Acceso::puede('EscalaBodega:ComisionGrupo') && (Acceso::veTodo() || Acceso::usuario()?->bodega_id !== null))
             ->modalHeading(fn (ComisionGrupo $record): string => Acceso::veTodo() ? $record->nombre.' por bodega' : $record->nombre.' en '.(Acceso::usuario()->bodega->nombre ?? 'su bodega'))
@@ -267,33 +254,38 @@ class ComisionGrupoResource extends Resource
     }
 
     /**
-     * "BODEGA COPÁN: 0.5% · 1% desde L. 30,000" de cada bodega con sus
-     * montos (el encargado, solo la suya).
+     * Lo que muestra la tarjeta del grupo (resources/views/filament/comisiones/tarjeta-grupo.blade.php):
+     *  - escalones: la escala para todas las bodegas, con la meta (el último).
+     *  - bodegas: las que pusieron sus montos (el encargado, solo la suya).
+     *  - categorias: por proveedor, en orden.
      *
-     * @return list<string>
+     * @return array{todas: bool, escalones: list<array{desde: float, porcentaje: float, meta: bool}>, bodegas: list<array{nombre: string, escala: string}>, categorias: array<string, list<string>>, cuantas: int, metas: int}
      */
-    private static function escalasPorBodega(ComisionGrupo $grupo): array
+    public static function tarjeta(ComisionGrupo $grupo): array
     {
         $usuario = Acceso::usuario();
         $todas = $usuario?->veTodasLasBodegas() ?? false;
+        $escalones = $grupo->escala()->escalones;
+        $ultimo = count($escalones) - 1;
 
-        return array_values($grupo->escalasBodega
-            ->filter(fn (ComisionEscalaBodega $e): bool => $todas || ($usuario !== null && $e->bodega_id === $usuario->bodega_id))
-            ->sortBy(fn (ComisionEscalaBodega $e): string => $e->bodega->nombre)
-            ->map(fn (ComisionEscalaBodega $e): string => ($todas ? $e->bodega->nombre.': ' : '').$e->escala()->texto())
-            ->all());
-    }
+        $categorias = [];
 
-    /**
-     * "1 vendedor", "3 vendedores" o "—".
-     */
-    private static function conMetaPropia(int $cuantos): string
-    {
-        return match ($cuantos) {
-            0       => '—',
-            1       => '1 vendedor',
-            default => $cuantos.' vendedores',
-        };
+        foreach ($grupo->categorias->sortBy(fn (Categoria $c): string => $c->proveedor->etiqueta().' '.$c->nombre) as $categoria) {
+            $categorias[$categoria->proveedor->etiqueta()][] = $categoria->nombre;
+        }
+
+        return [
+            'todas'     => $todas,
+            'escalones' => array_map(fn (array $e, int $i): array => [...$e, 'meta' => $i === $ultimo && $e['desde'] > 0], $escalones, array_keys($escalones)),
+            'bodegas'   => array_values($grupo->escalasBodega
+                ->filter(fn (ComisionEscalaBodega $e): bool => $todas || ($usuario !== null && $e->bodega_id === $usuario->bodega_id))
+                ->sortBy(fn (ComisionEscalaBodega $e): string => $e->bodega->nombre)
+                ->map(fn (ComisionEscalaBodega $e): array => ['nombre' => $e->bodega->nombre, 'escala' => $e->escala()->texto()])
+                ->all()),
+            'categorias' => $categorias,
+            'cuantas'    => $grupo->categorias->count(),
+            'metas'      => (int) $grupo->getAttribute('metas_count'),
+        ];
     }
 
     /**
