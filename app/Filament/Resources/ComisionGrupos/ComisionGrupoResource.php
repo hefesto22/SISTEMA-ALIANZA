@@ -277,12 +277,11 @@ class ComisionGrupoResource extends Resource
         $usuario = Acceso::usuario();
         $todas = $usuario?->veTodasLasBodegas() ?? false;
 
-        return $grupo->escalasBodega
+        return array_values($grupo->escalasBodega
             ->filter(fn (ComisionEscalaBodega $e): bool => $todas || ($usuario !== null && $e->bodega_id === $usuario->bodega_id))
             ->sortBy(fn (ComisionEscalaBodega $e): string => $e->bodega->nombre)
             ->map(fn (ComisionEscalaBodega $e): string => ($todas ? $e->bodega->nombre.': ' : '').$e->escala()->texto())
-            ->values()
-            ->all();
+            ->all());
     }
 
     /**
