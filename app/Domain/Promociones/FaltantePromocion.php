@@ -8,9 +8,10 @@ use App\Models\Presentacion;
 use App\Models\Promocion;
 
 /**
- * El cliente ya cumple la condición, pero en el pedido falta (todo o parte
- * de) el producto de regalo. Sirve para avisarle al vendedor. La cantidad
- * es en esa presentación (la del regalo, o la base si no da cabal).
+ * El cliente ya cumple la condición de una promoción con descuento (a mitad
+ * o con un %), pero en el pedido falta (todo o parte de) el producto que se
+ * descuenta. Sirve para avisarle al vendedor. La cantidad es en la
+ * presentación del regalo. (Las gratis no avisan: se agregan solas.)
  */
 final readonly class FaltantePromocion
 {

@@ -212,7 +212,7 @@
                             @if ($item->descuento > 0)
                                 −{{ lempiras($item->descuento) }}
                                 @if ($item->promocion)
-                                    <br><span class="muted">{{ $item->promocion->codigo }}</span>
+                                    <br><span class="muted">{{ $item->bonificacion ? 'REGALO ' : '' }}{{ $item->promocion->codigo }}</span>
                                 @endif
                             @endif
                         </td>

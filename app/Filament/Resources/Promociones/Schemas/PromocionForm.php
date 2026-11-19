@@ -77,6 +77,7 @@ class PromocionForm
 
                 Group::make([
                     Section::make('El cliente compra')
+                        ->description('Cuenta la presentación exacta: 2 CJ18 solo la cumplen 2 CJ18 (no una CJ24 ni sueltas).')
                         ->icon(Heroicon::OutlinedShoppingCart)
                         ->compact()
                         ->schema([
@@ -104,6 +105,7 @@ class PromocionForm
                         ]),
 
                     Section::make('Se lleva')
+                        ->description('Gratis: el regalo se agrega solo al pedido. A mitad u otro %: se descuenta de lo que el pedido ya trae.')
                         ->icon(Heroicon::OutlinedGift)
                         ->compact()
                         ->columns(4)

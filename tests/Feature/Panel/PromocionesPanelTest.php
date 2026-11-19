@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\Rol;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
+use App\Filament\Resources\Pedidos\Pages\EditPedido;
 use App\Filament\Resources\Promociones\Pages\ManagePromociones;
 use App\Filament\Resources\Promociones\PromocionResource;
 use App\Models\Bodega;
@@ -171,4 +172,52 @@ test('la preventa muestra las promociones y el pedido sale con el descuento', fu
         ->and($pedido->descuento)->toBe(12.65)
         ->and($pedido->isv)->toBe(6.4)
         ->and($pedido->total)->toBe(49.05);
+});
+
+test('gratis: la preventa agrega el regalo sola; al editar no se ve y se acomoda con lo que se cobra', function (): void {
+    Promocion::factory()->para($this->toffee, $this->nutrine)->create();
+    $municipio = Municipio::factory()->create();
+    $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id, 'municipio_id' => $municipio->id]);
+    Ruta::factory()->cubre($municipio)->para($this->vendedor)->create(['bodega_id' => $this->bodega->id]);
+
+    $this->actingAs($this->vendedor);
+    $undoRepeaterFake = Repeater::fake();
+
+    Livewire::test(CreatePedido::class)
+        ->fillForm([
+            'cliente_id' => $cliente->id,
+            'fecha'      => now()->toDateString(),
+            'items'      => [
+                ['producto_id' => $this->toffee->id, 'presentacion_id' => presentacion($this->toffee)->id, 'cantidad' => 1],
+            ],
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $pedido = Pedido::query()->latest('id')->firstOrFail();
+    $paga = $pedido->items()->where('bonificacion', false)->sole();
+    $regalo = $pedido->items()->where('bonificacion', true)->sole();
+
+    // Se cobra el toffee (30 + 4.50 ISV); el nutrine de regalo va en cero.
+    expect($regalo->presentacion_id)->toBe(presentacion($this->nutrine)->id)
+        ->and($regalo->cantidad)->toBe(1)
+        ->and($regalo->total)->toBe(0.0)
+        ->and($pedido->total)->toBe(34.5);
+
+    // Al editar solo se ve lo que se cobra; con 3 toffee, 3 de regalo.
+    Livewire::test(EditPedido::class, ['record' => $pedido->getRouteKey()])
+        ->assertFormSet(['items' => [
+            ['id' => $paga->id, 'producto_id' => $this->toffee->id, 'presentacion_id' => presentacion($this->toffee)->id, 'cantidad' => 1],
+        ]])
+        ->fillForm(['items' => [
+            ['id' => $paga->id, 'producto_id' => $this->toffee->id, 'presentacion_id' => presentacion($this->toffee)->id, 'cantidad' => 3],
+        ]])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $undoRepeaterFake();
+
+    expect($pedido->items()->count())->toBe(2)
+        ->and($pedido->items()->where('bonificacion', true)->sole()->cantidad)->toBe(3)
+        ->and($pedido->fresh()?->total)->toBe(103.5);
 });

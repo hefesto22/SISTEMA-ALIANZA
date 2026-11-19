@@ -9,6 +9,7 @@ use App\Enums\Rol;
 use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\Pedido;
+use App\Models\PedidoItem;
 use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\User;
@@ -140,6 +141,44 @@ test('si al despachar ya no se cumple la condición, el producto se cobra comple
         ->and($despachado->isv)->toBe(30.0)
         ->and($despachado->total)->toBe(230.0)
         ->and($lineaGravada->fresh()?->promocion_id)->toBeNull();
+});
+
+test('gratis: el regalo se agrega solo en su propia línea, en cero, y no cuenta para la condición', function (): void {
+    // Por cada CJ10 del exento, 1 UN del gravado gratis.
+    $promo = Promocion::factory()->para($this->exento, $this->gravado, enCaja: true)->create();
+
+    $pedido = pedidoConPromo($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    [$lineaGravada, $lineaExenta, $regalo] = $pedido->items->all();
+
+    // Las 2 UN del gravado se cobran completas (200 + 30 ISV); el regalo va aparte: 100 − 100, sin ISV.
+    expect($pedido->items)->toHaveCount(3)
+        ->and($lineaGravada->descuento)->toBe(0.0)
+        ->and($lineaGravada->bonificacion)->toBeFalse()
+        ->and($lineaExenta->total)->toBe(500.0)
+        ->and($regalo->bonificacion)->toBeTrue()
+        ->and($regalo->presentacion_id)->toBe(presentacion($this->gravado)->id)
+        ->and($regalo->cantidad)->toBe(1)
+        ->and($regalo->promocion_id)->toBe($promo->id)
+        ->and([$regalo->subtotal, $regalo->descuento, $regalo->isv, $regalo->total])->toBe([100.0, 100.0, 0.0, 0.0])
+        ->and([$pedido->subtotal, $pedido->descuento, $pedido->isv, $pedido->total])->toBe([800.0, 100.0, 30.0, 730.0]);
+
+    // Recalcular otra vez no duplica el regalo.
+    app(RecalcularPedido::class)->ejecutar($pedido->fresh() ?? $pedido);
+
+    expect($pedido->items()->where('bonificacion', true)->count())->toBe(1);
+});
+
+test('gratis: al validar el regalo sale con lo que sale de lo que se cobra', function (): void {
+    Promocion::factory()->para($this->exento, $this->gravado, enCaja: true)->create();
+    $pedido = pedidoConPromo($this->bodega, $this->vendedor, $this->gravado, $this->exento);
+    $lineaExenta = $pedido->items->firstOrFail(fn (PedidoItem $item): bool => $item->producto_id === $this->exento->id);
+
+    // No hay del exento: ya no hay caja que dé el regalo. Lo pidió (1) y no sale (0).
+    $despachado = app(ValidarDespacho::class)->ejecutar($pedido, [$lineaExenta->id => 0], $this->encargado);
+    $regalo = $despachado->items()->where('bonificacion', true)->sole();
+
+    expect([$regalo->cantidad, $regalo->cantidad_despachada])->toBe([1, 0])
+        ->and($despachado->total)->toBe(230.0);
 });
 
 test('administración cambia todas; el encargado crea y cambia solo las de su bodega; el vendedor solo las ve', function (): void {

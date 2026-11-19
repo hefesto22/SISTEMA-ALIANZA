@@ -46,9 +46,11 @@ use Livewire\Attributes\Renderless;
  * (ni se guarda) más de lo disponible.
  *
  * Promociones: las vigentes hoy en la bodega del pedido van arriba de la
- * lista para agregarlas de un toque (lo que pide la promoción más el
- * regalo). Si el vendedor toca un producto que está en una promoción, se le
- * pregunta si agrega la promoción o solo el producto.
+ * lista para agregarlas de un toque (lo que pide la promoción y, si es con
+ * descuento, lo que se descuenta; el regalo de las gratis no: se agrega
+ * solo al guardar, como bonificación). Si el vendedor toca un producto que
+ * está en una promoción, se le pregunta si agrega la promoción o solo el
+ * producto. Las líneas de bonificación no se ven ni se escriben aquí.
  *
  * Vista: resources/views/filament/pedidos/lineas-pedido.blade.php (también
  * trae la barra de abajo con el total y Guardar).
@@ -98,7 +100,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $this->dehydrated(false);
 
         $this->loadStateFromRelationshipsUsing(function (LineasPedido $component, Pedido $record): void {
-            $component->state($record->items()->orderBy('id')->get()
+            $component->state($record->items()->where('bonificacion', false)->orderBy('id')->get()
                 ->map(fn (PedidoItem $item): array => [
                     'id'              => $item->id,
                     'producto_id'     => $item->producto_id,
@@ -270,7 +272,9 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
                 self::sumarLinea($lineas, $condicion->producto_id, $condicion->presentacion_id, $condicion->cantidad);
             }
 
-            self::sumarLinea($lineas, $promocion->producto_beneficio_id, $promocion->beneficio_presentacion_id, $promocion->cantidad_beneficio);
+            if (! $promocion->esBonificacion()) {
+                self::sumarLinea($lineas, $promocion->producto_beneficio_id, $promocion->beneficio_presentacion_id, $promocion->cantidad_beneficio);
+            }
 
             $promos[] = [
                 'id'      => $promocion->id,
@@ -669,13 +673,14 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
     /**
      * Pasa las líneas a pedido_items: cambia las que ya estaban (solo las de
-     * este pedido), crea las nuevas y quita las que ya no vienen.
+     * este pedido), crea las nuevas y quita las que ya no vienen. Las de
+     * bonificación no se tocan aquí: las acomoda RecalcularPedido.
      *
      * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      */
     private static function guardar(Pedido $pedido, array $lineas): void
     {
-        $actuales = $pedido->items()->get()->keyBy('id');
+        $actuales = $pedido->items()->where('bonificacion', false)->get()->keyBy('id');
         $quedan = [];
 
         foreach ($lineas as $linea) {
@@ -696,7 +701,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             $quedan[] = $item->id;
         }
 
-        $pedido->items()->whereKeyNot($quedan)->delete();
+        $pedido->items()->where('bonificacion', false)->whereKeyNot($quedan)->delete();
         $pedido->unsetRelation('items');
     }
 }

@@ -25,8 +25,9 @@
     pueden agregar, y no se deja pedir más de lo disponible.
 
     Promociones de hoy (las de la bodega del pedido): arriba de la lista,
-    cada una con "Agregar al pedido" (lo que pide la promoción más el
-    regalo). En el buscador los productos en promoción salen marcados y, al
+    cada una con "Agregar al pedido" (lo que pide la promoción y, si es con
+    descuento, lo que se descuenta; el regalo de las gratis se agrega solo
+    al guardar, como bonificación). En el buscador los productos en promoción salen marcados y, al
     tocar uno que todavía no lleva, se pregunta si agrega la promoción o solo
     el producto. En la fila, lo que la promoción le descuenta (o "Gratis").
 --}}
@@ -805,7 +806,7 @@
                 return ''
             },
 
-            {{-- Agrega lo que pide la promoción más el regalo (sobre lo que ya lleve). --}}
+            {{-- Agrega lo que pide la promoción (y lo que se descuenta, si no es gratis), sobre lo que ya lleve. --}}
             agregarPromo(promo) {
                 const falta = this.noAlcanzaPara(promo)
 

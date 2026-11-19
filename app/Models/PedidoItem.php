@@ -13,7 +13,9 @@ use Illuminate\Support\Carbon;
  * FD6…). `cantidad` es lo que pidió el cliente; `cantidad_despachada` es lo
  * que bodega confirmó que sale (null = sin validar). `contenido` son las
  * unidades base que trae la presentación (se copia al guardar la línea: si
- * después cambia la presentación, lo ya pedido no cambia).
+ * después cambia la presentación, lo ya pedido no cambia). Las líneas con
+ * `bonificacion` son el regalo de una promoción gratis: las pone
+ * RecalcularPedido, con 100 % de descuento.
  *
  * @property int $id
  * @property int $pedido_id
@@ -27,6 +29,7 @@ use Illuminate\Support\Carbon;
  * @property float $subtotal
  * @property float $descuento
  * @property int|null $promocion_id
+ * @property bool $bonificacion regalo de una promoción gratis: lo agrega RecalcularPedido
  * @property float $isv
  * @property float $total
  * @property Carbon|null $created_at
@@ -65,6 +68,7 @@ class PedidoItem extends Model
             'descuento'           => 'float',
             'isv'                 => 'float',
             'total'               => 'float',
+            'bonificacion'        => 'boolean',
         ];
     }
 

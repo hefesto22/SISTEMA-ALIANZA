@@ -7,18 +7,21 @@ namespace App\Domain\Promociones;
 use App\Models\Promocion;
 
 /**
- * Lo que devuelve el motor: el descuento de cada línea (por clave)
- * y los avisos de promociones a las que les falta el producto de regalo.
+ * Lo que devuelve el motor: el descuento de cada línea (por clave), las
+ * bonificaciones que se agregan solas (promociones gratis) y los avisos de
+ * promociones con descuento a las que les falta el producto en el pedido.
  */
 final readonly class ResultadoPromociones
 {
     /**
      * @param array<int|string, DescuentoLinea> $descuentos
      * @param list<FaltantePromocion> $faltantes
+     * @param list<RegaloPromocion> $regalos
      */
     public function __construct(
         public array $descuentos = [],
         public array $faltantes = [],
+        public array $regalos = [],
     ) {}
 
     public function descuentoDe(int|string $clave): ?DescuentoLinea

@@ -13,7 +13,9 @@ use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Presentacion;
 use App\Models\Producto;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Component;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -24,6 +26,10 @@ use Illuminate\Database\Eloquent\Builder;
  * aparte). Si las sueltas no alcanzan, bodega dice qué caja abre
  * (aperturas()). Bodega también puede agregar un producto que no venía en
  * el pedido (paraAgregar()).
+ *
+ * Los regalos de promociones gratis (bonificación) no se escriben aquí: se
+ * ven arriba, para leer, y salen solos con lo que sale de lo que se cobra
+ * (RecalcularPedido).
  */
 final class LineasPedido
 {
@@ -36,8 +42,34 @@ final class LineasPedido
     public static function schema(bool $paraValidar = false): array
     {
         return [
+            Callout::make('Regalos de promociones')
+                ->description(fn (?Pedido $record): string => self::regalosTexto($record))
+                ->icon(Heroicon::OutlinedGift)
+                ->success()
+                ->visible(fn (?Pedido $record): bool => self::regalosTexto($record) !== ''),
             SalidaDePedido::make('items')->paraValidar($paraValidar),
         ];
+    }
+
+    /**
+     * "1 caja de 18 de JABON X (PROMO-0003) · …": los regalos que lleva el
+     * pedido, para leer en el modal. Vacío si no lleva.
+     */
+    public static function regalosTexto(?Pedido $pedido): string
+    {
+        if ($pedido === null) {
+            return '';
+        }
+
+        $regalos = $pedido->items()
+            ->with(['presentacion.unidadMedida', 'producto', 'promocion'])
+            ->where('bonificacion', true)
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (PedidoItem $item): bool => $item->cantidadFacturable() > 0)
+            ->map(fn (PedidoItem $item): string => $item->presentacion->enPalabras($item->cantidadFacturable()).' de '.$item->producto->descripcion.($item->promocion === null ? '' : " ({$item->promocion->codigo})"));
+
+        return $regalos->isEmpty() ? '' : $regalos->implode(' · ').'. Salen solos y se acomodan con lo que sale de lo que se cobra.';
     }
 
     /**
@@ -62,7 +94,7 @@ final class LineasPedido
      */
     public static function datos(Pedido $pedido, bool $segunExistencia = false): array
     {
-        $items = $pedido->items()->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida'])->orderBy('id')->get();
+        $items = $pedido->items()->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida'])->where('bonificacion', false)->orderBy('id')->get();
         $existencias = self::existencias($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all());
         [$mueve, $salio] = self::movimiento($pedido);
 
@@ -456,7 +488,8 @@ final class LineasPedido
 
         $cantidades = [];
 
-        foreach ($pedido->items()->pluck('id') as $id) {
+        // Los regalos no van: se acomodan solos.
+        foreach ($pedido->items()->where('bonificacion', false)->pluck('id') as $id) {
             $cantidades[(int) $id] = array_key_exists((int) $id, $sale) ? $sale[(int) $id] : 0;
         }
 

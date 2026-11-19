@@ -7,7 +7,8 @@ namespace App\Domain\Promociones;
 use App\Models\Promocion;
 
 /**
- * Descuento (sin ISV) que una promoción le deja a una línea del pedido.
+ * Descuento (sin ISV) que una promoción le deja a una línea del pedido y
+ * cuántas de la línea cubre (en su presentación).
  */
 final readonly class DescuentoLinea
 {

@@ -128,7 +128,21 @@ test('el total que pide el teléfono trae las promociones', function (): void {
         ->and($resumen['descuentos'][$nutrine->id])->toBeGreaterThan(12.65);
 });
 
-test('la preventa trae las promociones de hoy de su bodega, con lo que hay que agregar para llevarlas', function (): void {
+test('el total que pide el teléfono avisa el regalo de las gratis: no se cobra y se agrega solo al guardar', function (): void {
+    $toffee = Producto::factory()->precio(20.0, 30.0)->create();
+    $nutrine = Producto::factory()->precio(20.0, 25.30)->create(['descripcion' => 'BABY NUTRINE']);
+    Promocion::factory()->para($toffee, $nutrine)->create();
+
+    $resumen = PedidoForm::resumenDe([
+        ['id' => null, 'producto_id' => $toffee->id, 'presentacion_id' => presentacion($toffee)->id, 'cantidad' => 2],
+    ]);
+
+    // 2 × 30 + 15% = 69; el regalo no suma.
+    expect($resumen)->toMatchArray(['total' => 69.0, 'ahorro' => 0.0])
+        ->and($resumen['promociones'])->toContain('Regalo: 2 unidades de BABY NUTRINE')->toContain('Se agrega solo al guardar');
+});
+
+test('la preventa trae las promociones de hoy de su bodega, con lo que hay que agregar para llevarlas (el regalo de las gratis no: se agrega solo)', function (): void {
     $regalo = Producto::factory()->precio(10.0, 20.0)->create(['descripcion' => 'JABON DE REGALO']);
     $otra = Bodega::factory()->create();
 
@@ -149,7 +163,6 @@ test('la preventa trae las promociones de hoy de su bodega, con lo que hay que a
         ->and($hoy['promos'][0]['regalo'])->toBe($regalo->id)
         ->and($hoy['promos'][0]['lineas'])->toBe([
             ['producto_id' => $this->producto->id, 'presentacion_id' => caja($this->producto)->id, 'cantidad' => 2],
-            ['producto_id' => $regalo->id, 'presentacion_id' => presentacion($regalo)->id, 'cantidad' => 1],
         ])
         ->and(array_keys($hoy['productos']))->toEqualCanonicalizing([$this->producto->id, $regalo->id]);
 });

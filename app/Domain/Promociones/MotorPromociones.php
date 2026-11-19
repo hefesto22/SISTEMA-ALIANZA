@@ -7,19 +7,26 @@ namespace App\Domain\Promociones;
 use App\Models\Promocion;
 
 /**
- * Calcula qué líneas de un pedido llevan descuento por promoción.
- * No guarda nada: recibe las líneas y las promociones (con sus condiciones).
+ * Calcula las promociones de un pedido. No guarda nada: recibe las líneas
+ * que se cobran (las bonificaciones no cuentan) y las promociones con sus
+ * condiciones.
  *
- * Reglas (todo se cuenta en unidades base; una CJ de 12 = 12):
- *  - La condición es una lista de productos con su cantidad, cada uno en una
- *    presentación ("2 cajas de 12 de X + 1 caja de 24 de Y").
- *    Veces que aplica = la menor de (unidades compradas ÷ unidades pedidas) entre esos productos.
- *    Si el regalo es uno de ellos ("compre 2 y lleve 1"), a ese producto se le suma el regalo.
- *  - Se descuentan hasta (veces × cantidad de regalo) unidades de las líneas del producto
- *    de regalo, en el orden del pedido. El regalo tiene que venir en el pedido (bodega lo
- *    despacha); si falta, queda como aviso para el vendedor.
- *  - Una línea recibe a lo sumo una promoción; las promociones se aplican en el orden recibido.
- *  - Descuento = precio sin ISV × unidades con promoción × % (gratis = 100%, mitad = 50%).
+ * Reglas:
+ *  - La condición es una lista de productos, cada uno con su cantidad en una
+ *    presentación EXACTA ("2 CJ18 de X + 1 CJ24 de Y"), como las arma el
+ *    proveedor: 2 CJ18 no se llenan con una CJ24 ni con 36 sueltas.
+ *    Veces que aplica = la menor de (lo que trae de esa presentación ÷ lo que pide).
+ *  - Gratis (100 %): es una bonificación. El regalo (veces × su cantidad, en
+ *    su presentación) va en `regalos` y RecalcularPedido lo agrega solo en
+ *    su propia línea; no tiene que venir en el pedido. "Compre 2 y lleve 1":
+ *    con 2 pagadas se agrega 1.
+ *  - Con descuento (a mitad o con un %): se descuenta de las líneas de la
+ *    presentación del regalo que ya vienen en el pedido, en orden, hasta
+ *    veces × su cantidad. Si el regalo es de la condición ("compre 2 y lleve
+ *    la 3a a mitad"), por cada vez tienen que venir las 2 y la 3a. Si falta,
+ *    queda como aviso para el vendedor.
+ *  - Una línea recibe a lo sumo un descuento; las promociones se aplican en el orden recibido.
+ *  - Descuento = precio sin ISV × las que cubre × % (gratis = 100 %, mitad = 50 %).
  */
 final class MotorPromociones
 {
@@ -29,39 +36,50 @@ final class MotorPromociones
      */
     public function calcular(array $lineas, iterable $promociones): ResultadoPromociones
     {
-        $unidades = [];
-        $enPedido = [];
+        $hay = [];
 
         foreach ($lineas as $linea) {
-            $unidades[$linea->productoId] = ($unidades[$linea->productoId] ?? 0) + $linea->unidades();
-            $enPedido[$linea->productoId] = true;
+            $hay[$linea->presentacionId] = ($hay[$linea->presentacionId] ?? 0) + max(0, $linea->cantidad);
         }
 
         $descuentos = [];
         $faltantes = [];
+        $regalos = [];
 
         foreach ($promociones as $promocion) {
-            $requerido = self::requerido($promocion, $enPedido);
+            $requerido = self::requerido($promocion, $hay);
 
             if ($requerido === null || $promocion->cantidad_beneficio <= 0 || $promocion->descuento_porcentaje <= 0) {
                 continue;
             }
 
-            $regaloId = $promocion->producto_beneficio_id;
+            $regalo = $promocion->beneficioPresentacion;
+            $porRegalo = $promocion->cantidad_beneficio;
 
-            if (! array_key_exists($regaloId, $enPedido)) {
-                // El producto de regalo no viene en el pedido: solo se avisa.
-                $veces = self::veces($requerido, $unidades, $regaloId, 0);
+            if ($promocion->esBonificacion()) {
+                $veces = self::veces($requerido, $hay);
 
                 if ($veces > 0) {
-                    $faltantes[] = new FaltantePromocion($promocion, $veces * $promocion->cantidad_beneficio, $promocion->beneficioPresentacion);
+                    $regalos[] = new RegaloPromocion($promocion, $regalo, $veces * $porRegalo);
                 }
 
                 continue;
             }
 
-            $porRegalo = $promocion->cantidad_beneficio * max(1, $promocion->beneficioPresentacion->contenido);
-            $veces = self::veces($requerido, $unidades, $regaloId, $porRegalo);
+            $enCondicion = array_key_exists($regalo->id, $requerido);
+
+            if (! array_key_exists($regalo->id, $hay)) {
+                // Lo que se descuenta no viene en el pedido: solo se avisa.
+                $veces = self::veces($requerido, $hay);
+
+                if ($veces > 0) {
+                    $faltantes[] = new FaltantePromocion($promocion, $veces * $porRegalo, $regalo);
+                }
+
+                continue;
+            }
+
+            $veces = self::veces($requerido, $hay, $enCondicion ? [$regalo->id => $porRegalo] : []);
             $porAplicar = $veces * $porRegalo;
 
             foreach ($lineas as $linea) {
@@ -69,49 +87,48 @@ final class MotorPromociones
                     break;
                 }
 
-                if ($linea->productoId !== $regaloId || isset($descuentos[$linea->clave]) || $linea->unidades() === 0) {
+                if ($linea->presentacionId !== $regalo->id || isset($descuentos[$linea->clave]) || $linea->cantidad <= 0) {
                     continue;
                 }
 
-                $toma = min($porAplicar, $linea->unidades());
+                $toma = min($porAplicar, $linea->cantidad);
                 $descuentos[$linea->clave] = new DescuentoLinea($linea->clave, $promocion, self::monto($linea, $toma, $promocion->descuento_porcentaje), $toma);
                 $porAplicar -= $toma;
             }
 
             if ($porAplicar > 0) {
-                $faltantes[] = self::faltante($promocion, $porAplicar);
-            } elseif (array_key_exists($regaloId, $requerido)) {
-                // "Compre 2 y lleve 1": si ya lleva lo que se paga del siguiente grupo, solo le falta el regalo.
-                $falta = self::faltaParaSiguiente($requerido, $unidades, $regaloId, $porRegalo, $veces);
+                $faltantes[] = new FaltantePromocion($promocion, $porAplicar, $regalo);
+            } elseif ($enCondicion) {
+                // "Compre 2 y lleve la 3a a mitad": si ya lleva las 2 del siguiente grupo, solo le falta la 3a.
+                $falta = self::faltaParaSiguiente($requerido, $hay, $regalo->id, $porRegalo, $veces);
 
                 if ($falta > 0) {
-                    $faltantes[] = self::faltante($promocion, $falta);
+                    $faltantes[] = new FaltantePromocion($promocion, $falta, $regalo);
                 }
             }
         }
 
-        return new ResultadoPromociones($descuentos, $faltantes);
+        return new ResultadoPromociones($descuentos, $faltantes, $regalos);
     }
 
     /**
-     * Unidades base que pide cada producto de la condición por cada vez que aplica.
-     * null si la promoción no tiene condición válida o si falta en el pedido algún producto.
+     * Lo que pide cada presentación de la condición por cada vez que aplica.
+     * null si la promoción no tiene condición válida o si alguna no viene en el pedido.
      *
-     * @param array<int, true> $enPedido
+     * @param array<int, int> $hay [presentacion_id => cuántas trae el pedido]
      *
      * @return array<int, int>|null
      */
-    private static function requerido(Promocion $promocion, array $enPedido): ?array
+    private static function requerido(Promocion $promocion, array $hay): ?array
     {
         $requerido = [];
 
         foreach ($promocion->condiciones as $condicion) {
-            if (! array_key_exists($condicion->producto_id, $enPedido) || $condicion->cantidad <= 0) {
+            if (! array_key_exists($condicion->presentacion_id, $hay) || $condicion->cantidad <= 0) {
                 return null;
             }
 
-            $requerido[$condicion->producto_id] = ($requerido[$condicion->producto_id] ?? 0)
-                + $condicion->cantidad * max(1, $condicion->presentacion->contenido);
+            $requerido[$condicion->presentacion_id] = ($requerido[$condicion->presentacion_id] ?? 0) + $condicion->cantidad;
         }
 
         return $requerido === [] ? null : $requerido;
@@ -119,65 +136,46 @@ final class MotorPromociones
 
     /**
      * @param array<int, int> $requerido
-     * @param array<int, int> $unidades
+     * @param array<int, int> $hay
+     * @param array<int, int> $ademas lo que cada vez pide de más una presentación (el regalo con descuento que es de la condición)
      */
-    private static function veces(array $requerido, array $unidades, int $regaloId, int $porRegalo): int
+    private static function veces(array $requerido, array $hay, array $ademas = []): int
     {
         $veces = PHP_INT_MAX;
 
-        foreach ($requerido as $productoId => $porVez) {
-            $porVez += $productoId === $regaloId ? $porRegalo : 0;
-            $veces = min($veces, intdiv($unidades[$productoId] ?? 0, $porVez));
+        foreach ($requerido as $presentacionId => $porVez) {
+            $veces = min($veces, intdiv($hay[$presentacionId] ?? 0, $porVez + ($ademas[$presentacionId] ?? 0)));
         }
 
         return $veces;
     }
 
     /**
-     * Cuántas unidades del regalo faltan para el siguiente grupo, si lo demás ya está completo; 0 si no.
+     * Cuántas del regalo faltan para el siguiente grupo, si lo demás ya está completo; 0 si no.
      *
      * @param array<int, int> $requerido
-     * @param array<int, int> $unidades
+     * @param array<int, int> $hay
      */
-    private static function faltaParaSiguiente(array $requerido, array $unidades, int $regaloId, int $porRegalo, int $veces): int
+    private static function faltaParaSiguiente(array $requerido, array $hay, int $regaloId, int $porRegalo, int $veces): int
     {
         $siguiente = $veces + 1;
 
-        foreach ($requerido as $productoId => $porVez) {
-            $necesita = $siguiente * $porVez + ($productoId === $regaloId ? $veces * $porRegalo : 0);
+        foreach ($requerido as $presentacionId => $porVez) {
+            $necesita = $siguiente * $porVez + ($presentacionId === $regaloId ? $veces * $porRegalo : 0);
 
-            if (($unidades[$productoId] ?? 0) < $necesita) {
+            if (($hay[$presentacionId] ?? 0) < $necesita) {
                 return 0;
             }
         }
 
-        return $siguiente * ($requerido[$regaloId] + $porRegalo) - ($unidades[$regaloId] ?? 0);
+        return $siguiente * ($requerido[$regaloId] + $porRegalo) - ($hay[$regaloId] ?? 0);
     }
 
-    private static function monto(LineaPromocion $linea, int $unidades, float $porcentaje): float
+    private static function monto(LineaPromocion $linea, int $cantidad, float $porcentaje): float
     {
-        // Si la promoción cubre la línea completa se usa la cantidad tal cual,
-        // así "gratis" deja la línea exactamente en cero.
-        $bruto = $unidades === $linea->unidades()
-            ? $linea->precio * $linea->cantidad
-            : $linea->precio * $unidades / $linea->factor();
-
+        $bruto = $linea->precio * $cantidad;
         $descuento = $porcentaje >= 100 ? round($bruto, 2) : round($bruto * $porcentaje / 100, 2);
 
         return min(round($linea->precio * $linea->cantidad, 2), $descuento);
-    }
-
-    /**
-     * Lo que falta del regalo, en su presentación si da cabal; si no, en la base.
-     */
-    private static function faltante(Promocion $promocion, int $unidades): FaltantePromocion
-    {
-        $regalo = $promocion->beneficioPresentacion;
-
-        if ($regalo->contenido > 1 && $unidades % $regalo->contenido === 0) {
-            return new FaltantePromocion($promocion, intdiv($unidades, $regalo->contenido), $regalo);
-        }
-
-        return new FaltantePromocion($promocion, $unidades, $promocion->productoBeneficio->presentacionBase());
     }
 }

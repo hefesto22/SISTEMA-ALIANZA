@@ -39,9 +39,9 @@ final class AjustarLineas
                 continue;
             }
 
-            $linea = $items->first(fn (PedidoItem $item): bool => $item->presentacion_id === $nueva['presentacion_id']);
+            $linea = $items->first(fn (PedidoItem $item): bool => ! $item->bonificacion && $item->presentacion_id === $nueva['presentacion_id']);
 
-            // Ya traía esa presentación: es la misma línea.
+            // Ya traía esa presentación (de las que se cobran): es la misma línea.
             if ($linea instanceof PedidoItem) {
                 $sale[$linea->id] = $nueva['cantidad'];
 
@@ -77,7 +77,7 @@ final class AjustarLineas
 
             $item->save();
 
-            $alguna = $alguna || $item->cantidad_despachada > 0;
+            $alguna = $alguna || (! $item->bonificacion && $item->cantidad_despachada > 0);
         }
 
         $pedido->unsetRelation('items');

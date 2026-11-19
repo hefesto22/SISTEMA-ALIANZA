@@ -40,7 +40,7 @@
                         @endif
 
                         @if ($item->descuento > 0)
-                            <div class="vp-ahorro">−{{ lempiras($item->descuento) }}{{ $item->promocion ? ' · '.$item->promocion->codigo : '' }}</div>
+                            <div class="vp-ahorro">{{ $item->bonificacion ? 'Regalo · ' : '' }}−{{ lempiras($item->descuento) }}{{ $item->promocion ? ' · '.$item->promocion->codigo : '' }}</div>
                         @endif
                     </div>
 

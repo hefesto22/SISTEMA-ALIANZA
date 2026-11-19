@@ -21,10 +21,15 @@ use Illuminate\Support\Carbon;
  *
  * La condición puede ser uno o varios productos, cada uno con su cantidad
  * en una de sus presentaciones: "2 cajas de 12 de BUTTER TOFFEE + 1 caja de
- * 24 de NUTRINE → 1 unidad de BABY NUTRINE gratis". Todo se cuenta en
- * unidades base (una CJ de 12 son 12).
+ * 24 de NUTRINE → 1 unidad de BABY NUTRINE gratis". Cuenta la presentación
+ * EXACTA, como las arma el proveedor: "2 CJ18" solo la cumplen 2 CJ18 (una
+ * CJ24 o 36 sueltas no).
  * Si el regalo es uno de los productos de la condición queda como
  * "compre 2 y lleve 1 más gratis".
+ *
+ * Gratis (100 %) es una bonificación: el regalo se agrega solo al pedido,
+ * en su propia línea (RecalcularPedido). A mitad o con otro % se descuenta
+ * de lo que ya viene en el pedido de esa presentación.
  *
  * El código (PROMO-0001) se genera solo. Solo cuenta en los pedidos
  * mientras esté activa y dentro de sus fechas; el cálculo vive en
@@ -311,6 +316,14 @@ class Promocion extends Model
             abs($porcentaje - 50) < 0.001  => 'mitad',
             default                        => 'otro',
         };
+    }
+
+    /**
+     * Gratis: el regalo es una bonificación que se agrega sola al pedido.
+     */
+    public function esBonificacion(): bool
+    {
+        return $this->descuento_porcentaje >= 100 - 0.001;
     }
 
     /**

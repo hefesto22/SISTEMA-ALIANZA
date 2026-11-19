@@ -43,8 +43,9 @@ use Illuminate\Database\Eloquent\Model;
  *
  * Promociones de la bodega: van dentro de la lista de productos (se agregan
  * de un toque, y al tocar un producto que está en promoción se le pregunta
- * al vendedor si la agrega) y el total estimado ya trae el descuento. Si no
- * hay, el formulario queda como siempre.
+ * al vendedor si la agrega) y el total estimado ya trae el descuento. El
+ * regalo de las gratis no se escribe: se avisa y se agrega solo al guardar
+ * (bonificación). Si no hay promociones, el formulario queda como siempre.
  */
 class PedidoForm
 {
@@ -334,7 +335,7 @@ class PedidoForm
             $producto = $presentacion->producto;
 
             $conProducto[$clave] = ['producto' => $producto, 'presentacion' => $presentacion, 'cantidad' => $linea['cantidad']];
-            $paraMotor[] = new LineaPromocion($clave, $producto->id, $presentacion->contenido, $linea['cantidad'], $presentacion->precio);
+            $paraMotor[] = new LineaPromocion($clave, $producto->id, $presentacion->id, $presentacion->contenido, $linea['cantidad'], $presentacion->precio);
         }
 
         $vigentes = Promocion::query()->vigentes()->paraBodega($bodegaId)->with([...Promocion::PARA_CALCULAR, 'condiciones.producto'])->orderBy('id')->get();
@@ -349,6 +350,10 @@ class PedidoForm
         foreach ($resultado->porPromocion() as $grupo) {
             $filas[] = '<div style="color:#16a34a">'.self::icono('heroicon-m-check-circle').' <b>'.e((string) $grupo['promocion']->codigo).'</b> '.e($grupo['promocion']->nombre)
                 .': −'.e(lempiras($grupo['monto'])).' (sin ISV)</div>';
+        }
+
+        foreach ($resultado->regalos as $regalo) {
+            $filas[] = '<div style="color:#16a34a">'.self::icono('heroicon-m-gift').' '.e($regalo->texto()).' Se agrega solo al guardar.</div>';
         }
 
         foreach ($resultado->faltantes as $faltante) {

@@ -5,15 +5,17 @@ declare(strict_types=1);
 namespace App\Domain\Promociones;
 
 /**
- * Una línea del pedido tal como la ve el motor de promociones.
- * `contenido` son las unidades base que trae su presentación (UN = 1,
- * CJ de 12 = 12) y `precio` es por esa presentación, sin ISV.
+ * Una línea del pedido tal como la ve el motor de promociones (solo las que
+ * se cobran; las bonificaciones no cuentan). Las condiciones cuentan la
+ * presentación exacta (`presentacionId`). `contenido` son las unidades base
+ * que trae (UN = 1, CJ de 12 = 12) y `precio` es por esa presentación, sin ISV.
  */
 final readonly class LineaPromocion
 {
     public function __construct(
         public int|string $clave,
         public int $productoId,
+        public int $presentacionId,
         public int $contenido,
         public int $cantidad,
         public float $precio,
