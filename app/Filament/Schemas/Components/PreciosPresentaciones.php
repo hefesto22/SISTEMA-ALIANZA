@@ -16,9 +16,10 @@ use Filament\Forms\Components\Field;
  * (App\Filament\Resources\Productos\Actions\ActualizarPrecioAction).
  *
  * Arriba, para leer: la existencia de cada presentación y la última
- * compra; "Corregir costos" deja escribir el costo de cada una, solo para
- * cuando está mal. Abajo, una fila por presentación: SU costo promedio (con
- * y sin ISV), % de utilidad, precio (con ISV si es gravado), cuánto gana y si el
+ * compra; "Corregir costos" deja escribir el costo correcto, solo para
+ * cuando está mal (es uno por unidad: el de una presentación mueve a las
+ * demás). Abajo, una fila por presentación: su costo (el de la unidad × lo
+ * que trae, con y sin ISV), % de utilidad, precio (con ISV si es gravado), cuánto gana y si el
  * precio es "Con %" (sale del costo con ese % y lo mueven las compras) o
  * "Fijo" (lo pone la empresa; las compras no lo mueven), con una línea que
  * lo explica con los números de esa fila. En "Con %" solo se escribe el %

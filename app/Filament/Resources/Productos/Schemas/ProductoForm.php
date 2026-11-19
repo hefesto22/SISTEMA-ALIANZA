@@ -32,7 +32,8 @@ use Illuminate\Validation\Rules\Unique;
  *
  * Al crear, costo y precios son opcionales: el costo lo pone la primera
  * compra y el precio sale del costo con el % de utilidad; si se escribe un
- * precio, queda ese. Después se cambian con "Actualizar precio" para que
+ * precio, queda ese. El costo es uno por unidad: con el de una presentación
+ * basta (si se escriben varios, manda el de la base). Después se cambian con "Actualizar precio" para que
  * quede historial.
  *
  * Los campos de presentaciones no son columnas del producto: los guarda
@@ -131,6 +132,7 @@ class ProductoForm
                                     ->columnSpan(['md' => 2]),
                                 TextInput::make('base_costo')
                                     ->label(fn (Get $get): string => 'Costo '.self::codigo($get('unidad_medida_id')).($get('gravado') ? ' con ISV' : ''))
+                                    ->helperText('Con el costo de una presentación basta: es uno por unidad y las demás salen de él.')
                                     ->numeric()
                                     ->minValue(0)
                                     ->prefix('L.')

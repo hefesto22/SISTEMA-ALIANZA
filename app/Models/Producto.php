@@ -20,10 +20,12 @@ use LogicException;
  *
  * Se vende y se compra en presentaciones (App\Models\Presentacion): la base
  * (casi siempre UN) y las que traen varias (CJ de 32, CJ de 48, FD de 6…).
- * CADA presentación lleva su existencia en cada bodega y su costo promedio
- * (sin ISV): la CJ48 no se mezcla con la CJ32 ni con las UN sueltas. Al
- * abrir una caja, sus unidades pasan a las sueltas con el costo de esa
- * caja. Costo y precios son los mismos en todas las bodegas.
+ * CADA presentación lleva su existencia en cada bodega: la CJ48 no se
+ * mezcla con la CJ32 ni con las UN sueltas; al abrir una caja, sus unidades
+ * pasan a las sueltas. El costo (sin ISV) es UNO por unidad: el promedio de
+ * todo lo que se compró, venga en la caja que venga, y cada presentación
+ * cuesta ese × lo que trae. Costo y precios son los mismos en todas las
+ * bodegas.
  *
  * Para cambiar costos/precios usar App\Domain\Precios\ActualizarPrecioProducto:
  * es lo que deja el registro en el historial.

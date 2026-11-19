@@ -128,7 +128,7 @@ test('actualizar precio: un precio escrito queda fijo y se guarda sin ISV', func
         ->and($cambio->bodega_id)->toBe($this->bodega->id);
 });
 
-test('cada presentación con su %: la caja deja menos que la unidad y su precio sigue a su costo en cada compra', function (): void {
+test('cada presentación con su %: la caja deja menos que la unidad y las dos siguen al costo en cada compra', function (): void {
     $this->actingAs($this->encargado);
 
     // La CJ12 al 10 %: 600 ÷ 0.90 = 666.6667 sin ISV. La UN sigue con el 16 %.
@@ -147,21 +147,22 @@ test('cada presentación con su %: la caja deja menos que la unidad y su precio 
         ->and(presentacion($this->producto)->precio)->toBe(59.5238)
         ->and(presentacion($this->producto)->margen)->toBeNull();
 
-    // Compran barato: una CJ12 a L 621 con ISV = 540. Baja la CJ12 y deja su 10 %; la UN no se toca.
+    // Compran barato: una CJ12 a L 621 con ISV = 540 (45 la unidad). La CJ12 baja y deja su 10 %; la UN baja con su 16 %.
     app(RegistrarCompra::class)->ejecutar($this->bodega, $this->producto->proveedor, [
         ['producto_id' => $this->producto->id, 'presentacion_id' => presentacion($this->producto, 12)->id, 'cantidad' => 1, 'costo' => 621.0],
     ], $this->encargado);
 
     expect(presentacion($this->producto, 12)->costo)->toBe(540.0)
         ->and(presentacion($this->producto, 12)->precio)->toBe(600.0)
-        ->and(presentacion($this->producto)->precio)->toBe(59.5238);
+        ->and(presentacion($this->producto)->costo)->toBe(45.0)
+        ->and(presentacion($this->producto)->precio)->toBe(53.5714);
 });
 
-test('corregir costos: se guarda el corregido de esa presentación y su precio "Con %" sale de él', function (): void {
+test('corregir costos: el corregido de una presentación da el costo por unidad de todas y su precio "Con %" sale de él', function (): void {
     $this->actingAs($this->encargado);
     $caja = presentacion($this->producto, 12);
 
-    // CJ12 a L 600 con ISV → 521.739130 sin ISV. La UN no se toca.
+    // CJ12 a L 600 con ISV → 521.739130 sin ISV: 43.4783 la unidad.
     Livewire::test(ViewProducto::class, ['record' => $this->producto->getRouteKey()])
         ->mountAction('actualizarPrecio')
         ->fillForm(['precios.corregir' => true, 'precios.costos.'.$caja->id => 521.73913])
@@ -170,9 +171,9 @@ test('corregir costos: se guarda el corregido de esa presentación y su precio "
 
     expect($caja->fresh()?->costo)->toBe(521.7391)
         ->and($caja->fresh()?->precio)->toBe(621.1180)
-        ->and(presentacion($this->producto)->costo)->toBe(50.0)
-        ->and(presentacion($this->producto)->precio)->toBe(59.5238)
-        ->and($this->producto->cambiosPrecio()->sole()->motivo)->toBe(MotivoCambioPrecio::Manual);
+        ->and(presentacion($this->producto)->costo)->toBe(43.4783)
+        ->and(presentacion($this->producto)->precio)->toBe(51.7599)
+        ->and($this->producto->cambiosPrecio()->pluck('motivo')->all())->toBe([MotivoCambioPrecio::Manual, MotivoCambioPrecio::Manual]);
 });
 
 test('sin "Corregir costos", el costo que llegue no se toca', function (): void {

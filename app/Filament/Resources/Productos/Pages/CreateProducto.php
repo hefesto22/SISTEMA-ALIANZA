@@ -101,8 +101,10 @@ class CreateProducto extends CreateRecord
     }
 
     /**
-     * El costo sin ISV de cada presentación: el escrito o, si no tiene, el
-     * estimado por unidad × lo que trae. [] si no se escribió ninguno.
+     * El costo sin ISV de cada presentación. Es uno por unidad: el de la base
+     * si se escribió; si no, el más alto por unidad de los escritos (para no
+     * quedar por debajo del costo), × lo que trae cada una. [] si no se
+     * escribió ninguno.
      *
      * @param list<array{presentacion: Presentacion, costo: float|null, precio: float|null}> $filas
      *
@@ -130,7 +132,7 @@ class CreateProducto extends CreateRecord
 
         foreach ($filas as $fila) {
             $presentacion = $fila['presentacion'];
-            $costos[$presentacion->id] = $escritos[$presentacion->id] ?? round($referencia * $presentacion->contenido, 4);
+            $costos[$presentacion->id] = round($referencia * max(1, $presentacion->contenido), 4);
         }
 
         return $costos;

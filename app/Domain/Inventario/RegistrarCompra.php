@@ -29,13 +29,15 @@ use Illuminate\Support\Facades\DB;
  *
  * 1. El costo de la factura (de la presentación completa, con ISV si el
  *    producto es gravado) se pasa a sin ISV, como se guarda.
- * 2. El costo nuevo de ESA presentación sale según Configuración:
- *      - promedio: (lo que hay de ella en todas las bodegas × su costo +
- *        lo que entra × costo de compra) ÷ total. Si no había, el de compra.
+ * 2. El costo es uno por unidad del producto (ActualizarPrecioProducto) y
+ *    el nuevo sale según Configuración:
+ *      - promedio: (las unidades que hay del producto en todas las bodegas,
+ *        en cualquier presentación, × su costo + las que entran × lo que
+ *        costó cada una) ÷ total. Si no había (o no tenía costo), el de compra.
  *      - último: el de compra.
- *    Las otras presentaciones del producto no se tocan: una caja de 48 que
- *    se compró más barata no le baja el costo a la de 32 ni a las sueltas.
- * 3. El precio de esa presentación se recalcula con su % de utilidad
+ *    Todas las presentaciones quedan con ese costo por unidad × lo que
+ *    traen: una CJ24 a 240 y una CJ18 a 189 dan el mismo jabón a 10.21.
+ * 3. El precio de cada presentación se recalcula con su % de utilidad
  *    (ActualizarPrecioProducto, que deja el historial): siempre cubre su
  *    costo. Si es de precio fijo se queda; solo cambia el costo.
  * 4. Suma a la existencia de esa presentación en ESA bodega y deja el
@@ -102,14 +104,14 @@ final class RegistrarCompra
     }
 
     /**
-     * Costo (sin ISV) con que queda una presentación cuando le entran
-     * $entran a $costoEntra y había $existencia (en todas las bodegas) a
-     * $costoActual. Sirve igual para una compra y para las sueltas que salen
-     * de una caja abierta.
+     * Costo (sin ISV) con que queda cuando entran $entran a $costoEntra y
+     * había $existencia (en todas las bodegas) a $costoActual. Las
+     * cantidades pesan igual en cualquier medida: unidades con costos de la
+     * presentación completa dan el costo de la presentación completa.
      */
     public static function costoNuevo(MetodoCosto $metodo, int $existencia, float $costoActual, int $entran, float $costoEntra): float
     {
-        if ($metodo === MetodoCosto::Ultimo || $existencia <= 0) {
+        if ($metodo === MetodoCosto::Ultimo || $existencia <= 0 || $costoActual <= 0) {
             return round($costoEntra, 4);
         }
 
@@ -147,11 +149,14 @@ final class RegistrarCompra
         $unidades = $cantidad * $presentacion->contenido;
         $costoCompra = CalculadoraPrecio::aUnidadSinIsv($costoIngresado, $producto->gravado);
 
-        // Lo que hay de ESTA presentación en todas las bodegas antes de esta
-        // línea (su costo es uno solo para todas).
-        $hay = (int) Existencia::query()->where('presentacion_id', $presentacion->id)->sum('cantidad');
+        // Las unidades del producto en todas las bodegas y en todas sus
+        // presentaciones antes de esta línea (el costo por unidad es uno).
+        $hay = (int) Existencia::query()
+            ->join('presentaciones', 'presentaciones.id', '=', 'existencias.presentacion_id')
+            ->where('existencias.producto_id', $producto->id)
+            ->sum(DB::raw('existencias.cantidad * presentaciones.contenido'));
         $costoAnterior = $producto->precio_actualizado_at === null ? null : $presentacion->costo;
-        $costoNuevo = self::costoNuevo($metodo, $hay, $presentacion->costo, $cantidad, $costoCompra);
+        $costoNuevo = self::costoNuevo($metodo, $hay, $presentacion->costo, $unidades, $costoCompra);
 
         $this->precios->ejecutar($producto, MotivoCambioPrecio::Compra, $usuario, nota: "COMPRA {$compra->numero} · {$bodega->nombre}", costos: [$presentacion->id => $costoNuevo]);
         $presentacion->refresh();

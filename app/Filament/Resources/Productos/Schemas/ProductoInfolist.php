@@ -70,7 +70,7 @@ class ProductoInfolist
                 Section::make('Presentaciones y precios (todas las bodegas)')
                     ->description(fn (Producto $record): string => ($record->gravado
                         ? 'Precio de venta con ISV incluido. La utilidad es sobre el costo con ISV.'
-                        : 'Producto exento: el precio de venta no lleva ISV.').' Cada presentación lleva su existencia y su costo promedio (lo que se ha comprado de ella); las sueltas también se llenan al abrir una caja.')
+                        : 'Producto exento: el precio de venta no lleva ISV.').' Cada presentación lleva su existencia (las sueltas también se llenan al abrir una caja). El costo es uno por unidad, el promedio de lo que se ha comprado en cualquier presentación, y cada una cuesta ese × lo que trae.')
                     ->columns(3)
                     ->columnSpanFull()
                     ->schema([

@@ -23,10 +23,11 @@ use Livewire\Attributes\Renderless;
  * costo con ISV como viene en la factura (vacío: se escribe el de la
  * factura) y el total de la línea. Si de un producto vienen varias
  * presentaciones (10 CJ48, 10 CJ32 y 5 UN), "+ Otra presentación" agrega
- * otra fila del mismo producto. Abajo de cada una, cómo queda ESA
- * presentación (cada una tiene su costo): "Costo CJ48: está a L X →
- * quedará a L Y" y lo mismo del precio de venta (el fijo se queda), con la
- * misma cuenta que RegistrarCompra (promedio o último, según
+ * otra fila del mismo producto. Abajo de cada una, cómo queda esa
+ * presentación con la compra: "Costo CJ48: está a L X → quedará a L Y" y
+ * lo mismo del precio de venta (el fijo se queda), con la misma cuenta que
+ * RegistrarCompra: el costo es uno por unidad del producto, así que todas
+ * sus líneas de la compra lo mueven (promedio o último, según
  * Configuración). Si el costo se aleja mucho del de hoy, avisa (error de
  * dedo). Abajo, la barra con el total y "Registrar compra".
  *
@@ -178,7 +179,8 @@ class LineasCompra extends Field
      * precio de hoy CON ISV (si es gravado), y lo necesario para sacar cómo
      * queda cada una con la compra igual que RegistrarCompra: su costo sin
      * ISV, lo que hay de ella en todas las bodegas, su % de utilidad y si el
-     * precio es fijo.
+     * precio es fijo; y del producto, sus unidades en todas las bodegas (en
+     * cualquier presentación) y su costo por unidad.
      *
      * @param array<int, int> $existencias [presentacion_id => lo que hay en todas las bodegas]
      *
@@ -192,6 +194,12 @@ class LineasCompra extends Field
             $presentaciones[] = self::presentacionDe($presentacion, $producto, $existencias[$presentacion->id] ?? 0);
         }
 
+        $unidades = 0;
+
+        foreach ($producto->presentaciones as $presentacion) {
+            $unidades += ($existencias[$presentacion->id] ?? 0) * max(1, $presentacion->contenido);
+        }
+
         return [
             'id'             => $producto->id,
             'codigo'         => $producto->codigo,
@@ -200,6 +208,8 @@ class LineasCompra extends Field
             'proveedor_id'   => $producto->proveedor_id,
             'presentaciones' => $presentaciones,
             'margen'         => $producto->margenAplicado(),
+            'unidades'       => $unidades,
+            'costoUnidad'    => $producto->costoReferencia(),
         ];
     }
 
@@ -227,7 +237,7 @@ class LineasCompra extends Field
 
     /**
      * Lo que hay de cada presentación de esos productos en TODAS las bodegas
-     * (su costo promedio es uno solo): [presentacion_id => cantidad en ella].
+     * (el costo es uno solo): [presentacion_id => cantidad en ella].
      *
      * @param array<mixed> $ids
      *

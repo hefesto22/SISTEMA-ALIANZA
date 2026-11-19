@@ -13,8 +13,8 @@ use App\Models\Producto;
 use App\Models\User;
 
 // El factory deja la UN con costo 50.00 y precio 59.5238 (16%) y una CJ de
-// 12 con costo 600.00 y precio 714.2856 (12 × la UN). Cada presentación
-// tiene su costo.
+// 12 con costo 600.00 y precio 714.2856 (12 × la UN). El costo es uno por
+// unidad: cada presentación cuesta ese × lo que trae.
 
 test('los costos nuevos recalculan el precio de cada presentación y dejan historial de cada una', function (): void {
     $bodega = Bodega::factory()->create();
@@ -42,19 +42,18 @@ test('los costos nuevos recalculan el precio de cada presentación y dejan histo
         ->and($cambios[0]->motivo)->toBe(MotivoCambioPrecio::Compra);
 });
 
-test('el costo de una presentación no mueve el de las otras ni su precio', function (): void {
+test('el costo nuevo de una presentación es el de todas: sale el costo por unidad y cada una lo cobra con su %', function (): void {
     $producto = Producto::factory()->create();
     $caja = presentacion($producto, 12);
 
-    // La CJ12 se compró más barata: 480 (40 cada una). La UN sigue a 50.
+    // La CJ12 a 480 = 40 cada unidad: la UN también queda a 40.
     $cambios = app(ActualizarPrecioProducto::class)->ejecutar($producto, MotivoCambioPrecio::Compra, costos: [$caja->id => 480.0]);
 
-    expect($cambios)->toHaveCount(1)
-        ->and($cambios[0]->presentacion_id)->toBe($caja->id)
+    expect($cambios)->toHaveCount(2)
         ->and($caja->fresh()?->costo)->toBe(480.0)
         ->and($caja->fresh()?->precio)->toBe(571.4286)
-        ->and(presentacion($producto)->costo)->toBe(50.0)
-        ->and(presentacion($producto)->precio)->toBe(59.5238);
+        ->and(presentacion($producto)->costo)->toBe(40.0)
+        ->and(presentacion($producto)->precio)->toBe(47.619);
 });
 
 test('si el costo y el precio no cambian (o solo por redondeo) no se escribe historial', function (): void {
@@ -112,12 +111,13 @@ test('con precio fijo, el costo nuevo se guarda pero el precio se queda', functi
 
     $cambios = app(ActualizarPrecioProducto::class)->ejecutar($producto, MotivoCambioPrecio::Compra, nota: 'COMPRA COM-000001', costos: [presentacion($producto)->id => 60.0]);
 
-    // Cuesta 60 y se sigue vendiendo a 59.5238: deja −0.8 %.
+    // Cuesta 60 (la CJ12, 720) y se sigue vendiendo a 59.5238: deja −0.8 %.
     expect(presentacion($producto)->costo)->toBe(60.0)
         ->and(presentacion($producto)->precio)->toBe(59.5238)
         ->and(presentacion($producto)->precio_fijo)->toBeTrue()
+        ->and(presentacion($producto, 12)->costo)->toBe(720.0)
         ->and(presentacion($producto, 12)->precio)->toBe(714.2856)
-        ->and($cambios)->toHaveCount(1)
+        ->and($cambios)->toHaveCount(2)
         ->and($cambios[0]->precio_nuevo)->toBe(59.5238)
         ->and($cambios[0]->margen)->toBe(-0.008)
         ->and($cambios[0]->nota)->toBe('COMPRA COM-000001 · PRECIO FIJO');

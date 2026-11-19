@@ -41,9 +41,10 @@ use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 /**
- * Inventario por bodega y compras: cada presentación tiene su costo
- * (promedio o último) y su precio, los mismos para todas las bodegas, y su
- * existencia en cada bodega. El despacho saca cada presentación de la suya.
+ * Inventario por bodega y compras: el costo es uno por unidad (promedio o
+ * último) y cada presentación cuesta ese × lo que trae, con su precio; los
+ * mismos para todas las bodegas. Cada presentación tiene su existencia en
+ * cada bodega y el despacho la saca de la suya.
  */
 beforeEach(function (): void {
     Filament::setCurrentPanel('admin');
@@ -128,7 +129,7 @@ test('la existencia se muestra por presentación; las unidades sueltas también 
         ->and($this->producto->existenciaEnTexto(29))->toBe('2 CJ12 + 5 UN');
 });
 
-test('costo promedio por presentación: la CJ12 se promedia con las CJ12 de todas las bodegas; la UN no se toca', function (): void {
+test('costo promedio por unidad: la compra de CJ12 se promedia con todo lo que hay del producto en todas las bodegas y la UN la sigue', function (): void {
     // Ya hay 2 CJ12 a L 960 en Santa Rosa; entran 2 CJ12 a L 1,200 en Ocotepeque.
     contar($this->bodega, $this->caja, 2, $this->admin);
 
@@ -139,11 +140,11 @@ test('costo promedio por presentación: la CJ12 se promedia con las CJ12 de toda
 
     $item = $compra->items()->sole();
 
-    // (2 × 960 + 2 × 1,200) ÷ 4 = 1,080 → CJ12: 1,080 ÷ 0.8 = 1,350. La UN sigue a 80 y 100.
+    // (24 unidades × 80 + 24 × 100) ÷ 48 = 90 la unidad → CJ12: 1,080 ÷ 0.8 = 1,350; UN: 90 → 112.50.
     expect($this->caja->fresh()?->costo)->toBe(1080.0)
         ->and($this->caja->fresh()?->precio)->toBe(1350.0)
-        ->and($this->base->fresh()?->costo)->toBe(80.0)
-        ->and($this->base->fresh()?->precio)->toBe(100.0)
+        ->and($this->base->fresh()?->costo)->toBe(90.0)
+        ->and($this->base->fresh()?->precio)->toBe(112.5)
         ->and(Existencia::de($this->bodega->id, $this->caja->id))->toBe(2)
         ->and(Existencia::de($this->otra->id, $this->caja->id))->toBe(2)
         ->and(Existencia::en($this->otra->id, $this->producto->id))->toBe(24)
@@ -159,7 +160,10 @@ test('costo promedio por presentación: la CJ12 se promedia con las CJ12 de toda
         ->and($item->costo_nuevo)->toBe(1080.0)
         ->and($item->precio_nuevo)->toBe(1350.0);
 
-    $cambio = CambioPrecio::query()->sole();
+    // En el historial, una por cada presentación que cambió.
+    expect(CambioPrecio::query()->orderBy('presentacion_id')->pluck('presentacion_id')->all())->toBe([$this->base->id, $this->caja->id]);
+
+    $cambio = CambioPrecio::query()->where('presentacion_id', $this->caja->id)->sole();
     $entrada = MovimientoInventario::query()->where('compra_id', $compra->id)->sole();
 
     expect($cambio->motivo)->toBe(MotivoCambioPrecio::Compra)
@@ -173,7 +177,7 @@ test('costo promedio por presentación: la CJ12 se promedia con las CJ12 de toda
         ->and($entrada->costo_unidad)->toBe(1200.0);
 });
 
-test('último costo: toma el costo de la compra', function (): void {
+test('último costo: toma el costo de la compra para todas las presentaciones', function (): void {
     Configuracion::actual()->update(['metodo_costo' => MetodoCosto::Ultimo]);
     contar($this->bodega, $this->caja, 2, $this->admin);
 
@@ -183,7 +187,8 @@ test('último costo: toma el costo de la compra', function (): void {
 
     expect($this->caja->fresh()?->costo)->toBe(1200.0)
         ->and($this->caja->fresh()?->precio)->toBe(1500.0)
-        ->and($this->base->fresh()?->precio)->toBe(100.0)
+        ->and($this->base->fresh()?->costo)->toBe(100.0)
+        ->and($this->base->fresh()?->precio)->toBe(125.0)
         ->and(Existencia::de($this->bodega->id, $this->caja->id))->toBe(3)
         ->and(Existencia::en($this->bodega->id, $this->producto->id))->toBe(36);
 });
@@ -200,10 +205,10 @@ test('con promedio y sin existencia, el costo es el de la compra; lo exento entr
         ['producto_id' => $exento->id, 'presentacion_id' => presentacion($exento)->id, 'cantidad' => 10, 'costo' => 48.0],
     ], $this->admin);
 
-    // 115 con ISV = 100 sin ISV (la UN: 125); el exento queda en 48 (60). La CJ12 no se toca.
+    // 115 con ISV = 100 sin ISV (la UN: 125) y la CJ12 la sigue (1,200); el exento queda en 48 (60).
     expect($this->base->fresh()?->costo)->toBe(100.0)
         ->and($this->base->fresh()?->precio)->toBe(125.0)
-        ->and($this->caja->fresh()?->costo)->toBe(960.0)
+        ->and($this->caja->fresh()?->costo)->toBe(1200.0)
         ->and(presentacion($exento)->costo)->toBe(48.0)
         ->and(presentacion($exento)->precio)->toBe(60.0)
         ->and($compra->subtotal)->toBe(1480.0)
@@ -211,7 +216,7 @@ test('con promedio y sin existencia, el costo es el de la compra; lo exento entr
         ->and($compra->total)->toBe(1630.0);
 });
 
-test('un mismo producto puede venir en varias presentaciones en la misma compra: cada una queda con su costo y su precio', function (): void {
+test('un mismo producto puede venir en varias presentaciones en la misma compra: queda un costo por unidad para todas y cada una con su precio', function (): void {
     // El mismo jabón (mismo código) también viene en caja de 8 (sin costo todavía).
     $caja8 = Presentacion::query()->create(['producto_id' => $this->producto->id, 'unidad_medida_id' => $this->caja->unidad_medida_id, 'contenido' => 8, 'precio' => 800.0]);
 
@@ -222,13 +227,13 @@ test('un mismo producto puede venir en varias presentaciones en la misma compra:
         ['producto_id' => $this->producto->id, 'presentacion_id' => $this->base->id, 'cantidad' => 5, 'costo' => 103.5],
     ], $this->admin);
 
-    // Sin existencia cada una toma el de su compra; con 20 %: CJ12 1,500, CJ8 900, UN 112.50.
-    expect($this->caja->fresh()?->costo)->toBe(1200.0)
-        ->and($this->caja->fresh()?->precio)->toBe(1500.0)
-        ->and($caja8->fresh()?->costo)->toBe(720.0)
-        ->and($caja8->fresh()?->precio)->toBe(900.0)
-        ->and($this->base->fresh()?->costo)->toBe(90.0)
-        ->and($this->base->fresh()?->precio)->toBe(112.5)
+    // Las 25 unidades costaron 1,200 + 720 + 450 = 2,370: 94.80 cada una. Con 20 %: CJ12 1,422, CJ8 948, UN 118.50.
+    expect($this->caja->fresh()?->costo)->toBe(1137.6)
+        ->and($this->caja->fresh()?->precio)->toBe(1422.0)
+        ->and($caja8->fresh()?->costo)->toBe(758.4)
+        ->and($caja8->fresh()?->precio)->toBe(948.0)
+        ->and($this->base->fresh()?->costo)->toBe(94.8)
+        ->and($this->base->fresh()?->precio)->toBe(118.5)
         ->and(Existencia::de($this->bodega->id, $this->base->id))->toBe(5)
         ->and(Existencia::de($this->bodega->id, $this->caja->id))->toBe(1)
         ->and(Existencia::de($this->bodega->id, $caja8->id))->toBe(1)
@@ -638,7 +643,7 @@ test('el vendedor ve lo disponible (lo de la bodega menos lo apartado en pedidos
         ->and(LineasPedido::datos($validado)['items'][0]['salio_pres'])->toBe(1);
 });
 
-test('con precio fijo la compra mueve el costo promedio pero no el precio; si el costo lo pasa, avisa', function (): void {
+test('con precio fijo la compra mueve el costo pero no el precio; si el costo lo pasa, avisa', function (): void {
     // La CJ12 fija a L 1,140; la UN sigue con el % de utilidad.
     $this->caja->forceFill(['precio_fijo' => true, 'precio' => 1140.0])->save();
     contar($this->bodega, $this->caja, 2, $this->admin);
@@ -656,12 +661,12 @@ test('con precio fijo la compra mueve el costo promedio pero no el precio; si el
         ->call('create')
         ->assertHasNoFormErrors();
 
-    // 2 cajas a L 1,380 con ISV = L 1,200: (2 × 960 + 2 × 1,200) ÷ 4 = 1,080. Se sigue vendiendo a 1,140.
+    // 2 cajas a L 1,380 con ISV = L 1,200: (2 × 960 + 2 × 1,200) ÷ 4 = 1,080. Se sigue vendiendo a 1,140; la UN (con %) sigue a su costo: 90 → 112.50.
     $comprar(2, 1380.0)->assertNotNotified('Hay precios fijos por debajo del costo');
 
     expect($this->caja->fresh()?->costo)->toBe(1080.0)
         ->and($this->caja->fresh()?->precio)->toBe(1140.0)
-        ->and($this->base->fresh()?->precio)->toBe(100.0)
+        ->and($this->base->fresh()?->precio)->toBe(112.5)
         ->and(Compra::query()->latest('id')->firstOrFail()->items()->sole()->precio_nuevo)->toBe(1140.0);
 
     // 4 cajas a L 1,794 con ISV = L 1,560: (4 × 1,080 + 4 × 1,560) ÷ 8 = 1,320, más que los 1,140 del precio.
@@ -670,5 +675,5 @@ test('con precio fijo la compra mueve el costo promedio pero no el precio; si el
     expect($this->caja->fresh()?->costo)->toBe(1320.0)
         ->and($this->caja->fresh()?->precio)->toBe(1140.0)
         ->and($this->caja->fresh()?->precio_fijo)->toBeTrue()
-        ->and($this->base->fresh()?->precio)->toBe(100.0);
+        ->and($this->base->fresh()?->precio)->toBe(137.5);
 });

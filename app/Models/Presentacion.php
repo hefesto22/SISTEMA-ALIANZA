@@ -17,11 +17,11 @@ use Illuminate\Support\Carbon;
  * empaque que trae varias (CJ de 8, CJ de 12, FD de 6, SC de 10…).
  *
  * Cada presentación lleva su existencia en cada bodega (en ella: cuántas
- * CJ48, cuántas UN sueltas) y su costo: el promedio de lo que se ha
- * comprado de ELLA, de la presentación completa y sin ISV. Las UN sueltas
- * también entran cuando se abre una caja (con el costo de esa caja). El
- * precio es de la presentación completa y SIN ISV: calculado desde su
- * costo con el % de utilidad (el suyo o, si no tiene, el del producto o su
+ * CJ48, cuántas UN sueltas; las UN también entran cuando se abre una caja)
+ * y su costo, de la presentación completa y sin ISV: el costo es uno por
+ * unidad del producto (el promedio de todo lo que se ha comprado, en
+ * cualquier presentación) × lo que trae. El precio es de la presentación
+ * completa y SIN ISV: calculado desde su costo con el % de utilidad (el suyo o, si no tiene, el del producto o su
  * categoría; se recalcula cuando cambia su costo) o fijo (lo pone la
  * empresa a mano). Costo y precio se cambian por
  * App\Domain\Precios\ActualizarPrecioProducto, que deja el historial.
@@ -34,7 +34,7 @@ use Illuminate\Support\Carbon;
  * @property int $unidad_medida_id
  * @property int $contenido
  * @property float $precio
- * @property float $costo costo promedio de la presentación completa, sin ISV
+ * @property float $costo costo de la presentación completa (el de la unidad × lo que trae), sin ISV
  * @property float|null $margen % de utilidad propio (0.10 = 10 %); null = el del producto
  * @property bool $precio_fijo
  * @property bool $es_base

@@ -495,7 +495,7 @@
                 return this.r4(gravado ? monto * (1 + @js($config['tasa'])) : monto)
             },
 
-            {{-- Costo sin ISV con que queda la presentación de la línea después de TODAS sus líneas de esta compra, en orden, como RegistrarCompra (promedio con lo que hay de ELLA en todas las bodegas, o el último). Cada presentación tiene el suyo. null si todavía no hay costo escrito. --}}
+            {{-- Costo sin ISV con que queda la presentación de la línea después de TODAS las líneas del producto en esta compra, en el orden de RegistrarCompra: el costo es uno por unidad (promedio con las unidades que hay del producto en todas las bodegas, en cualquier presentación, o el último) y la presentación cuesta ese × lo que trae. null si todavía no hay costo escrito. --}}
             costoFinal(linea) {
                 const p = this.productos[linea.producto_id]
                 const pr = this.presentacion(linea)
@@ -504,28 +504,34 @@
                     return null
                 }
 
-                let existencia = Number(pr.existencia) || 0
-                let costo = Number(pr.costo) || 0
+                let unidades = Number(p.unidades) || 0
+                let porUnidad = Number(p.costoUnidad) || 0
                 let alguna = false
+                const delProducto = this.lineas
+                    .filter((l) => Number(l.producto_id) === Number(linea.producto_id))
+                    .sort((a, b) => Number(a.presentacion_id) - Number(b.presentacion_id))
 
-                for (const otra of this.lineas.filter((l) => Number(l.presentacion_id) === Number(pr.id))) {
+                for (const otra of delProducto) {
+                    const de = this.presentacion(otra)
                     const cantidad = this.n(otra.cantidad)
                     const pagado = this.decimal(otra.costo)
 
-                    if (cantidad < 1 || pagado <= 0) {
+                    if (! de || cantidad < 1 || pagado <= 0) {
                         continue
                     }
 
-                    const deCompra = this.r4(pagado / (p.gravado ? 1 + @js($config['tasa']) : 1))
+                    const trae = Math.max(1, Number(de.contenido) || 1)
+                    const entran = cantidad * trae
+                    const deCompra = pagado / (p.gravado ? 1 + @js($config['tasa']) : 1) / trae
 
-                    costo = @js($config['metodo']) === 'ultimo' || existencia <= 0
+                    porUnidad = @js($config['metodo']) === 'ultimo' || unidades <= 0 || porUnidad <= 0
                         ? deCompra
-                        : this.r4((existencia * costo + cantidad * deCompra) / (existencia + cantidad))
-                    existencia += cantidad
+                        : (unidades * porUnidad + entran * deCompra) / (unidades + entran)
+                    unidades += entran
                     alguna = true
                 }
 
-                return alguna ? costo : null
+                return alguna ? this.r4(porUnidad * Math.max(1, Number(pr.contenido) || 1)) : null
             },
 
             {{-- Cómo quedan el costo y el precio de la presentación de la línea con la compra (con ISV si es gravado). --}}

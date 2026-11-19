@@ -15,16 +15,18 @@ use Illuminate\Support\Facades\DB;
 /**
  * ÚNICA puerta para cambiar los costos o los precios de un producto.
  *
- * Cada presentación (UN, CJ de 32, CJ de 48…) tiene su costo (promedio de
- * lo que se ha comprado de ella, de la presentación completa y sin ISV) y
- * su precio, también de la presentación completa y sin ISV, que sale de SU
- * costo con su % de utilidad (el propio o, si no tiene, el del producto o
- * su categoría), salvo que se mande un precio a mano o que tenga precio
+ * El costo es UNO por unidad del producto (sin ISV): cada presentación
+ * (UN, CJ de 32, CJ de 48…) cuesta ese costo por lo que trae, venga de la
+ * caja que venga. Su precio, de la presentación completa y sin ISV, sale de
+ * SU costo con SU % de utilidad (el propio o, si no tiene, el del producto
+ * o su categoría), salvo que se mande un precio a mano o que tenga precio
  * fijo (ahí se queda el que tiene: una compra o un cambio de margen no lo
  * mueven). Sin costo todavía un precio calculado se queda como está.
  *
- * Los costos nuevos llegan en $costos (de una compra, de una caja que se
- * abrió o corregidos a mano); la que no viene se queda con el suyo.
+ * El costo nuevo llega en $costos (de una compra, corregido a mano o al
+ * unificar): de la presentación que viene sale el costo por unidad (de la
+ * base si viene; si no, de la que trae más) y todas quedan con ese × lo que
+ * traen. Sin $costos cada una se queda con el suyo.
  *
  * Lo guarda en las presentaciones —que son las mismas para todas las
  * bodegas— y deja en el historial un renglón por cada presentación que se
@@ -43,7 +45,7 @@ final class ActualizarPrecioProducto
 
     /**
      * @param array<int, array{precio?: float|null, fijo?: bool|null, margen?: float|null}> $precios por presentación (id): precio sin ISV de la presentación completa (null = el que le toca), si queda fijo (null = como está) y su % de utilidad propio (0.10 = 10 %; si viene null, el del producto; si no viene, el que tiene)
-     * @param array<int, float> $costos por presentación (id): su costo nuevo sin ISV, de la presentación completa
+     * @param array<int, float> $costos por presentación (id): su costo nuevo sin ISV, de la presentación completa (con una basta: de ella sale el de todas)
      *
      * @return list<CambioPrecio> lo que quedó en el historial
      */
@@ -59,6 +61,7 @@ final class ActualizarPrecioProducto
 
         $margenProducto = $producto->margenAplicado();
         $primera = $producto->precio_actualizado_at === null;
+        $costos = self::porUnidad($producto, $costos);
         $planes = [];
 
         foreach ($producto->presentaciones as $presentacion) {
@@ -158,5 +161,37 @@ final class ActualizarPrecioProducto
 
             return $cambios;
         });
+    }
+
+    /**
+     * El costo de todas las presentaciones con el costo por unidad que sale
+     * de $costos: la presentación de donde sale se queda con el que vino y
+     * las demás con ese por unidad × lo que traen. Sin $costos, [].
+     *
+     * @param array<int, float> $costos
+     *
+     * @return array<int, float>
+     */
+    public static function porUnidad(Producto $producto, array $costos): array
+    {
+        $fuente = $producto->presentaciones
+            ->filter(fn (Presentacion $presentacion): bool => array_key_exists($presentacion->id, $costos))
+            ->sortByDesc(fn (Presentacion $presentacion): int => $presentacion->es_base ? PHP_INT_MAX : $presentacion->contenido)
+            ->first();
+
+        if (! $fuente instanceof Presentacion) {
+            return [];
+        }
+
+        $unidad = $costos[$fuente->id] / max(1, $fuente->contenido);
+        $todas = [];
+
+        foreach ($producto->presentaciones as $presentacion) {
+            $todas[$presentacion->id] = $presentacion->id === $fuente->id
+                ? $costos[$fuente->id]
+                : round($unidad * max(1, $presentacion->contenido), 4);
+        }
+
+        return $todas;
     }
 }

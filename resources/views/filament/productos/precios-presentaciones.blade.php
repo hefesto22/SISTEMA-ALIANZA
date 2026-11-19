@@ -3,9 +3,10 @@
     (App\Filament\Schemas\Components\PreciosPresentaciones).
 
     Arriba, para leer: lo que hay de cada presentación y la última compra;
-    "Corregir costos" deja escribir el costo de cada una (solo para cuando
-    está mal). Abajo, una fila por presentación: SU costo promedio (con y
-    sin ISV; cada caja tiene el suyo), % de
+    "Corregir costos" deja escribir el costo correcto (solo para cuando
+    está mal): el costo es uno por unidad, así que al escribir el de una
+    presentación las demás se mueven con él. Abajo, una fila por
+    presentación: su costo (el de la unidad × lo que trae, con y sin ISV), % de
     utilidad, precio (con ISV si es gravado), cuánto gana y si el precio es
     "Con %" (sale del costo con ese % y lo mueven las compras) o "Fijo" (lo
     pone la empresa). Debajo de cada una, en palabras, qué pasa con ese
@@ -186,7 +187,7 @@
 
             {{-- ── Cada presentación ── --}}
             p(fila) { return this.datos.presentaciones[fila.id] ?? { sigla: '?', nombre: '', contenido: 1, precioHoy: 0, costoHoy: 0, existencia: 0, regla: 0 } },
-            {{-- El costo de la presentación completa, sin ISV (el suyo; cada caja tiene el suyo). --}}
+            {{-- El costo de la presentación completa, sin ISV (el de la unidad × lo que trae). --}}
             costoDe(fila) { return this.r4(Number(this.estado.costos?.[fila.id]) || 0) },
             sugerido(fila, margen) {
                 const costo = this.costoDe(fila)
@@ -350,7 +351,7 @@
                 }
             },
 
-            {{-- ── Corregir costos (cada presentación el suyo) ── --}}
+            {{-- ── Corregir costos (uno por unidad: el que se escribe mueve a las demás) ── --}}
             abrirCorreccion() {
                 this.estado.corregir = true
 
@@ -377,7 +378,16 @@
                     return
                 }
 
-                this.estado.costos[fila.id] = this.r6(costo / this.factor())
+                const porUnidad = costo / this.factor() / Math.max(1, Number(this.p(fila).contenido) || 1)
+
+                for (const otra of this.estado.filas) {
+                    this.estado.costos[otra.id] = this.r6(porUnidad * Math.max(1, Number(this.p(otra).contenido) || 1))
+
+                    if (otra.id !== fila.id) {
+                        this.costoTexto[otra.id] = this.fijo2(this.pantalla(this.costoDe(otra)))
+                    }
+                }
+
                 this.recalcular()
             },
             corregido(fila) {
@@ -429,7 +439,7 @@
             <button type="button" class="ap-enlace" x-show="estado.corregir" x-cloak x-on:click="quitarCorreccion()">Quitar corrección</button>
         </div>
 
-        <p class="ap-aviso-correccion" x-show="estado.corregir" x-cloak>Escriba el costo correcto{{ $conIsv }} de cada presentación que esté mal (la caja completa). Se guarda en lugar del promedio de las compras.</p>
+        <p class="ap-aviso-correccion" x-show="estado.corregir" x-cloak>Escriba el costo correcto{{ $conIsv }} de cualquier presentación (la caja completa): el costo es uno por unidad y las demás se ajustan solas. Se guarda en lugar del promedio de las compras.</p>
 
         {{-- ── Precio de cada presentación ── --}}
         <div class="ap-tabla" role="table" aria-label="Precio de venta de cada presentación">
