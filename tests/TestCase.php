@@ -7,7 +7,10 @@ namespace Tests;
 use Database\Seeders\RolesSistemaSeeder;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\Attributes\Seeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
@@ -40,5 +43,39 @@ abstract class TestCase extends BaseTestCase
         }
 
         return $app;
+    }
+
+    /**
+     * Antes del migrate:fresh de RefreshDatabase (una vez por proceso) borra
+     * las tablas de la base de pruebas una por una.
+     *
+     * migrate:fresh las borra todas en una sola sentencia, que toma unos mil
+     * bloqueos; con --parallel son 14 bases borrándose a la vez y Postgres se
+     * queda sin espacio para tantos ("out of shared memory", la pista habla
+     * de max_locks_per_transaction). Una por una no pasan de unos 150 cada
+     * vez, y migrate:fresh ya no encuentra nada que borrar.
+     *
+     * @return array<mixed>
+     */
+    protected function setUpTraits(): array
+    {
+        if (isset(class_uses_recursive(static::class)[RefreshDatabase::class]) && ! RefreshDatabaseState::$migrated) {
+            $this->borrarTablasUnaPorUna();
+        }
+
+        return parent::setUpTraits();
+    }
+
+    private function borrarTablasUnaPorUna(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
+        }
+
+        foreach (DB::select('SELECT tablename FROM pg_tables WHERE schemaname = current_schema()') as $fila) {
+            if (is_object($fila) && isset($fila->tablename) && is_string($fila->tablename)) {
+                DB::statement('DROP TABLE IF EXISTS "'.str_replace('"', '""', $fila->tablename).'" CASCADE');
+            }
+        }
     }
 }
