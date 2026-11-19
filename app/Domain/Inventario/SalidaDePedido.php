@@ -6,6 +6,7 @@ namespace App\Domain\Inventario;
 
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\TipoMovimiento;
+use App\Models\Existencia;
 use App\Models\MovimientoInventario;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
@@ -19,7 +20,9 @@ use App\Models\User;
  * Cada presentación sale de SU existencia: las CJ48 de las CJ48 y las UN de
  * las sueltas, con el costo de ese momento. Si para las sueltas hay que
  * abrir cajas, quien despacha dice cuáles ($abrir) y se abren antes de
- * sacar (AbrirCaja).
+ * sacar (AbrirCaja). Los regalos de promociones (bonificación) no los
+ * escribe nadie: si las sueltas no alcanzan para ellos, se abre sola la
+ * caja más chica del producto que sobre y alcance (abrirParaRegalos).
  *
  * Un movimiento por presentación aunque venga en varias líneas. Se procesan
  * en orden de producto y presentación para que dos despachos al mismo
@@ -30,6 +33,7 @@ final class SalidaDePedido
     public function __construct(
         private readonly MoverExistencia $mover,
         private readonly AbrirCaja $abrirCaja,
+        private readonly AbrirSiFaltan $abrirSiFaltan,
     ) {}
 
     /**
@@ -41,6 +45,7 @@ final class SalidaDePedido
         $pedido->loadMissing(['items.presentacion.unidadMedida', 'items.producto']);
 
         $this->abrir($pedido, $abrir, $usuario);
+        $this->abrirParaRegalos($pedido, $usuario, $antes);
 
         $ahora = self::porPresentacion($pedido);
         $ids = array_unique([...array_keys($antes), ...array_keys($ahora)]);
@@ -146,6 +151,46 @@ final class SalidaDePedido
             }
 
             $this->abrirCaja->ejecutar($pedido->bodega_id, $caja, $abrir[$caja->id], $usuario, $pedido->id, "PEDIDO {$pedido->numero}: SE ABREN {$abrir[$caja->id]} {$caja->sigla()}");
+        }
+    }
+
+    /**
+     * Si las sueltas de la bodega no alcanzan para lo que sale de regalo en
+     * la base (UN), abre solas las cajas del producto que sobran (AbrirSiFaltan).
+     * Sin cajas que sobren no abre nada (sin controlar existencias, las
+     * sueltas quedan en negativo).
+     *
+     * @param array<int, int> $antes lo que ya había salido por presentación (al corregir)
+     */
+    private function abrirParaRegalos(Pedido $pedido, User $usuario, array $antes): void
+    {
+        $regalos = [];
+
+        /** @var PedidoItem $item */
+        foreach ($pedido->items as $item) {
+            if ($item->bonificacion && $item->presentacion->es_base && $item->cantidadFacturable() > 0) {
+                $regalos[$item->producto_id] = $item->presentacion;
+            }
+        }
+
+        if ($regalos === []) {
+            return;
+        }
+
+        $ahora = self::porPresentacion($pedido);
+        $salen = [];
+
+        foreach ($ahora as $presentacionId => $cantidad) {
+            $salen[$presentacionId] = $cantidad - ($antes[$presentacionId] ?? 0);
+        }
+
+        foreach ($regalos as $productoId => $base) {
+            $deRegalo = (int) $pedido->items
+                ->filter(fn (PedidoItem $item): bool => $item->bonificacion && $item->presentacion_id === $base->id)
+                ->sum(fn (PedidoItem $item): int => $item->cantidadFacturable());
+            $falta = min($deRegalo, ($salen[$base->id] ?? 0) - Existencia::de($pedido->bodega_id, $base->id));
+
+            $this->abrirSiFaltan->ejecutar($pedido->bodega_id, $productoId, $falta, $usuario, $pedido->id, "PEDIDO {$pedido->numero} (REGALO)", $salen);
         }
     }
 }

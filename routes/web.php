@@ -19,6 +19,7 @@ declare(strict_types=1);
 | /horizon, etc.) las gestiona Filament automáticamente.
 */
 
+use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirPedidoController;
 use App\Http\Controllers\ImprimirPedidosController;
 use App\Http\Controllers\ImprimirReporteController;
@@ -33,6 +34,10 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
     // Vista previa de un pedido.
     Route::get('pedidos/{pedido}/imprimir', ImprimirPedidoController::class)
         ->name('pedidos.imprimir');
+
+    // Nota de crédito o constancia de una devolución.
+    Route::get('devoluciones/{devolucion}/imprimir', ImprimirDevolucionController::class)
+        ->name('devoluciones.imprimir');
 
     // Uno o varios de un solo (?ids=1,2,3), uno por página.
     Route::get('imprimir/pedidos', ImprimirPedidosController::class)

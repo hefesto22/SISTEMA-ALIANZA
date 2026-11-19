@@ -30,6 +30,7 @@ use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
  *  - Logo: imagen visible en la barra superior del panel
  *  - Favicon: ícono de la pestaña del navegador
  *  - Tema de colores (shadcn): tono de botones y acentos, en claro y oscuro
+ *  - Devoluciones: si una devolución con crédito emite nota de crédito.
  *  - Inventario y precios: costo promedio o último, qué precio se cobra al
  *    despachar y si se controla la existencia (App\Models\Configuracion)
  *
@@ -80,6 +81,7 @@ class BrandingSettingsPage extends Page
             'metodo_costo'          => $configuracion->metodo_costo->value,
             'precio_al_despachar'   => $configuracion->precio_al_despachar->value,
             'controlar_existencias' => $configuracion->controlar_existencias,
+            'notas_credito'         => $configuracion->notas_credito,
         ]);
     }
 
@@ -167,6 +169,14 @@ class BrandingSettingsPage extends Page
                             ->label('No despachar más de lo que hay en la bodega')
                             ->helperText('Enciéndalo cuando ya esté cargado el inventario de todas las bodegas (Productos → Ajustar existencia). Apagado, la existencia igual se descuenta y puede quedar en negativo.'),
                     ]),
+
+                Section::make('Devoluciones')
+                    ->description('Lo bueno regresa a la bodega y lo dañado queda marcado. En un cambio se repone lo mismo; con crédito se abona lo que pagó.')
+                    ->schema([
+                        Toggle::make('notas_credito')
+                            ->label('Emitir nota de crédito desde el sistema')
+                            ->helperText('Encendido: una devolución con crédito emite su nota de crédito con el CAI de notas de crédito (tipo 07) de la bodega (Administración > CAI). Apagado: queda como crédito interno y la nota se hace a mano.'),
+                    ]),
             ]);
     }
 
@@ -188,6 +198,7 @@ class BrandingSettingsPage extends Page
             'metodo_costo'          => $metodo instanceof MetodoCosto ? $metodo : (MetodoCosto::tryFrom(is_string($metodo) ? $metodo : '') ?? MetodoCosto::Promedio),
             'precio_al_despachar'   => $precio instanceof PrecioAlDespachar ? $precio : (PrecioAlDespachar::tryFrom(is_string($precio) ? $precio : '') ?? PrecioAlDespachar::Despacho),
             'controlar_existencias' => (bool) ($datos['controlar_existencias'] ?? false),
+            'notas_credito'         => (bool) ($datos['notas_credito'] ?? false),
         ]);
 
         Notification::make()

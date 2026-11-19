@@ -50,6 +50,9 @@ class Cai extends Model
 
     public const FACTURA = '01';
 
+    /** Tipo de documento del SAR para las notas de crédito (devoluciones). */
+    public const NOTA_CREDITO = '07';
+
     public const CORRELATIVO_MAXIMO = 99999999;
 
     /** El CAI de prueba (FacturacionPruebaSeeder): sus facturas no valen ante el SAR. */
@@ -146,16 +149,17 @@ class Cai extends Model
     }
 
     /**
-     * El CAI con el que se factura en una bodega: el suyo propio y, si no
-     * tiene uno vigente, el global. Primero el que vence antes.
+     * El CAI con el que se factura (o, con $tipo, se emite ese documento: las
+     * notas de crédito) en una bodega: el suyo propio y, si no tiene uno
+     * vigente, el global. Primero el que vence antes.
      *
      * Con $bloquear la fila queda tomada hasta terminar la transacción, para
      * que dos impresiones al mismo tiempo no saquen el mismo número.
      */
-    public static function paraBodega(int $bodegaId, bool $bloquear = false): ?self
+    public static function paraBodega(int $bodegaId, bool $bloquear = false, string $tipo = self::FACTURA): ?self
     {
-        $propio = self::query()->vigentes()->whereHas('bodegas', fn (Builder $q): Builder => $q->whereKey($bodegaId));
-        $global = self::query()->vigentes()->whereDoesntHave('bodegas');
+        $propio = self::query()->vigentes()->where('tipo_documento', $tipo)->whereHas('bodegas', fn (Builder $q): Builder => $q->whereKey($bodegaId));
+        $global = self::query()->vigentes()->where('tipo_documento', $tipo)->whereDoesntHave('bodegas');
 
         foreach ([$propio, $global] as $query) {
             $query->orderBy('fecha_limite')->orderBy('id');

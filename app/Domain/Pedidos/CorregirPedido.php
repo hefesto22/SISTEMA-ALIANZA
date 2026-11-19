@@ -9,6 +9,7 @@ use App\Domain\Facturacion\AnularFactura;
 use App\Domain\Inventario\SalidaDePedido;
 use App\Enums\EstadoPedido;
 use App\Enums\TipoMovimiento;
+use App\Models\Devolucion;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\User;
@@ -47,6 +48,10 @@ final class CorregirPedido
 
             if (! $pedido->estaValidado()) {
                 throw new ReglaNegocioException("El pedido {$pedido->numero} está {$pedido->estado->getLabel()}: solo se corrigen pedidos ya validados.");
+            }
+
+            if (Devolucion::query()->where('pedido_id', $pedido->id)->exists()) {
+                throw new ReglaNegocioException("El pedido {$pedido->numero} ya tiene devoluciones: ya no se corrige. Lo que regrese, regístrelo como otra devolución.");
             }
 
             $antes = self::cantidades($pedido);

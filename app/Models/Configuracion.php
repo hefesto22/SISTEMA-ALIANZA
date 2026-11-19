@@ -20,6 +20,8 @@ use Illuminate\Support\Facades\Cache;
  *   el despacho (el del día o el del pedido, sin vender a pérdida).
  * - controlar_existencias: si está encendido, no se despacha más de lo que
  *   hay en la bodega. Se enciende cuando ya está cargado el inventario.
+ * - notas_credito: si está encendido, una devolución con crédito emite su
+ *   nota de crédito (CAI tipo 07); apagado, queda como crédito interno.
  * - comision_frecuencia y comision_corte: cada cuánto se pagan las
  *   comisiones; con quincenal, la primera quincena va del 1 al día de corte.
  *
@@ -27,6 +29,7 @@ use Illuminate\Support\Facades\Cache;
  * @property MetodoCosto $metodo_costo
  * @property PrecioAlDespachar $precio_al_despachar
  * @property bool $controlar_existencias
+ * @property bool $notas_credito
  * @property FrecuenciaComision $comision_frecuencia
  * @property int $comision_corte
  * @property Carbon|null $created_at
@@ -38,7 +41,7 @@ class Configuracion extends Model
      * Va con versión: lo que quedó en caché antes de agregar columnas (con una
      * migración) no las trae. Súbale el número al agregar una columna.
      */
-    public const CACHE = 'configuracion:v2';
+    public const CACHE = 'configuracion:v3';
 
     protected $table = 'configuracion';
 
@@ -47,6 +50,7 @@ class Configuracion extends Model
         'metodo_costo',
         'precio_al_despachar',
         'controlar_existencias',
+        'notas_credito',
         'comision_frecuencia',
         'comision_corte',
     ];
@@ -60,6 +64,7 @@ class Configuracion extends Model
             'metodo_costo'          => MetodoCosto::class,
             'precio_al_despachar'   => PrecioAlDespachar::class,
             'controlar_existencias' => 'boolean',
+            'notas_credito'         => 'boolean',
             'comision_frecuencia'   => FrecuenciaComision::class,
             'comision_corte'        => 'integer',
         ];
@@ -72,6 +77,7 @@ class Configuracion extends Model
             'metodo_costo'          => MetodoCosto::Promedio,
             'precio_al_despachar'   => PrecioAlDespachar::Despacho,
             'controlar_existencias' => false,
+            'notas_credito'         => false,
             'comision_frecuencia'   => FrecuenciaComision::Quincenal,
             'comision_corte'        => 14,
         ]));

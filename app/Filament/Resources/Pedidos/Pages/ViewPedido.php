@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Filament\Resources\Pedidos\Actions\AnularPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\CorregirPedidoAction;
+use App\Filament\Resources\Pedidos\Actions\DevolucionAction;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ValidarDespachoAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
@@ -36,6 +37,7 @@ class ViewPedido extends ViewRecord
             ValidarDespachoAction::make(),
             CorregirPedidoAction::make(),
             ImprimirPedidoAction::make(),
+            DevolucionAction::make(),
             ImprimirPedidoAction::copia(),
             EditAction::make(),
             AnularPedidoAction::make(),

@@ -93,7 +93,7 @@ class CaiResource extends Resource
                     ->disabled($usado),
                 Select::make('tipo_documento')
                     ->label('Documento')
-                    ->options([Cai::FACTURA => '01 · Factura'])
+                    ->options([Cai::FACTURA => '01 · Factura', Cai::NOTA_CREDITO => '07 · Nota de crédito'])
                     ->default(Cai::FACTURA)
                     ->selectablePlaceholder(false)
                     ->required()

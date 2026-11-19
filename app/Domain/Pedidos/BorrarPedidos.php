@@ -7,6 +7,7 @@ namespace App\Domain\Pedidos;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Models\Cai;
 use App\Models\ComisionFactura;
+use App\Models\Devolucion;
 use App\Models\Existencia;
 use App\Models\Factura;
 use App\Models\MovimientoInventario;
@@ -21,14 +22,15 @@ use Illuminate\Support\Facades\DB;
  *  - Lo que salió de la bodega regresa: se quitan sus renglones del kárdex
  *    (despacho, correcciones y cajas abiertas) y los renglones que vinieron
  *    después quedan con la existencia que habrían tenido sin ellos.
+ *  - Sus devoluciones se borran con ellos (lo que movieron en la bodega
+ *    también se deshace); si alguna emitió nota de crédito, no se borran.
  *  - Sus facturas se borran solo si son del CAI de prueba y ninguna está en
  *    un periodo de comisiones cerrado. Una factura de un CAI del SAR no se
  *    borra nunca: se anula.
  *  - El CAI de prueba vuelve a su primer número libre y, si ya no queda
  *    ningún pedido, la numeración de los pedidos empieza otra vez en 1.
  *
- * Los clientes, las compras, los costos y los precios no se tocan (el costo
- * que dejó una caja abierta se queda como está).
+ * Los clientes, las compras, los costos y los precios no se tocan.
  */
 final class BorrarPedidos
 {
@@ -72,6 +74,13 @@ final class BorrarPedidos
 
         if ($delSar !== []) {
             return 'Tienen facturas de un CAI del SAR ('.implode(', ', $delSar).'): esas no se borran, se anulan corrigiendo el pedido.';
+        }
+
+        /** @var list<string> $notas */
+        $notas = Devolucion::query()->whereIn('pedido_id', $ids)->whereNotNull('nota_numero')->orderBy('nota_numero')->limit(5)->pluck('nota_numero')->all();
+
+        if ($notas !== []) {
+            return 'Tienen devoluciones con nota de crédito ('.implode(', ', $notas).'): esas no se borran.';
         }
 
         $enComisiones = ComisionFactura::query()->whereIn('factura_id', (clone $facturas)->select('id'))->exists();
