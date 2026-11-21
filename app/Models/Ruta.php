@@ -119,6 +119,23 @@ class Ruta extends Model
     }
 
     /**
+     * La ruta del pedido, para la factura: la del vendedor que lleva el
+     * municipio del cliente; si ninguna lo lleva (fuera de ruta), la primera
+     * del vendedor; si no tiene, ninguna.
+     */
+    public static function delPedido(Pedido $pedido): ?self
+    {
+        $rutas = self::query()
+            ->where('activa', true)
+            ->whereHas('vendedores', fn (Builder $vendedores): Builder => $vendedores->whereKey($pedido->vendedor_id))
+            ->with('municipios')
+            ->orderBy('nombre')
+            ->get();
+
+        return $rutas->first(fn (self $ruta): bool => $ruta->municipios->contains('id', $pedido->cliente->municipio_id)) ?? $rutas->first();
+    }
+
+    /**
      * @return list<string>
      */
     protected function camposEnMayusculas(): array

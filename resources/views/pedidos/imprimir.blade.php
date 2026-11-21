@@ -6,11 +6,17 @@
     de los pedidos que salen como ORIGINAL). Sin firma, toda factura sale
     "COPIA · SIN VALOR FISCAL"; firmada y no original, "REIMPRESIÓN · COPIA".
 
-    Con factura vigente sale como FACTURA con los requisitos del Acuerdo
-    481-2017 (datos del emisor, CAI, número, rango autorizado, fecha límite,
-    desglose de importes, total en letras). Sin factura (pedido pendiente, o
-    el vendedor viendo uno que bodega no ha impreso) sale como PEDIDO, sin
-    valor fiscal.
+    Diseño de la factura de Distribuciones Alianza en papel continuo de media
+    carta (8.5 × 5.5 pulgadas, @page): emisor arriba; factura y cliente a la
+    izquierda, CAI, fecha y forma de pago a la derecha; datos del adquiriente
+    exonerado; el detalle (Cant., Presentación, Código, Descripción, Precio
+    Unit., Desc., I.S.V. y Total con ISV, G gravado / E exento) hasta "Fin del
+    Detalle de la Factura"; abajo observaciones, total en letras, rango
+    autorizado, fecha límite, firma y los importes (Acuerdo 481-2017). Si el
+    detalle no cabe sigue en otra hoja (el encabezado de la tabla se repite).
+
+    Sin factura (pedido pendiente, o el vendedor viendo uno que bodega no ha
+    impreso) sale como PEDIDO, sin valor fiscal.
 
     Desde el panel se carga en un iframe oculto y se imprime ahí mismo
     (resources/views/filament/imprimir-hoja.blade.php).
@@ -23,59 +29,70 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ $titulo }}</title>
     <style>
+        @page { size: 8.5in 5.5in; margin: 0.3in 0.35in; }
         * { box-sizing: border-box; }
-        body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #111; margin: 0; background: #f3f4f6; }
-        .hoja { max-width: 840px; margin: 24px auto; background: #fff; padding: 28px 32px; border-radius: 8px; }
-        .barra { max-width: 840px; margin: 16px auto 0; display: flex; gap: 8px; align-items: center; }
-        .barra .cuantos { margin-right: auto; color: #4b5563; font-size: 14px; }
+        body { font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; color: #000; margin: 0; background: #e5e7eb; font-size: 8.6pt; line-height: 1.3; }
+        .barra { max-width: 8.5in; margin: 16px auto 0; display: flex; gap: 8px; align-items: center; font-size: 14px; }
+        .barra .cuantos { margin-right: auto; color: #4b5563; }
         .barra button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; }
         .barra .principal { background: #111; color: #fff; border-color: #111; }
 
-        header { display: grid; grid-template-columns: 1fr auto; gap: 24px; border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 12px; }
-        h1 { font-size: 20px; margin: 0 0 2px; }
-        .emisor { font-size: 12px; line-height: 1.45; color: #374151; }
-        .emisor .razon { font-weight: 600; color: #111; }
-        .documento { text-align: right; font-size: 12px; line-height: 1.5; min-width: 290px; }
-        .documento .tipo { font-size: 20px; font-weight: 800; letter-spacing: 0.06em; }
-        .documento .numero { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
-        .documento .cai { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-        .muted { color: #6b7280; }
-        .estado { display: inline-block; margin-top: 4px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #fef3c7; color: #92400e; }
-        .estado.anulado { background: #e5e7eb; color: #374151; }
-        .reimpresion { display: inline-block; margin-top: 4px; padding: 2px 10px; border: 2px solid #111; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; }
-        .sustituye { border: 2px solid #111; padding: 8px 12px; margin-bottom: 12px; font-size: 12px; font-weight: 600; }
-
-        .datos { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; font-size: 13px; margin-bottom: 12px; }
-        .datos b { display: inline-block; min-width: 82px; color: #374151; }
-
-        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-        th { text-align: left; border-bottom: 1px solid #111; padding: 5px 4px; font-weight: 600; }
-        td { border-bottom: 1px solid #e5e7eb; padding: 5px 4px; vertical-align: top; }
+        .hoja { position: relative; width: 8.5in; min-height: 5.5in; margin: 16px auto 24px; padding: 0.3in 0.35in; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.15); display: flex; flex-direction: column; }
+        b, .etiqueta { font-weight: 700; }
         .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-        .falta { color: #b91c1c; font-weight: 600; }
-        .nota-falta { font-size: 11px; }
-        .tachado { color: #9ca3af; text-decoration: line-through; }
-        .promo { color: #15803d; }
+        .chico { font-size: 7.4pt; }
 
-        .pie { display: grid; grid-template-columns: 1fr 300px; gap: 24px; margin-top: 12px; }
-        .exonerados { font-size: 11px; color: #374151; display: grid; gap: 6px; }
-        .exonerados div { display: flex; gap: 6px; align-items: flex-end; }
-        .exonerados span { flex: 1; min-width: 60px; border-bottom: 1px solid #9ca3af; height: 1em; }
-        .letras { margin-top: 8px; font-size: 12px; font-weight: 600; }
-        .totales { font-size: 12.5px; }
-        .totales td { border: 0; padding: 2px 4px; }
-        .totales .total td { font-size: 16px; font-weight: 700; border-top: 2px solid #111; padding-top: 6px; }
+        /* Emisor */
+        .emisor { text-align: center; }
+        .emisor h1 { margin: 0; font-size: 14pt; line-height: 1.2; }
+        .emisor .comercial { font-size: 8pt; letter-spacing: 0.04em; }
+        .renglon { display: flex; flex-wrap: wrap; justify-content: center; column-gap: 18px; }
+        .documento { position: absolute; top: 0.3in; right: 0.35in; text-align: right; }
+        .documento .tipo { display: inline-block; border: 1.5px solid #000; padding: 1px 8px; font-weight: 800; letter-spacing: 0.12em; font-size: 9pt; }
+        .documento .sello { display: block; margin-top: 3px; font-weight: 800; font-size: 7.4pt; letter-spacing: 0.06em; }
+        .documento .estado { display: block; margin-top: 3px; font-size: 7.4pt; }
 
-        .autorizacion { margin-top: 14px; padding-top: 8px; border-top: 1px solid #d1d5db; font-size: 11px; line-height: 1.5; color: #374151; }
-        .nota { margin-top: 10px; font-size: 11.5px; color: #4b5563; }
-        .firmas { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 44px; font-size: 12px; text-align: center; }
-        .firmas div { border-top: 1px solid #111; padding-top: 6px; }
+        /* Factura y cliente | CAI, fecha y forma de pago */
+        .datos { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; margin-top: 6px; }
+        .datos .fila { display: grid; grid-template-columns: 0.8in 1fr; }
+        .datos .derecha .fila { grid-template-columns: 0.95in 1fr; }
+        .datos .numero { font-weight: 700; font-size: 9.6pt; }
+        .cai { white-space: nowrap; font-size: 8.2pt; }
+        .sustituye { margin-top: 4px; border: 1.5px solid #000; padding: 2px 6px; font-weight: 700; }
+        .exonerado { margin-top: 4px; }
+        .exonerado .campos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 1px; }
+        .exonerado .campos div { display: flex; gap: 4px; white-space: nowrap; }
+        .exonerado .campos span { flex: 1; border-bottom: 1px solid #000; min-width: 0.4in; }
+
+        /* Detalle */
+        table.detalle { width: 100%; border-collapse: collapse; margin-top: 6px; }
+        .detalle th { font-weight: 700; text-align: left; padding: 2px 3px; border-bottom: 1px solid #000; white-space: nowrap; }
+        .detalle td { padding: 1.5px 3px; vertical-align: top; }
+        .detalle .letra { width: 12px; padding-left: 2px; text-align: left; }
+        .detalle tr { break-inside: avoid; }
+        .detalle .nota { display: block; font-size: 7.2pt; }
+        .tachado td { text-decoration: line-through; }
+        .tachado td .nota { text-decoration: none; }
+        .fin { display: flex; align-items: center; gap: 8px; margin: 4px 0.6in 0; font-size: 7.4pt; }
+        .fin::before, .fin::after { content: ""; flex: 1; border-top: 1px dashed #000; }
+
+        /* Pie: observaciones, letras y autorización | firma | importes */
+        .pie { margin-top: auto; padding-top: 10px; display: grid; grid-template-columns: 1fr 1.25in 2.1in; gap: 0 16px; align-items: end; break-inside: avoid; }
+        .pie .fila { display: grid; grid-template-columns: auto 1fr; gap: 0 6px; }
+        .pie .rango { white-space: nowrap; }
+        .observaciones span { border-bottom: 1px solid #000; min-height: 1.2em; }
+        .letras { margin: 2px 0; font-weight: 700; }
+        .firma { text-align: center; border-top: 1px solid #000; padding-top: 2px; margin-bottom: 0.45in; }
+        .totales { width: 100%; border-collapse: collapse; }
+        .totales td { padding: 0.5px 0; }
+        .totales .total td { font-weight: 800; font-size: 10pt; border-top: 1.5px solid #000; padding-top: 2px; }
 
         @media print {
             body { background: #fff; }
             .barra { display: none; }
-            .hoja { margin: 0; padding: 0; max-width: none; border-radius: 0; }
-            .hoja + .hoja { break-before: page; page-break-before: always; }
+            .hoja { width: auto; min-height: 4.88in; margin: 0; padding: 0; box-shadow: none; }
+            .documento { top: 0; right: 0; }
+            .hoja + .hoja { break-before: page; }
         }
     </style>
 </head>
@@ -93,8 +110,6 @@
         $factura = $pedido->factura;
         $esOriginal = ($firmado ?? false) && in_array($pedido->id, $originales ?? [], true);
         $validado = $pedido->estaValidado();
-        $conPromo = $pedido->descuento > 0;
-        $promociones = $pedido->items->pluck('promocion')->filter()->unique('id');
 
         [$exento, $gravado] = $factura !== null
             ? [$factura->importe_exento, $factura->importe_gravado]
@@ -103,58 +118,88 @@
         $isv = $factura->isv ?? $pedido->isv;
         $total = $factura->total ?? $pedido->total;
 
+        $razon = $fiscales->razon_social ?: $fiscales->nombreParaMostrar();
+        $comercial = $fiscales->nombre_comercial && $fiscales->nombre_comercial !== $razon ? $fiscales->nombre_comercial : null;
         $bodega = $pedido->bodega;
-        $establecimiento = collect([$bodega->nombre, $bodega->direccion, $bodega->municipio?->etiqueta()])->filter()->implode(', ');
-        $contacto = collect([
-            $fiscales->telefono ? 'Tel. '.$fiscales->telefono : null,
-            $bodega->telefono && $bodega->telefono !== $fiscales->telefono ? 'Bodega '.$bodega->telefono : null,
-            $fiscales->correo,
-        ])->filter()->implode(' · ');
+        $municipioBodega = $bodega->municipio && ! str_contains(mb_strtoupper($bodega->nombre), mb_strtoupper($bodega->municipio->nombre)) ? $bodega->municipio->etiqueta() : null;
+        $establecimiento = collect([$bodega->nombre, $bodega->direccion, $municipioBodega])->filter()->implode(', ');
+        $ruta = \App\Models\Ruta::delPedido($pedido);
+        $cliente = $pedido->cliente;
+        $direccion = collect([$cliente->direccion, $cliente->municipio?->nombre, $cliente->municipio?->departamento?->nombre])->filter()->implode(', ');
+        $fecha = $factura ? $factura->fecha_emision->copy()->locale('es')->isoFormat('DD/MM/YYYY hh:mm:ss a') : $pedido->fecha->format('d/m/Y');
     @endphp
 
     <div class="hoja">
-        <header>
-            <div class="emisor">
-                <h1>{{ $fiscales->nombreParaMostrar() }}</h1>
-                @if ($fiscales->razon_social && $fiscales->razon_social !== $fiscales->nombreParaMostrar())
-                    <div class="razon">{{ $fiscales->razon_social }}</div>
+        <div class="documento">
+            <span class="tipo">{{ $factura ? 'FACTURA' : 'PEDIDO' }}</span>
+            @if ($factura)
+                @if ($esOriginal)
+                    {{-- Original: sin sello. --}}
+                @elseif ($firmado ?? false)
+                    <span class="sello">REIMPRESIÓN · COPIA</span>
+                @else
+                    <span class="sello">COPIA · SIN VALOR FISCAL</span>
                 @endif
+            @else
+                <span class="estado">{{ $pedido->estado->getLabel() }} · {{ $validado ? 'sin factura todavía' : 'vista previa' }}</span>
+                <span class="sello">SIN VALOR FISCAL</span>
+            @endif
+        </div>
+
+        <div class="emisor">
+            <h1>{{ $razon }}</h1>
+            @if ($comercial)
+                <div class="comercial">{{ $comercial }}</div>
+            @endif
+            <div class="renglon">
                 @if ($fiscales->rtn)
-                    <div><b>RTN:</b> {{ $fiscales->rtn }}</div>
+                    <span><b>RTN: {{ $fiscales->rtn }}</b></span>
                 @endif
                 @if ($fiscales->direccion)
-                    <div><b>Casa matriz:</b> {{ $fiscales->direccion }}</div>
-                @endif
-                <div><b>Establecimiento:</b> {{ $establecimiento }}</div>
-                @if ($contacto)
-                    <div>{{ $contacto }}</div>
+                    <span>{{ $fiscales->direccion }}</span>
                 @endif
             </div>
+            <div class="renglon">
+                @if ($fiscales->telefono)
+                    <span><b>Tel:</b> {{ $fiscales->telefono }}</span>
+                @endif
+                @if ($fiscales->correo)
+                    <span><b>Correo:</b> {{ $fiscales->correo }}</span>
+                @endif
+                @if ($ruta)
+                    <span><b>Ruta:</b> {{ \Illuminate\Support\Str::limit($ruta->nombre, 34) }}</span>
+                @endif
+                <span><b>Vendedor:</b> {{ $pedido->vendedor->name }}</span>
+            </div>
+            <div class="renglon chico"><span><b>Establecimiento:</b> {{ $establecimiento }}</span></div>
+        </div>
 
-            <div class="documento">
+        <div class="datos">
+            <div>
                 @if ($factura)
-                    <div class="tipo">FACTURA</div>
-                    <div class="numero">N° {{ $factura->numero }}</div>
-                    <div>Fecha de emisión: {{ $factura->fecha_emision->format('d/m/Y H:i') }}</div>
-                    <div class="cai">CAI: {{ $factura->cai }}</div>
-                    @if ($esOriginal)
-                        {{-- Original: sin sello. --}}
-                    @elseif ($firmado ?? false)
-                        <span class="reimpresion">REIMPRESIÓN · COPIA</span>
-                    @else
-                        <span class="reimpresion">COPIA · SIN VALOR FISCAL</span>
-                    @endif
+                    <div class="fila"><span class="etiqueta">Factura:</span><span class="numero">{{ $factura->numero }}</span></div>
                 @else
-                    <div class="tipo">PEDIDO</div>
-                    <div class="numero">{{ $pedido->numero }}</div>
-                    <div>{{ $pedido->fecha->format('d/m/Y') }}</div>
-                    <span class="estado {{ $pedido->estado->value }}">
-                        {{ $pedido->estado->getLabel() }} · {{ $validado ? 'sin factura todavía' : 'vista previa' }}
-                    </span>
-                    <div class="muted">Sin valor fiscal</div>
+                    <div class="fila"><span class="etiqueta">Pedido:</span><span class="numero">{{ $pedido->numero }}</span></div>
+                @endif
+                <div class="fila"><span class="etiqueta">Cliente:</span><span>{{ $cliente->codigo }} {{ $factura->cliente_nombre ?? $cliente->nombre }}</span></div>
+                <div class="fila"><span class="etiqueta">Teléfono:</span><span>{{ $cliente->telefono }}</span></div>
+                <div class="fila"><span class="etiqueta">R.T.N.:</span><span>{{ ($factura ? $factura->cliente_rtn : $cliente->rtn) ?: '-' }}</span></div>
+                <div class="fila"><span class="etiqueta">Dirección:</span><span>{{ $direccion }}</span></div>
+            </div>
+            <div class="derecha">
+                @if ($factura)
+                    <div class="fila"><span class="etiqueta">C.A.I.:</span><span class="cai">{{ $factura->cai }}</span></div>
+                @endif
+                <div class="fila"><span class="etiqueta">Fecha:</span><span>{{ $fecha }}</span></div>
+                <div class="fila"><span class="etiqueta">Forma de Pago:</span><span>CONTADO</span></div>
+                @if ($factura)
+                    <div class="fila"><span class="etiqueta">Pedido:</span><span>{{ $pedido->numero }} · {{ $pedido->fecha->format('d/m/Y') }}</span></div>
+                @endif
+                @if ($pedido->fuera_de_ruta)
+                    <div class="fila"><span class="etiqueta">Fuera de ruta:</span><span>{{ $pedido->motivo_fuera_ruta }}</span></div>
                 @endif
             </div>
-        </header>
+        </div>
 
         @if ($factura?->reemplazaA)
             <div class="sustituye">
@@ -163,117 +208,94 @@
             </div>
         @endif
 
-        <div class="datos">
-            <div><b>Cliente:</b> {{ $factura->cliente_nombre ?? $pedido->cliente->nombre }}@if ($pedido->cliente->codigo) ({{ $pedido->cliente->codigo }})@endif</div>
-            <div><b>RTN:</b> {{ ($factura ? $factura->cliente_rtn : $pedido->cliente->rtn) ?: '—' }}</div>
-            <div><b>Dirección:</b> {{ $pedido->cliente->direccion ?? '—' }}@if ($pedido->cliente->municipio) · {{ $pedido->cliente->municipio->nombre }}, {{ $pedido->cliente->municipio->departamento->nombre }}@endif</div>
-            <div><b>Teléfono:</b> {{ $pedido->cliente->telefono ?? '—' }}</div>
-            <div><b>Vendedor:</b> {{ $pedido->vendedor->name }}@if ($pedido->vendedor->codigo) ({{ $pedido->vendedor->codigo }})@endif</div>
-            <div><b>Pedido:</b> {{ $pedido->numero }} · {{ $pedido->fecha->format('d/m/Y') }}</div>
-            @if ($pedido->fuera_de_ruta)
-                <div><b>Fuera de ruta:</b> {{ $pedido->motivo_fuera_ruta }}</div>
-            @endif
-            <div><b>Validó:</b> {{ $pedido->validador?->name ?? 'Pendiente de validar' }}@if ($pedido->validado_at) · {{ $pedido->validado_at->format('d/m/Y H:i') }}@endif</div>
-        </div>
+        @if ($factura)
+            <div class="exonerado">
+                <b>Datos del Adquiriente Exonerado:</b>
+                <div class="campos">
+                    <div><b>N° Orden de Compra Exenta:</b><span></span></div>
+                    <div><b>N° Constancia de Registro de Exonerados:</b><span></span></div>
+                    <div><b>N° Registro SAG:</b><span></span></div>
+                </div>
+            </div>
+        @endif
 
-        <table>
+        <table class="detalle">
             <thead>
             <tr>
-                <th>Código</th>
-                <th>Descripción</th>
-                <th>En</th>
-                <th class="num">Pidió</th>
                 <th class="num">{{ $validado ? 'Cant.' : 'Cant. est.' }}</th>
-                <th class="num">Precio unit.</th>
-                @if ($conPromo)
-                    <th class="num">Descuento</th>
-                @endif
-                <th class="num">Importe</th>
+                <th>Presentación</th>
+                <th>Código</th>
+                <th>Descripción del Producto</th>
+                <th class="num">Precio Unit.</th>
+                <th class="num">Desc.</th>
+                <th class="num">I.S.V.</th>
+                <th class="num">Total</th>
+                <th class="letra"></th>
             </tr>
             </thead>
             <tbody>
             @foreach ($pedido->items as $item)
+                @php
+                    $cantidad = $validado ? $item->cantidadFacturable() : $item->cantidad;
+                @endphp
                 <tr @class(['tachado' => $validado && $item->cantidad_despachada === 0])>
+                    <td class="num">{{ $cantidad }}</td>
+                    <td>{{ mb_strtoupper($item->presentacion->palabra(max(1, $cantidad))) }}</td>
                     <td>{{ $item->producto->codigo }}</td>
                     <td>
-                        {{ $item->producto->descripcion }}@if (! $item->gravado) <span class="muted">(E)</span>@endif
+                        {{ $item->producto->descripcion }}
                         @if ($validado && ($falta = $item->faltaEnPalabras()))
-                            <br><span class="falta nota-falta">{{ $falta }}</span>
+                            <span class="nota">{{ $falta }}</span>
                         @elseif ($validado && ($mas = $item->deMasEnPalabras()))
-                            <br><span class="nota-falta">{{ $mas }}</span>
+                            <span class="nota">{{ $mas }}</span>
+                        @endif
+                        @if ($item->promocion)
+                            <span class="nota">{{ $item->bonificacion ? 'Regalo de la promoción' : 'Promoción' }} {{ $item->promocion->codigo }}</span>
                         @endif
                     </td>
-                    <td>{{ $item->presentacion->sigla() }}</td>
-                    <td class="num">{{ $item->cantidad }}</td>
-                    <td class="num @if ($item->faltante() > 0) falta @endif">{{ $item->cantidadFacturable() }}</td>
-                    <td class="num">{{ lempiras($item->precio) }}</td>
-                    @if ($conPromo)
-                        <td class="num promo">
-                            @if ($item->descuento > 0)
-                                −{{ lempiras($item->descuento) }}
-                                @if ($item->promocion)
-                                    <br><span class="muted">{{ $item->bonificacion ? 'REGALO ' : '' }}{{ $item->promocion->codigo }}</span>
-                                @endif
-                            @endif
-                        </td>
-                    @endif
-                    <td class="num">{{ lempiras($item->subtotal - $item->descuento) }}</td>
+                    <td class="num">{{ number_format($item->precio, 2) }}</td>
+                    <td class="num">{{ number_format($item->descuento, 2) }}</td>
+                    <td class="num">{{ number_format($item->isv, 2) }}</td>
+                    <td class="num">{{ number_format($item->total, 2) }}</td>
+                    <td class="letra">{{ $item->gravado ? 'G' : 'E' }}</td>
                 </tr>
             @endforeach
             </tbody>
         </table>
+        <div class="fin">Fin del Detalle de la {{ $factura ? 'Factura' : 'Pedido' }}</div>
 
         <div class="pie">
             <div>
+                <div class="fila observaciones"><span class="etiqueta">Observaciones:</span><span>{{ $pedido->notas }}</span></div>
+                <div class="letras">Total: {{ \App\Support\NumeroALetras::lempiras($total) }}</div>
                 @if ($factura)
-                    <div class="exonerados">
-                        <div>N° correlativo de orden de compra exenta: <span></span></div>
-                        <div>N° correlativo de constancia de registro de exonerado: <span></span></div>
-                        <div>N° identificativo del registro de la SAG: <span></span></div>
+                    <div class="fila"><span class="etiqueta">Rango Autorizado:</span><span class="rango">del {{ $factura->rangoAutorizado() }}</span></div>
+                    <div class="fila"><span class="etiqueta">Fecha Límite:</span><span>{{ $factura->fecha_limite->format('d/m/Y') }}</span></div>
+                    <div>{{ $fiscales->leyenda ?: 'La Factura Es Un Derecho, Exíjala' }}</div>
+                    <div class="chico">Original: Cliente &nbsp;-&nbsp; Copia: Emisor &nbsp;·&nbsp; G = gravado 15 %, E = exento</div>
+                @else
+                    <div class="chico">
+                        @unless ($validado)
+                            Pedido pendiente: totales con los precios de hoy; bodega confirma cantidades y precio al validar.
+                        @endunless
+                        G = gravado 15 %, E = exento
                     </div>
                 @endif
-                <div class="letras">SON: {{ \App\Support\NumeroALetras::lempiras($total) }}</div>
-                <div class="muted" style="font-size:11px;margin-top:4px">(E) = exento. Precios sin ISV; el ISV se suma al final.</div>
             </div>
+
+            <div class="firma">Firma</div>
 
             <table class="totales">
-                <tr><td>Descuentos y rebajas otorgados</td><td class="num">{{ lempiras($descuento) }}</td></tr>
-                <tr><td>Importe exonerado</td><td class="num">{{ lempiras(0) }}</td></tr>
-                <tr><td>Importe exento</td><td class="num">{{ lempiras($exento) }}</td></tr>
-                <tr><td>Importe gravado 15%</td><td class="num">{{ lempiras($gravado) }}</td></tr>
-                <tr><td>Importe gravado 18%</td><td class="num">{{ lempiras(0) }}</td></tr>
-                <tr><td>ISV 15%</td><td class="num">{{ lempiras($isv) }}</td></tr>
-                <tr><td>ISV 18%</td><td class="num">{{ lempiras(0) }}</td></tr>
-                <tr class="total"><td>Total a pagar</td><td class="num">{{ lempiras($total) }}</td></tr>
+                <tr><td>Importe Exonerado: L.</td><td class="num">{{ number_format(0, 2) }}</td></tr>
+                <tr><td>Importe Gravado (15%): L.</td><td class="num">{{ number_format($gravado, 2) }}</td></tr>
+                <tr><td>Importe Gravado (18%): L.</td><td class="num">{{ number_format(0, 2) }}</td></tr>
+                <tr><td>Importe Exento: L.</td><td class="num">{{ number_format($exento, 2) }}</td></tr>
+                <tr><td>Sub Total: L.</td><td class="num">{{ number_format($exento + $gravado + $descuento, 2) }}</td></tr>
+                <tr><td>Descuento: L.</td><td class="num">{{ number_format($descuento, 2) }}</td></tr>
+                <tr><td>Impuesto (15%): L.</td><td class="num">{{ number_format($isv, 2) }}</td></tr>
+                <tr><td>Impuesto (18%): L.</td><td class="num">{{ number_format(0, 2) }}</td></tr>
+                <tr class="total"><td>Total: L.</td><td class="num">{{ number_format($total, 2) }}</td></tr>
             </table>
-        </div>
-
-        @if ($factura)
-            <div class="autorizacion">
-                <b>Rango autorizado:</b> del {{ $factura->rangoAutorizado() }}
-                · <b>Fecha límite de emisión:</b> {{ $factura->fecha_limite->format('d/m/Y') }}
-                <br>Original: Cliente · Copia: Obligado tributario emisor
-                @if ($fiscales->leyenda)
-                    <br>{{ $fiscales->leyenda }}
-                @endif
-            </div>
-        @endif
-
-        <p class="nota">
-            @unless ($validado)
-                Pedido pendiente: totales calculados con los precios de hoy. Bodega confirma cantidades y precio al validar.<br>
-            @endunless
-            @foreach ($promociones as $promocion)
-                {{ $promocion->codigo }} · {{ $promocion->nombre }}: {{ $promocion->resumen() }}.<br>
-            @endforeach
-            @if ($pedido->notas)
-                Notas: {{ $pedido->notas }}
-            @endif
-        </p>
-
-        <div class="firmas">
-            <div>Entregó</div>
-            <div>Recibió conforme</div>
         </div>
     </div>
 @endforeach

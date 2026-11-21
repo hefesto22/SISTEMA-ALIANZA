@@ -19,8 +19,10 @@ use App\Models\Cai;
 use App\Models\Cliente;
 use App\Models\DatosFiscales;
 use App\Models\Factura;
+use App\Models\Municipio;
 use App\Models\Pedido;
 use App\Models\Producto;
+use App\Models\Ruta;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
@@ -90,19 +92,24 @@ test('al imprimir se emite la factura con el CAI de la bodega; las copias usan e
 
     $primero = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
     $segundo = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
+    Ruta::factory()->create(['bodega_id' => $this->cop->id, 'nombre' => 'RUTA 001 SRC'])->vendedores()->attach($this->vendedores['COP']->id);
 
     $this->actingAs($this->encargados['COP']);
 
     $this->get(imprimir($primero, $this->encargados['COP'], ModoImpresion::Originales)->url())
         ->assertOk()
         ->assertSee('FACTURA')
+        ->assertSee('RUTA 001 SRC')
+        ->assertSee('CONTADO')
+        ->assertSee('Datos del Adquiriente Exonerado')
+        ->assertSee('Fin del Detalle de la Factura')
         ->assertSee('000-001-01-00000120')
         ->assertSee($cai->cai)
         ->assertSee('del 000-001-01-00000120 al 000-001-01-00000130')
         ->assertSee($cai->fecha_limite->format('d/m/Y'))
         ->assertSee('05019000123456')
         ->assertSee('ALIANZA HOZANA')
-        ->assertSee('SON: SETECIENTOS TREINTA LEMPIRAS CON 00/100')
+        ->assertSee('Total: SETECIENTOS TREINTA LEMPIRAS CON 00/100')
         ->assertDontSee('REIMPRESIÓN');
 
     $this->get(imprimir($primero, $this->encargados['COP'], ModoImpresion::Copia)->url())
@@ -385,4 +392,18 @@ test('si se corrige el inicio del rango antes de usarlo, el primer número sale 
     imprimir($pedido, $this->encargados['COP'], ModoImpresion::Originales);
 
     expect(Factura::query()->sole()->numero)->toBe('000-001-01-00000501');
+});
+
+test('la ruta de la factura es la del vendedor que lleva el municipio del cliente; si ninguna, la primera suya', function (): void {
+    $pedido = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
+    $municipio = Municipio::query()->findOrFail($pedido->cliente->municipio_id);
+    $vendedor = $this->vendedores['COP']->id;
+
+    expect(Ruta::delPedido($pedido))->toBeNull();
+
+    Ruta::factory()->create(['bodega_id' => $this->cop->id, 'nombre' => 'RUTA A'])->vendedores()->attach($vendedor);
+    expect(Ruta::delPedido($pedido)?->nombre)->toBe('RUTA A');
+
+    Ruta::factory()->cubre($municipio)->create(['bodega_id' => $this->cop->id, 'nombre' => 'RUTA B'])->vendedores()->attach($vendedor);
+    expect(Ruta::delPedido($pedido->fresh() ?? $pedido)?->nombre)->toBe('RUTA B');
 });
