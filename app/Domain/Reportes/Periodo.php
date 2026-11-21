@@ -134,8 +134,8 @@ final readonly class Periodo
      */
     public function textoLargo(): string
     {
-        $desde = $this->desde->locale('es');
-        $hasta = $this->hasta->locale('es');
+        $desde = self::enEspanol($this->desde);
+        $hasta = self::enEspanol($this->hasta);
 
         if ($desde->equalTo($hasta)) {
             return ucfirst($hasta->isoFormat('dddd D [de] MMMM [de] YYYY'));
@@ -156,6 +156,18 @@ final readonly class Periodo
     public function dias(): int
     {
         return (int) $this->desde->diffInDays($this->hasta) + 1;
+    }
+
+    /**
+     * La misma fecha con los nombres de días y meses en español (locale()
+     * dice que también puede devolver el texto del idioma; con uno nuevo
+     * siempre devuelve la fecha).
+     */
+    private static function enEspanol(CarbonImmutable $fecha): CarbonImmutable
+    {
+        $enEspanol = $fecha->locale('es');
+
+        return $enEspanol instanceof CarbonImmutable ? $enEspanol : $fecha;
     }
 
     /**
