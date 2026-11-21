@@ -9,6 +9,7 @@ use App\Domain\Pedidos\ValidarDespacho;
 use App\Domain\Precios\ActualizarPrecioProducto;
 use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
+use App\Enums\FormatoFactura;
 use App\Enums\ModoImpresion;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
@@ -17,6 +18,7 @@ use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
 use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Models\Bodega;
+use App\Models\Cai;
 use App\Models\Cliente;
 use App\Models\Factura;
 use App\Models\Pedido;
@@ -113,6 +115,64 @@ test('el botón Imprimir emite y cuenta; la hoja firmada sale original y sin fir
     expect($pedido->fresh()?->impresiones)->toBe(1)
         ->and($factura->fresh()?->impresiones)->toBe(1)
         ->and(Factura::query()->count())->toBe(1);
+});
+
+test('Imprimir abre la vista previa con la impresora de la bodega; la factura sale en el papel que se escoja', function (): void {
+    $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+    $this->bodega->update(['formato_factura' => FormatoFactura::Carta]);
+    $siguiente = Cai::query()->sole()->siguiente;
+
+    $this->actingAs($this->encargado);
+
+    // El modal abre con la impresora de la bodega y la hoja como va a salir.
+    Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
+        ->mountAction('imprimir')
+        ->assertSchemaStateSet(['papel' => FormatoFactura::Carta->value])
+        ->assertSee(route('pedidos.vista-previa', ['pedido' => $pedido->id, 'modo' => 'original', 'hoja' => 'carta']));
+
+    // La vista previa muestra la factura que se va a emitir, sin emitirla ni gastar el número.
+    $this->get(route('pedidos.vista-previa', ['pedido' => $pedido->id, 'modo' => 'original', 'hoja' => 'continuo']))
+        ->assertOk()
+        ->assertSee('size: 8.5in 5.5in', false)
+        ->assertSee('FACTURA')
+        ->assertSee('VISTA PREVIA')
+        ->assertSee('(se confirma al imprimir)')
+        ->assertDontSee('class="barra"', false);
+
+    expect(Factura::query()->count())->toBe(0)
+        ->and(Cai::query()->sole()->siguiente)->toBe($siguiente);
+
+    // Se escoge la LX-350: sale en media carta, como original.
+    $url = null;
+
+    Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
+        ->callAction('imprimir', data: ['papel' => FormatoFactura::Continuo->value])
+        ->assertDispatched(ImprimirPedidoAction::EVENTO, function (string $nombre, array $datos) use (&$url): bool {
+            $url = $datos['url'] ?? null;
+
+            return is_string($url) && str_contains($url, 'hoja=continuo');
+        });
+
+    $factura = Factura::query()->where('pedido_id', $pedido->id)->sole();
+
+    $this->get((string) $url)
+        ->assertOk()
+        ->assertSee('size: 8.5in 5.5in', false)
+        ->assertSee($factura->numero)
+        ->assertDontSee('VISTA PREVIA')
+        ->assertDontSee('REIMPRESIÓN');
+
+    // La vista previa de la copia: la misma factura, con su sello, en el papel de la bodega.
+    $this->get(route('pedidos.vista-previa', ['pedido' => $pedido->id, 'modo' => 'copia']))
+        ->assertOk()
+        ->assertSee($factura->numero)
+        ->assertSee('size: 8.5in 11in', false)
+        ->assertSeeText('REIMPRESIÓN · COPIA');
+
+    // El vendedor no imprime: tampoco ve la vista previa.
+    $this->actingAs($this->vendedor);
+
+    expect($this->get(route('pedidos.vista-previa', ['pedido' => $pedido->id]))->status())->toBeIn([403, 404]);
 });
 
 test('copia sale como reimpresión; "No salió" repite la hoja igual sin contarla como copia', function (): void {

@@ -23,6 +23,7 @@ use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirPedidoController;
 use App\Http\Controllers\ImprimirPedidosController;
 use App\Http\Controllers\ImprimirReporteController;
+use App\Http\Controllers\VistaPreviaFacturaController;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
@@ -34,6 +35,10 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
     // Vista previa de un pedido.
     Route::get('pedidos/{pedido}/imprimir', ImprimirPedidoController::class)
         ->name('pedidos.imprimir');
+
+    // La factura como va a salir, dentro del modal de Imprimir (?modo=original|copia&hoja=continuo|carta).
+    Route::get('pedidos/{pedido}/vista-previa', VistaPreviaFacturaController::class)
+        ->name('pedidos.vista-previa');
 
     // Nota de crédito o constancia de una devolución.
     Route::get('devoluciones/{devolucion}/imprimir', ImprimirDevolucionController::class)

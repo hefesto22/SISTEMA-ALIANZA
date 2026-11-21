@@ -167,16 +167,22 @@ class FacturaResource extends Resource
             ])
             ->recordUrl(fn (Factura $record): string => PedidoResource::getUrl('view', ['record' => $record->pedido_id]))
             ->recordActions([
-                Action::make('copia')
-                    ->label('Imprimir copia')
-                    ->tooltip('Imprimir copia')
-                    ->icon(Heroicon::OutlinedPrinter)
-                    ->iconButton()
-                    ->color('gray')
-                    ->visible(fn (Factura $record): bool => ! $record->estaAnulada() && Gate::allows('imprimir', $record->pedido))
-                    ->action(function (Factura $record, Component $livewire): void {
-                        ImprimirPedidoAction::ejecutar($livewire, [$record->pedido_id], ModoImpresion::Copia);
-                    }),
+                // Abre la vista previa con la impresora (LX-350 o normal) antes de imprimir.
+                ImprimirPedidoAction::conVistaPrevia(
+                    Action::make('copia')
+                        ->label('Imprimir copia')
+                        ->tooltip('Imprimir copia')
+                        ->icon(Heroicon::OutlinedPrinter)
+                        ->iconButton()
+                        ->color('gray')
+                        ->visible(fn (Factura $record): bool => ! $record->estaAnulada() && Gate::allows('imprimir', $record->pedido))
+                        ->modalHeading(fn (Factura $record): string => "Imprimir copia de la factura {$record->numero}")
+                        ->fillForm(fn (Factura $record): array => ImprimirPedidoAction::datosDelModal($record->pedido))
+                        ->action(function (array $data, Factura $record, Component $livewire): void {
+                            ImprimirPedidoAction::ejecutar($livewire, [$record->pedido_id], ModoImpresion::Copia, ImprimirPedidoAction::papel($data['papel'] ?? null));
+                        }),
+                    ModoImpresion::Copia,
+                ),
             ]);
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Facturacion;
 
+use App\Enums\FormatoFactura;
 use App\Models\Pedido;
 use Illuminate\Support\Facades\URL;
 
@@ -53,13 +54,16 @@ final class ResultadoImpresion
 
     /**
      * Enlace firmado a la hoja: solo con la firma salen como ORIGINAL; sin
-     * ella (vista previa, enlace copiado) la factura sale como COPIA.
+     * ella (vista previa, enlace copiado) la factura sale como COPIA. El
+     * papel va fuera de la firma (?hoja=), como el que se cambia en la hoja.
      */
-    public function url(): string
+    public function url(?FormatoFactura $papel = null): string
     {
-        return URL::temporarySignedRoute('pedidos.imprimir-lote', now()->addMinutes(self::MINUTOS), [
+        $url = URL::temporarySignedRoute('pedidos.imprimir-lote', now()->addMinutes(self::MINUTOS), [
             'ids'        => implode(',', $this->pedidos),
             'originales' => implode(',', $this->originales),
         ]);
+
+        return $papel === null ? $url : $url.'&hoja='.$papel->value;
     }
 }

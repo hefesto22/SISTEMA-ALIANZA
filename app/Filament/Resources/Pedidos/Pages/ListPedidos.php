@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Enums\EstadoPedido;
+use App\Enums\FormatoFactura;
 use App\Enums\ModoImpresion;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
@@ -37,8 +38,10 @@ class ListPedidos extends ListRecords
                 ->modalHeading(fn (): string => 'Imprimir '.count($this->idsPorImprimir()).' factura(s)')
                 ->modalDescription('Salen como original, una por página, con los filtros y la búsqueda que tiene puestos. Si otra persona ya imprimió alguno, se salta.')
                 ->modalSubmitActionLabel('Imprimir')
-                ->action(function (): void {
-                    ImprimirPedidoAction::ejecutar($this, $this->idsPorImprimir(), ModoImpresion::Originales);
+                ->fillForm(fn (): array => ['papel' => FormatoFactura::delUsuario(Acceso::usuario())->value])
+                ->schema([ImprimirPedidoAction::campoPapel()])
+                ->action(function (array $data): void {
+                    ImprimirPedidoAction::ejecutar($this, $this->idsPorImprimir(), ModoImpresion::Originales, ImprimirPedidoAction::papel($data['papel'] ?? null));
                 })
                 ->visible(fn (): bool => $this->activeTab === EstadoPedido::PorImprimir->value && $this->idsPorImprimir() !== []),
             CreateAction::make()->label('Nueva preventa'),
@@ -106,9 +109,9 @@ class ListPedidos extends ListRecords
      * @param array<int|string, mixed> $ids
      */
     #[On(ImprimirPedidoAction::PEDIR)]
-    public function imprimirPedidos(array $ids = [], string $modo = 'originales'): void
+    public function imprimirPedidos(array $ids = [], string $modo = 'originales', ?string $papel = null): void
     {
-        ImprimirPedidoAction::desdeAviso($this, $ids, $modo);
+        ImprimirPedidoAction::desdeAviso($this, $ids, $modo, $papel);
     }
 
     /**

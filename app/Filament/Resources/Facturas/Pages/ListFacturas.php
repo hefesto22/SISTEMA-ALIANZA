@@ -23,9 +23,9 @@ class ListFacturas extends ListRecords
      * @param array<int|string, mixed> $ids
      */
     #[On(ImprimirPedidoAction::PEDIR)]
-    public function imprimirPedidos(array $ids = [], string $modo = 'originales'): void
+    public function imprimirPedidos(array $ids = [], string $modo = 'originales', ?string $papel = null): void
     {
-        ImprimirPedidoAction::desdeAviso($this, $ids, $modo);
+        ImprimirPedidoAction::desdeAviso($this, $ids, $modo, $papel);
     }
 
     /**

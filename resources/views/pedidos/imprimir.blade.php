@@ -3,10 +3,11 @@
     varias de un solo, una por página (ImprimirPedidosController).
     Datos: $pedidos (pedidos con sus relaciones), $titulo, $fiscales (DatosFiscales),
     $firmado (el enlace viene firmado de la acción Imprimir), $originales (ids
-    de los pedidos que salen como ORIGINAL), $formato (FormatoFactura: el papel)
-    y $enlaces (la misma hoja en cada papel, para la barra). Sin firma, toda
-    factura sale "COPIA · SIN VALOR FISCAL"; firmada y no original,
-    "REIMPRESIÓN · COPIA".
+    de los pedidos que salen como ORIGINAL), $formato (FormatoFactura: el papel),
+    $enlaces (la misma hoja en cada papel, para la barra) y $previa (dentro del
+    modal de Imprimir: sin barra y a lo ancho del cuadro; una factura todavía
+    sin guardar sale marcada VISTA PREVIA). Sin firma, toda factura sale
+    "COPIA · SIN VALOR FISCAL"; firmada y no original, "REIMPRESIÓN · COPIA".
 
     Diseño de la factura de Distribuciones Alianza en dos papeles (@page):
     - Continuo media carta (8.5 × 5.5 pulgadas) para matriciales como la
@@ -31,6 +32,7 @@
 @php
     $formato ??= \App\Enums\FormatoFactura::Continuo;
     $enlaces ??= [];
+    $previa ??= false;
 @endphp
 <!DOCTYPE html>
 <html lang="es" translate="no">
@@ -65,6 +67,7 @@
         .papel a:first-of-type { border-radius: 6px 0 0 6px; }
         .papel a:last-of-type { border-radius: 0 6px 6px 0; border-left: 0; }
         .papel a.elegido { background: #111; color: #fff; border-color: #111; }
+        body.previa .hoja { margin: 12px auto; }
 
         .hoja { position: relative; width: 8.5in; min-height: var(--alto); margin: 16px auto 24px; padding: var(--margen-arriba) var(--margen-lado) var(--margen-abajo); background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.15); display: flex; flex-direction: column; }
         b, .etiqueta { font-weight: 700; }
@@ -88,6 +91,7 @@
         .datos .fila { display: grid; grid-template-columns: 6.6em 1fr; align-items: baseline; }
         .datos .derecha .fila { grid-template-columns: 7.9em 1fr; }
         .datos .numero { font-weight: 700; font-size: var(--numero); line-height: 1.1; }
+        .datos .provisional { font-size: var(--nota); margin-left: 6px; }
         .datos .aparte { margin-left: 1.4em; white-space: nowrap; }
         .cai { white-space: nowrap; font-size: var(--cai); }
         .sustituye { margin-top: 4px; border: 1.5px solid #000; padding: 2px 6px; font-weight: 700; }
@@ -135,20 +139,31 @@
         }
     </style>
 </head>
-<body class="{{ $formato->value }}">
-<div class="barra">
-    <span class="cuantos">{{ $titulo }}{{ $pedidos->count() > 1 ? ', una por página' : '' }}</span>
-    @if ($enlaces !== [])
-        <span class="papel">
-            <span class="que">Papel:</span>
-            @foreach (\App\Enums\FormatoFactura::cases() as $opcion)
-                <a href="{{ $enlaces[$opcion->value] ?? '#' }}" title="{{ $opcion->getDescription() }}" @class(['elegido' => $opcion === $formato])>{{ $opcion->corto() }}</a>
-            @endforeach
-        </span>
-    @endif
-    <button type="button" onclick="window.close()">Cerrar</button>
-    <button type="button" class="principal" onclick="window.print()">Imprimir</button>
-</div>
+<body class="{{ $formato->value }}{{ $previa ? ' previa' : '' }}">
+@if ($previa)
+    <script>
+        // En el modal la hoja se achica si el cuadro es más angosto que la hoja (8.5 pulgadas).
+        (() => {
+            const ajustar = () => { document.body.style.zoom = Math.min(1, (document.documentElement.clientWidth - 16) / 816); };
+            ajustar();
+            addEventListener('resize', ajustar);
+        })();
+    </script>
+@else
+    <div class="barra">
+        <span class="cuantos">{{ $titulo }}{{ $pedidos->count() > 1 ? ', una por página' : '' }}</span>
+        @if ($enlaces !== [])
+            <span class="papel">
+                <span class="que">Papel:</span>
+                @foreach (\App\Enums\FormatoFactura::cases() as $opcion)
+                    <a href="{{ $enlaces[$opcion->value] ?? '#' }}" title="{{ $opcion->getDescription() }}" @class(['elegido' => $opcion === $formato])>{{ $opcion->corto() }}</a>
+                @endforeach
+            </span>
+        @endif
+        <button type="button" onclick="window.close()">Cerrar</button>
+        <button type="button" class="principal" onclick="window.print()">Imprimir</button>
+    </div>
+@endif
 
 @foreach ($pedidos as $pedido)
     @php
@@ -209,7 +224,10 @@
             <div class="documento">
                 <span class="tipo">{{ $factura ? 'FACTURA' : 'PEDIDO' }}</span>
                 @if ($factura)
-                    @if ($esOriginal)
+                    @if (! $factura->exists)
+                        {{-- La que se va a emitir (modal de Imprimir): el número se confirma al imprimir. --}}
+                        <span class="sello">VISTA PREVIA</span>
+                    @elseif ($esOriginal)
                         {{-- Original: sin sello. --}}
                     @elseif ($firmado ?? false)
                         <span class="sello"><span class="nw">REIMPRESIÓN ·</span> <span class="nw">COPIA</span></span>
@@ -226,7 +244,7 @@
         <div class="datos">
             <div>
                 @if ($factura)
-                    <div class="fila"><span class="etiqueta">Factura:</span><span class="numero">{{ $factura->numero }}</span></div>
+                    <div class="fila"><span class="etiqueta">Factura:</span><span><span class="numero">{{ $factura->numero }}</span>@unless ($factura->exists)<span class="provisional">(se confirma al imprimir)</span>@endunless</span></div>
                 @else
                     <div class="fila"><span class="etiqueta">Pedido:</span><span class="numero">{{ $pedido->numero }}</span></div>
                 @endif

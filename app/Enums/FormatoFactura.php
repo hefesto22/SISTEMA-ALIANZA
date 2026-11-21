@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Enums;
 
 use App\Models\Bodega;
+use App\Models\User;
 use Filament\Support\Contracts\HasDescription;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Http\Request;
@@ -47,6 +48,17 @@ enum FormatoFactura: string implements HasDescription, HasLabel
     }
 
     /**
+     * Para el botón de la impresora en el modal de Imprimir.
+     */
+    public function impresora(): string
+    {
+        return match ($this) {
+            self::Continuo => 'Epson LX-350 · media carta',
+            self::Carta    => 'Impresora normal · carta',
+        };
+    }
+
+    /**
      * El tamaño de la hoja para @page.
      */
     public function pagina(): string
@@ -65,6 +77,15 @@ enum FormatoFactura: string implements HasDescription, HasLabel
         return (is_string($escogido) ? self::tryFrom($escogido) : null)
             ?? $bodega->formato_factura
             ?? self::Continuo;
+    }
+
+    /**
+     * El de la bodega del usuario (para imprimir varias de un solo); sin
+     * bodega (administración), media carta.
+     */
+    public static function delUsuario(?User $usuario): self
+    {
+        return $usuario->bodega->formato_factura ?? self::Continuo;
     }
 
     /**

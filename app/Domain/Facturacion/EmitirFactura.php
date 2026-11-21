@@ -46,30 +46,25 @@ final class EmitirFactura
         $cai->siguiente = $correlativo + 1;
         $cai->save();
 
-        [$exento, $gravado] = self::importes($pedido);
+        return Factura::query()->create(self::datos($pedido, $cai, $correlativo) + ['emitida_por' => $usuario->id]);
+    }
 
-        return Factura::query()->create([
-            'pedido_id'       => $pedido->id,
-            'bodega_id'       => $pedido->bodega_id,
-            'cai_id'          => $cai->id,
-            'numero'          => $cai->numero($correlativo),
-            'correlativo'     => $correlativo,
-            'cai'             => $cai->cai,
-            'rango_desde'     => $cai->numero($cai->rango_desde),
-            'rango_hasta'     => $cai->numero($cai->rango_hasta),
-            'fecha_limite'    => $cai->fecha_limite,
-            'fecha_emision'   => now(),
-            'cliente_nombre'  => $pedido->cliente->nombre,
-            'cliente_rtn'     => $pedido->cliente->rtn,
-            'subtotal'        => $pedido->subtotal,
-            'descuento'       => $pedido->descuento,
-            'importe_exento'  => $exento,
-            'importe_gravado' => $gravado,
-            'isv'             => $pedido->isv,
-            'total'           => $pedido->total,
-            'reemplaza_a_id'  => $pedido->facturaPorSustituir()?->id,
-            'emitida_por'     => $usuario->id,
-        ]);
+    /**
+     * La factura como saldría si se imprime ahora, con el siguiente número
+     * del CAI, sin guardarla ni gastar el número: para la vista previa del
+     * modal de Imprimir. Null si la bodega no tiene CAI vigente.
+     */
+    public static function borrador(Pedido $pedido): ?Factura
+    {
+        $cai = Cai::paraBodega($pedido->bodega_id);
+
+        if ($cai === null) {
+            return null;
+        }
+
+        return (new Factura)
+            ->forceFill(self::datos($pedido, $cai, $cai->siguiente))
+            ->setRelation('reemplazaA', $pedido->facturaPorSustituir());
     }
 
     /**
@@ -93,5 +88,37 @@ final class EmitirFactura
         }
 
         return [round($exento, 2), round($gravado, 2)];
+    }
+
+    /**
+     * Lo que se guarda de la factura: el número del CAI y los importes del pedido.
+     *
+     * @return array<string, mixed>
+     */
+    private static function datos(Pedido $pedido, Cai $cai, int $correlativo): array
+    {
+        [$exento, $gravado] = self::importes($pedido);
+
+        return [
+            'pedido_id'       => $pedido->id,
+            'bodega_id'       => $pedido->bodega_id,
+            'cai_id'          => $cai->id,
+            'numero'          => $cai->numero($correlativo),
+            'correlativo'     => $correlativo,
+            'cai'             => $cai->cai,
+            'rango_desde'     => $cai->numero($cai->rango_desde),
+            'rango_hasta'     => $cai->numero($cai->rango_hasta),
+            'fecha_limite'    => $cai->fecha_limite,
+            'fecha_emision'   => now(),
+            'cliente_nombre'  => $pedido->cliente->nombre,
+            'cliente_rtn'     => $pedido->cliente->rtn,
+            'subtotal'        => $pedido->subtotal,
+            'descuento'       => $pedido->descuento,
+            'importe_exento'  => $exento,
+            'importe_gravado' => $gravado,
+            'isv'             => $pedido->isv,
+            'total'           => $pedido->total,
+            'reemplaza_a_id'  => $pedido->facturaPorSustituir()?->id,
+        ];
     }
 }
