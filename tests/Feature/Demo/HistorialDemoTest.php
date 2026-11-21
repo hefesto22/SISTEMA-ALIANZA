@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 use App\Enums\EstadoPedido;
 use App\Enums\Rol;
+use App\Enums\TipoDevolucion;
 use App\Enums\TipoMovimiento;
 use App\Models\Bodega;
 use App\Models\Cai;
 use App\Models\Cliente;
 use App\Models\ComisionPeriodo;
 use App\Models\Compra;
+use App\Models\Devolucion;
 use App\Models\Existencia;
 use App\Models\Factura;
 use App\Models\MovimientoInventario;
@@ -65,6 +67,9 @@ test('del 1 al 19: inventario inicial, compras, pedidos validados e impresos, co
         ->and(Factura::query()->whereNull('anulada_at')->where('cai', Cai::PRUEBA)->count())->toBe((clone $impresos)->count())
         ->and(Pedido::query()->where('estado', EstadoPedido::Pendiente->value)->where('fecha', '!=', '2026-09-19')->exists())->toBeFalse()
         ->and(Factura::query()->whereDate('fecha_emision', '2026-09-15')->exists())->toBeFalse()
+        // Las devoluciones a crédito llevan su nota, del CAI de prueba de notas de crédito.
+        ->and(Devolucion::query()->where('tipo', TipoDevolucion::Credito->value)->whereNull('nota_numero')->exists())->toBeFalse()
+        ->and(Devolucion::query()->whereNotNull('nota_numero')->where('cai', '!=', Cai::PRUEBA_NOTAS)->exists())->toBeFalse()
         // El inventario cuadra y nunca queda en negativo.
         ->and(Existencia::query()->where('cantidad', '<', 0)->exists())->toBeFalse()
         ->and((int) $kardex->n)->toBe(0)
@@ -84,7 +89,8 @@ test('limpiar deja la base sin operación y el CAI de prueba en su primer númer
 
     expect(array_sum(app(LimpiarMovimientos::class)->resumen()))->toBe(0)
         ->and(Existencia::query()->exists())->toBeFalse()
-        ->and(Cai::query()->where('cai', Cai::PRUEBA)->value('siguiente'))->toBe(1);
+        ->and(Cai::query()->where('cai', Cai::PRUEBA)->value('siguiente'))->toBe(1)
+        ->and(Cai::query()->where('cai', Cai::PRUEBA_NOTAS)->value('siguiente'))->toBe(1);
 
     Cai::factory()->create();
 

@@ -47,7 +47,7 @@ class PedidoInfolist
 
                 Section::make('Facturas')
                     ->icon(Heroicon::OutlinedDocumentText)
-                    ->description('Al corregir un pedido ya impreso, su factura se anula y al reimprimir sale otra. La anulada se retira al cliente.')
+                    ->description('El mismo día en que se imprimió, al corregir el pedido su factura se anula y al reimprimir sale otra (la anulada se retira al cliente). Después, lo que devuelvan va como devolución.')
                     ->columnSpanFull()
                     ->extraAttributes(['class' => 'pv'])
                     ->visible(fn (Pedido $record): bool => $record->facturas()->exists())

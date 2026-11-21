@@ -9,9 +9,10 @@ use App\Models\DatosFiscales;
 use Illuminate\Database\Seeder;
 
 /**
- * SOLO PARA PROBAR EN LOCAL: datos fiscales de ejemplo (si faltan) y un CAI
- * global de prueba, para poder imprimir facturas antes de tener el CAI
- * real. En producción se cargan los del SAR en Administración > CAI.
+ * SOLO PARA PROBAR EN LOCAL: datos fiscales de ejemplo (si faltan) y CAI
+ * globales de prueba, uno de facturas y otro de notas de crédito, para poder
+ * imprimir antes de tener los reales. En producción se cargan los del SAR en
+ * Administración > CAI.
  *
  *   php artisan db:seed --class=FacturacionPruebaSeeder
  */
@@ -43,6 +44,17 @@ class FacturacionPruebaSeeder extends Seeder
             'notas'           => 'CAI DE PRUEBA: CAMBIAR POR EL DEL SAR',
         ]);
 
-        $this->command?->warn('CAI de prueba listo (global). Cámbielo por el del SAR antes de facturar de verdad.');
+        Cai::query()->firstOrCreate(['cai' => Cai::PRUEBA_NOTAS], [
+            'establecimiento' => '000',
+            'punto_emision'   => '999',
+            'tipo_documento'  => Cai::NOTA_CREDITO,
+            'rango_desde'     => 1,
+            'rango_hasta'     => 5000,
+            'fecha_limite'    => today()->addYear(),
+            'activo'          => true,
+            'notas'           => 'CAI DE PRUEBA DE NOTAS DE CRÉDITO: CAMBIAR POR EL DEL SAR',
+        ]);
+
+        $this->command?->warn('CAI de prueba listos (globales, de facturas y de notas de crédito). Cámbielos por los del SAR antes de facturar de verdad.');
     }
 }

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Devoluciones\RegistrarDevolucion;
 use App\Domain\Inventario\MoverExistencia;
 use App\Domain\Inventario\RegistrarCompra;
 use App\Domain\Pedidos\CorregirPedido;
@@ -10,12 +11,14 @@ use App\Domain\Pedidos\ValidarDespacho;
 use App\Enums\EstadoFactura;
 use App\Enums\FrecuenciaComision;
 use App\Enums\Rol;
+use App\Enums\TipoDevolucion;
 use App\Enums\TipoMovimiento;
 use App\Models\Bodega;
 use App\Models\Cai;
 use App\Models\Cliente;
 use App\Models\ComisionFactura;
 use App\Models\ComisionPeriodo;
+use App\Models\Devolucion;
 use App\Models\Existencia;
 use App\Models\Factura;
 use App\Models\MovimientoInventario;
@@ -164,4 +167,42 @@ test('no borra facturas de un CAI del SAR ni las que ya están en un periodo de 
     expect(Pedido::query()->count())->toBe(1)
         ->and(Factura::query()->count())->toBe(1)
         ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe(3);
+});
+
+test('las notas de crédito del CAI de prueba se borran con su pedido y ese CAI vuelve a empezar; las de un CAI del SAR no', function (): void {
+    $notas = Cai::query()->create([
+        'cai'             => Cai::PRUEBA_NOTAS,
+        'establecimiento' => '000',
+        'punto_emision'   => '999',
+        'tipo_documento'  => Cai::NOTA_CREDITO,
+        'rango_desde'     => 1,
+        'rango_hasta'     => 5000,
+        'fecha_limite'    => today()->addYear(),
+    ]);
+
+    // Salen 4 UN y regresa 1 buena, a crédito: sale la nota del CAI de prueba.
+    $pedido = app(ValidarDespacho::class)->ejecutar(pedidoDeJabon($this->bodega, $this->vendedor, $this->un, 4), [], $this->encargado);
+    imprimir($pedido, $this->encargado);
+    $devolucion = app(RegistrarDevolucion::class)->ejecutar($pedido, TipoDevolucion::Credito, [$pedido->items()->sole()->id => ['buenas' => 1]], $this->encargado);
+
+    expect($devolucion->nota_numero)->toBe('000-999-07-00000001')
+        ->and($notas->fresh()?->siguiente)->toBe(2)
+        ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe(2);
+
+    // Si la nota fuera de un CAI del SAR, no se borra.
+    Devolucion::query()->update(['cai' => 'ABCDEF-123456-ABCDEF-123456-ABCDEF-07']);
+
+    $this->artisan('pedidos:borrar', ['--force' => true])
+        ->expectsOutputToContain('nota de crédito')
+        ->assertFailed();
+
+    Devolucion::query()->update(['cai' => Cai::PRUEBA_NOTAS]);
+
+    $this->artisan('pedidos:borrar', ['--force' => true])
+        ->assertSuccessful();
+
+    expect(Pedido::query()->count())->toBe(0)
+        ->and(Devolucion::query()->count())->toBe(0)
+        ->and($notas->fresh()?->siguiente)->toBe(1)
+        ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe(5);
 });

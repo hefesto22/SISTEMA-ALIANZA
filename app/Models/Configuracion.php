@@ -20,8 +20,8 @@ use Illuminate\Support\Facades\Cache;
  *   el despacho (el del día o el del pedido, sin vender a pérdida).
  * - controlar_existencias: si está encendido, no se despacha más de lo que
  *   hay en la bodega. Se enciende cuando ya está cargado el inventario.
- * - notas_credito: si está encendido, una devolución con crédito emite su
- *   nota de crédito (CAI tipo 07); apagado, queda como crédito interno.
+ * - notas_credito: encendido (de fábrica), una devolución con crédito emite
+ *   su nota de crédito (CAI tipo 07); apagado, queda como crédito interno.
  * - comision_frecuencia y comision_corte: cada cuánto se pagan las
  *   comisiones; con quincenal, la primera quincena va del 1 al día de corte.
  *
@@ -77,7 +77,7 @@ class Configuracion extends Model
             'metodo_costo'          => MetodoCosto::Promedio,
             'precio_al_despachar'   => PrecioAlDespachar::Despacho,
             'controlar_existencias' => false,
-            'notas_credito'         => false,
+            'notas_credito'         => true,
             'comision_frecuencia'   => FrecuenciaComision::Quincenal,
             'comision_corte'        => 14,
         ]));

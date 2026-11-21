@@ -60,11 +60,12 @@ class PedidoPolicy
     }
 
     /**
-     * Corregir lo que sale de un pedido ya validado (por imprimir o impreso).
+     * Corregir lo que sale de un pedido ya validado: por imprimir, o impreso
+     * el mismo día de su factura (Pedido::seCorrigeTodavia).
      */
     public function corregir(User $user, Pedido $pedido): bool
     {
-        return $pedido->estaValidado() && $this->leTocaABodega($user, $pedido);
+        return $pedido->estaValidado() && $pedido->seCorrigeTodavia() && $this->leTocaABodega($user, $pedido);
     }
 
     /**

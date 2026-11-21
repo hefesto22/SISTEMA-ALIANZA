@@ -240,6 +240,23 @@ class Pedido extends Model
     }
 
     /**
+     * Un impreso se corrige solo el día en que se imprimió su factura (se
+     * anula y sale otra con la misma fecha). Después, lo que el cliente
+     * devuelva va como devolución (nota de crédito o cambio) y lo que pida
+     * de más, en un pedido nuevo. Por imprimir se corrige siempre.
+     */
+    public function seCorrigeTodavia(): bool
+    {
+        if ($this->estado !== EstadoPedido::Impreso) {
+            return true;
+        }
+
+        $factura = $this->factura;
+
+        return $factura === null || $factura->fecha_emision->isToday();
+    }
+
+    /**
      * Quién ve qué (lista, ver, editar, hoja):
      *  - Super admin y administración: todos los pedidos, de todas las bodegas.
      *  - Vendedor: los que él levantó MIENTRAS están pendientes, para

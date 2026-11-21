@@ -58,6 +58,12 @@ class Cai extends Model
     /** El CAI de prueba (FacturacionPruebaSeeder): sus facturas no valen ante el SAR. */
     public const PRUEBA = '000000-000000-000000-000000-000000-00';
 
+    /** El CAI de prueba de las notas de crédito (FacturacionPruebaSeeder). */
+    public const PRUEBA_NOTAS = '000000-000000-000000-000000-000000-07';
+
+    /** @var list<string> */
+    public const DE_PRUEBA = [self::PRUEBA, self::PRUEBA_NOTAS];
+
     protected $table = 'cais';
 
     /** @var list<string> */
@@ -226,7 +232,7 @@ class Cai extends Model
 
     public function esDePrueba(): bool
     {
-        return $this->cai === self::PRUEBA;
+        return in_array($this->cai, self::DE_PRUEBA, true);
     }
 
     public function estaVigente(): bool

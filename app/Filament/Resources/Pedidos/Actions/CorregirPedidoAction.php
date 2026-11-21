@@ -21,6 +21,8 @@ use Filament\Support\Icons\Heroicon;
  *
  * Si ya se imprimió, su factura queda ANULADA (con el motivo, que se pide
  * aquí) y al reimprimir sale una factura nueva que la sustituye.
+ * Un impreso solo se corrige el día de su factura (PedidoPolicy::corregir);
+ * después sale Devolución (DevolucionAction).
  */
 final class CorregirPedidoAction
 {
@@ -33,7 +35,7 @@ final class CorregirPedidoAction
             ->authorize('corregir')
             ->modalHeading(fn (Pedido $record): string => "Corregir · {$record->numero} · {$record->cliente->nombre}")
             ->modalDescription(fn (Pedido $record): string => $record->factura !== null
-                ? "Ya se imprimió con la factura N° {$record->factura->numero}. Al guardar, esa factura queda ANULADA (hay que retirarla al cliente) y al reimprimir sale una nueva. Cambie lo que sale con − y + (\"No hay\" = no sale) o agregue un producto."
+                ? "Se imprimió hoy con la factura N° {$record->factura->numero}. Al guardar, esa factura queda ANULADA (hay que retirarla al cliente) y al reimprimir sale una nueva. Solo se corrige hoy: desde mañana lo que devuelvan va como devolución. Cambie lo que sale con − y + (\"No hay\" = no sale) o agregue un producto."
                 : 'Cambie lo que sale con − y + ("No hay" = no sale) o agregue un producto. Sigue por imprimir.')
             ->modalWidth(Width::ThreeExtraLarge)
             ->modalSubmitActionLabel('Guardar corrección')
@@ -42,7 +44,7 @@ final class CorregirPedidoAction
                 ...LineasPedido::schema(),
                 Textarea::make('motivo')
                     ->label('Motivo de la corrección')
-                    ->placeholder('Ej. el cliente devolvió 2 cajas de aceite')
+                    ->placeholder('Ej. no había 2 cajas de aceite')
                     ->helperText('Queda en el historial como motivo de la anulación de la factura.')
                     ->rows(2)
                     ->maxLength(200)

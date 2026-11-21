@@ -22,6 +22,8 @@ use Illuminate\Support\Facades\DB;
  *
  * Queda Por imprimir. Si ya se había impreso, su factura queda ANULADA
  * (con el motivo) y al reimprimir se emite una nueva que la sustituye.
+ * Un impreso se corrige solo el día en que se imprimió su factura: después,
+ * lo que regrese va como devolución y lo que pidan de más, en otro pedido.
  * Si no cambió ninguna cantidad no se corrige: no se gasta un número.
  *
  * La existencia de la bodega se ajusta con la diferencia, por
@@ -52,6 +54,12 @@ final class CorregirPedido
 
             if (Devolucion::query()->where('pedido_id', $pedido->id)->exists()) {
                 throw new ReglaNegocioException("El pedido {$pedido->numero} ya tiene devoluciones: ya no se corrige. Lo que regrese, regístrelo como otra devolución.");
+            }
+
+            $impresa = $pedido->factura;
+
+            if ($impresa !== null && ! $pedido->seCorrigeTodavia()) {
+                throw new ReglaNegocioException("La factura {$impresa->numero} del pedido {$pedido->numero} se imprimió el {$impresa->fecha_emision->format('d/m/Y')}: ya no se corrige. Si el cliente devolvió producto, regístrelo como devolución (nota de crédito o cambio); si pidió más, haga un pedido nuevo.");
             }
 
             $antes = self::cantidades($pedido);

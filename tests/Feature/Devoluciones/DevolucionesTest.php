@@ -56,6 +56,9 @@ beforeEach(function (): void {
 
     $this->cai = facturacionLista();
 
+    // De fábrica se emite la nota de crédito; estas pruebas son del crédito interno (la de la nota la enciende).
+    Configuracion::actual()->update(['notas_credito' => false]);
+
     // Entregado: 10 UN y 1 CJ12, impreso con su factura.
     $pedido = Pedido::query()->create([
         'bodega_id'   => $this->bodega->id,

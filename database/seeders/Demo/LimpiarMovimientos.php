@@ -21,7 +21,8 @@ use Illuminate\Support\Facades\DB;
  * configuración no se tocan.
  *
  * No se usa si hay documentos de un CAI del SAR (facturas o notas de
- * crédito) o un CAI del SAR activo para facturar.
+ * crédito) o un CAI del SAR activo para facturar o para notas de crédito.
+ * Lo del CAI de prueba (facturas y notas) sí se borra.
  */
 final class LimpiarMovimientos
 {
@@ -41,7 +42,7 @@ final class LimpiarMovimientos
         'compras',
     ];
 
-    /** El CAI de prueba alcanza para la demostración. */
+    /** Los CAI de prueba alcanzan para la demostración. */
     private const RANGO_PRUEBA = 50_000;
 
     /**
@@ -74,17 +75,17 @@ final class LimpiarMovimientos
         }
 
         /** @var list<string> $notas */
-        $notas = Devolucion::query()->whereNotNull('nota_numero')->orderBy('nota_numero')->limit(5)->pluck('nota_numero')->all();
+        $notas = Devolucion::query()->whereNotNull('nota_numero')->where('cai', '!=', Cai::PRUEBA_NOTAS)->orderBy('nota_numero')->limit(5)->pluck('nota_numero')->all();
 
         if ($notas !== []) {
             return 'Hay notas de crédito emitidas ('.implode(', ', $notas).'): la demostración solo se genera en una base de prueba.';
         }
 
         /** @var list<string> $activos */
-        $activos = Cai::query()->vigentes()->where('tipo_documento', Cai::FACTURA)->where('cai', '!=', Cai::PRUEBA)->orderBy('id')->pluck('cai')->all();
+        $activos = Cai::query()->vigentes()->whereIn('tipo_documento', [Cai::FACTURA, Cai::NOTA_CREDITO])->whereNotIn('cai', Cai::DE_PRUEBA)->orderBy('id')->pluck('cai')->all();
 
         if ($activos !== []) {
-            return 'Hay CAI del SAR activos para facturar ('.implode(', ', $activos).'): desactívelos en Administración > CAI para que la demostración facture con el CAI de prueba.';
+            return 'Hay CAI del SAR activos para facturar o para notas de crédito ('.implode(', ', $activos).'): desactívelos en Administración > CAI para que la demostración use los CAI de prueba.';
         }
 
         return null;
@@ -95,8 +96,8 @@ final class LimpiarMovimientos
         DB::transaction(function (): void {
             DB::statement('TRUNCATE TABLE '.implode(', ', self::TABLAS).' RESTART IDENTITY');
 
-            // El CAI de prueba vuelve a su primer número, activo, con números y fecha de sobra.
-            Cai::query()->where('cai', Cai::PRUEBA)->update([
+            // Los CAI de prueba vuelven a su primer número, activos, con números y fecha de sobra.
+            Cai::query()->whereIn('cai', Cai::DE_PRUEBA)->update([
                 'siguiente'    => DB::raw('rango_desde'),
                 'rango_hasta'  => DB::raw('GREATEST(rango_hasta, '.self::RANGO_PRUEBA.')'),
                 'fecha_limite' => DB::raw('GREATEST(fecha_limite, CURRENT_DATE + 365)'),

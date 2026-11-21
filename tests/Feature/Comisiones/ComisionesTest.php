@@ -246,11 +246,12 @@ test('quincenas del 1 al 14 y del 15 a fin de mes (por la fecha de la factura); 
         ->and(comisionDe(PeriodoComision::actual(), $this->ana)->comision())->toBe(30.0);
 });
 
-test('al cerrar queda lo pagado; lo que se anula después se descuenta en el siguiente y la factura nueva cuenta en su fecha', function (): void {
+test('al cerrar queda lo pagado; lo que se anula después se descuenta en el siguiente y la factura que la sustituye entra en el siguiente', function (): void {
+    $this->travelTo(CarbonImmutable::parse('2026-11-14 09:00:00'));
     $pedido = facturaDeComision($this, $this->ana, [[$this->jabon, 10]]);
     $q1 = quincena('2026-11-01');
 
-    $this->travelTo(CarbonImmutable::parse('2026-11-15 09:00:00'));
+    $this->travelTo(CarbonImmutable::parse('2026-11-14 17:00:00'));
     $cierre = app(CerrarPeriodoComision::class)->ejecutar($q1, $this->admin, 'pagado');
 
     expect($cierre->comision)->toBe(20.0)
@@ -261,9 +262,10 @@ test('al cerrar queda lo pagado; lo que se anula después se descuenta en el sig
     expect(comisionDe($q1, $this->ana)->comision())->toBe(20.0);
     $this->limpieza->update(['escalones' => [['desde' => 0, 'porcentaje' => 0.5], ['desde' => 800, 'porcentaje' => 1], ['desde' => 1000, 'porcentaje' => 2]]]);
 
-    // El 16 devuelve 2 jabones: se anula la factura (1,000, ya pagada) y sale otra por 800.
-    $this->travelTo(CarbonImmutable::parse('2026-11-16 10:00:00'));
-    app(CorregirPedido::class)->ejecutar($pedido, [$pedido->items()->sole()->id => 8], $this->admin, 'devolvió 2');
+    // Esa misma tarde (ya cerrado) regresan 2 jabones que no se entregaron: se
+    // corrige el pedido, se anula la factura (1,000, ya pagada) y sale otra por 800.
+    $this->travelTo(CarbonImmutable::parse('2026-11-14 18:00:00'));
+    app(CorregirPedido::class)->ejecutar($pedido, [$pedido->items()->sole()->id => 8], $this->admin, 'no se entregaron 2');
     imprimir($pedido->fresh() ?? $pedido, $this->admin, ModoImpresion::Originales);
     // Y el 20 vende 15 más (1,500).
     $this->travelTo(CarbonImmutable::parse('2026-11-20 10:00:00'));
@@ -272,7 +274,7 @@ test('al cerrar queda lo pagado; lo que se anula después se descuenta en el sig
     $q2 = PeriodoComision::actual();
     $ana = comisionDe($q2, $this->ana);
 
-    // 800 + 1,500 − 1,000 = 1,300 → 2%.
+    // 800 (rezagada: con fecha del 14, se emitió después de cerrar) + 1,500 − 1,000 = 1,300 → 2%.
     expect($ana->filas[0]->venta)->toBe(2300.0)
         ->and($ana->filas[0]->anulado)->toBe(1000.0)
         ->and($ana->filas[0]->base)->toBe(1300.0)

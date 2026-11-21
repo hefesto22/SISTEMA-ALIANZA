@@ -465,6 +465,36 @@ test('solo se corrige lo validado, y solo bodega', function (): void {
         ->toThrow(ReglaNegocioException::class);
 });
 
+test('un impreso se corrige solo el día en que se imprimió; después lo que regrese va como devolución', function (): void {
+    $this->travelTo(now()->subDay());
+    $deAyer = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+    imprimir($deAyer, $this->encargado, ModoImpresion::Originales);
+    $this->travelBack();
+
+    $deHoy = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+    imprimir($deHoy, $this->encargado, ModoImpresion::Originales);
+    $deAyer = $deAyer->fresh() ?? $deAyer;
+    $deHoy = $deHoy->fresh() ?? $deHoy;
+
+    expect($deAyer->seCorrigeTodavia())->toBeFalse()
+        ->and($this->encargado->can('corregir', $deAyer))->toBeFalse()
+        ->and($deHoy->seCorrigeTodavia())->toBeTrue()
+        ->and($this->encargado->can('corregir', $deHoy))->toBeTrue();
+
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ViewPedido::class, ['record' => $deAyer->getRouteKey()])
+        ->assertActionHidden('corregir');
+
+    $lineas = $deAyer->items()->orderBy('id')->pluck('id')->all();
+
+    expect(fn () => app(CorregirPedido::class)->ejecutar($deAyer, [$lineas[0] => 1], $this->encargado, 'devolvió uno'))
+        ->toThrow(ReglaNegocioException::class, 'se imprimió el '.today()->subDay()->format('d/m/Y').': ya no se corrige');
+
+    expect($deAyer->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and(Factura::query()->where('pedido_id', $deAyer->id)->sole()->estado)->toBe(EstadoFactura::Vigente);
+});
+
 test('al corregir no se puede dejar sin nada: para eso se anula', function (): void {
     $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
     $lineas = $pedido->items()->pluck('id')->all();
@@ -592,14 +622,15 @@ test('Por imprimir e Impresos se ven por día: Imprimir las N de un día, Ver lo
 });
 
 test('la factura que sustituye a una anulada cuenta el día en que se imprime; la anulada se queda en su día sin sumar', function (): void {
+    // Ayer se imprimió y esa tarde se corrigió (no había en bodega); hoy se reimprime.
+    $this->travelTo(now()->subDay());
     $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
     imprimir($pedido, $this->encargado, ModoImpresion::Originales);
-
-    // Se imprimió ayer; hoy se corrige (no había en bodega) y se reimprime.
     $anulada = Factura::query()->where('pedido_id', $pedido->id)->sole();
-    $anulada->forceFill(['fecha_emision' => now()->subDay()])->save();
     $lineas = $pedido->items()->orderBy('id')->pluck('id')->all();
     app(CorregirPedido::class)->ejecutar($pedido->fresh() ?? $pedido, [$lineas[0] => 1], $this->encargado, 'no había en bodega');
+    $this->travelBack();
+
     imprimir($pedido, $this->encargado, ModoImpresion::Originales);
     $nueva = Factura::query()->where('pedido_id', $pedido->id)->where('estado', EstadoFactura::Vigente)->sole();
 
@@ -621,7 +652,7 @@ test('la factura que sustituye a una anulada cuenta el día en que se imprime; l
     // Ayer: la anulada, cuándo se anuló, cuál la sustituye y por qué.
     $this->get(route('facturas.resumen-dia', ['dia' => today()->subDay()->toDateString(), 'bodega' => $this->bodega->id]))
         ->assertOk()
-        ->assertSee('Anulada el '.today()->format('d/m'))
+        ->assertSee('Anulada el '.today()->subDay()->format('d/m'))
         ->assertSee("la sustituye {$nueva->numero} (del ".today()->format('d/m').')')
         ->assertSee('PEDIDO CORREGIDO: NO HABÍA EN BODEGA');
 });

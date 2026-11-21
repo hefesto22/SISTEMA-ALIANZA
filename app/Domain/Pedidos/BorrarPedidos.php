@@ -23,12 +23,14 @@ use Illuminate\Support\Facades\DB;
  *    (despacho, correcciones y cajas abiertas) y los renglones que vinieron
  *    después quedan con la existencia que habrían tenido sin ellos.
  *  - Sus devoluciones se borran con ellos (lo que movieron en la bodega
- *    también se deshace); si alguna emitió nota de crédito, no se borran.
+ *    también se deshace); si alguna emitió nota de crédito de un CAI del
+ *    SAR, no se borran (las del CAI de prueba sí).
  *  - Sus facturas se borran solo si son del CAI de prueba y ninguna está en
  *    un periodo de comisiones cerrado. Una factura de un CAI del SAR no se
  *    borra nunca: se anula.
- *  - El CAI de prueba vuelve a su primer número libre y, si ya no queda
- *    ningún pedido, la numeración de los pedidos empieza otra vez en 1.
+ *  - Los CAI de prueba (facturas y notas de crédito) vuelven a su primer
+ *    número libre y, si ya no queda ningún pedido, la numeración de los
+ *    pedidos empieza otra vez en 1.
  *
  * Los clientes, las compras, los costos y los precios no se tocan.
  */
@@ -77,7 +79,7 @@ final class BorrarPedidos
         }
 
         /** @var list<string> $notas */
-        $notas = Devolucion::query()->whereIn('pedido_id', $ids)->whereNotNull('nota_numero')->orderBy('nota_numero')->limit(5)->pluck('nota_numero')->all();
+        $notas = Devolucion::query()->whereIn('pedido_id', $ids)->whereNotNull('nota_numero')->where('cai', '!=', Cai::PRUEBA_NOTAS)->orderBy('nota_numero')->limit(5)->pluck('nota_numero')->all();
 
         if ($notas !== []) {
             return 'Tienen devoluciones con nota de crédito ('.implode(', ', $notas).'): esas no se borran.';
@@ -116,7 +118,10 @@ final class BorrarPedidos
             $movimientos = $this->devolverExistencias($ids);
 
             /** @var list<int> $cais */
-            $cais = Factura::query()->whereIn('pedido_id', $ids)->distinct()->pluck('cai_id')->map(fn (mixed $id): int => (int) $id)->all();
+            $cais = array_values(array_unique(array_map(intval(...), [
+                ...Factura::query()->whereIn('pedido_id', $ids)->distinct()->pluck('cai_id')->all(),
+                ...Devolucion::query()->whereIn('pedido_id', $ids)->whereNotNull('cai_id')->distinct()->pluck('cai_id')->all(),
+            ])));
             $facturas = (int) Factura::query()->whereIn('pedido_id', $ids)->delete();
             $pedidos = (int) Pedido::query()->whereKey($ids)->delete();
 
@@ -172,15 +177,17 @@ final class BorrarPedidos
     }
 
     /**
-     * El CAI de prueba sigue en su primer número libre y, sin pedidos, el
+     * Los CAI de prueba siguen en su primer número libre y, sin pedidos, el
      * próximo vuelve a ser el 1 (COP-000001).
      *
      * @param list<int> $cais
      */
     private function reiniciarNumeros(array $cais): void
     {
-        foreach (Cai::query()->whereKey($cais)->where('cai', Cai::PRUEBA)->lockForUpdate()->get() as $cai) {
-            $ultimo = $cai->facturas()->max('correlativo');
+        foreach (Cai::query()->whereKey($cais)->whereIn('cai', Cai::DE_PRUEBA)->lockForUpdate()->get() as $cai) {
+            $ultimo = $cai->tipo_documento === Cai::NOTA_CREDITO
+                ? Devolucion::query()->where('cai_id', $cai->id)->max('correlativo')
+                : $cai->facturas()->max('correlativo');
             $cai->siguiente = $ultimo === null ? $cai->rango_desde : (int) $ultimo + 1;
             $cai->save();
         }

@@ -363,6 +363,11 @@ final class HistorialDemo
             if (Cai::paraBodega($bodegaId) === null) {
                 throw new ReglaNegocioException('Una bodega con vendedores no tiene CAI para facturar: corra php artisan db:seed --class=FacturacionPruebaSeeder.');
             }
+
+            // Las devoluciones a crédito sacan nota de crédito: sin CAI 07 no se registrarían.
+            if (Configuracion::actual()->notas_credito && Cai::paraBodega($bodegaId, tipo: Cai::NOTA_CREDITO) === null) {
+                throw new ReglaNegocioException('Las notas de crédito están encendidas y una bodega con vendedores no tiene CAI de notas de crédito (tipo 07): corra php artisan db:seed --class=FacturacionPruebaSeeder o apáguelas en Configuración.');
+            }
         }
 
         $this->catalogo();
