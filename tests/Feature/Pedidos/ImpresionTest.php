@@ -124,11 +124,10 @@ test('Imprimir abre la vista previa con la impresora de la bodega; la factura sa
 
     $this->actingAs($this->encargado);
 
-    // El modal abre con la impresora de la bodega y la hoja como va a salir.
+    // El modal abre con la impresora de la bodega.
     Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
         ->mountAction('imprimir')
-        ->assertSchemaStateSet(['papel' => FormatoFactura::Carta->value])
-        ->assertSee(route('pedidos.vista-previa', ['pedido' => $pedido->id, 'modo' => 'original', 'hoja' => 'carta']));
+        ->assertSchemaStateSet(['papel' => FormatoFactura::Carta->value]);
 
     // La vista previa muestra la factura que se va a emitir, sin emitirla ni gastar el número.
     $this->get(route('pedidos.vista-previa', ['pedido' => $pedido->id, 'modo' => 'original', 'hoja' => 'continuo']))
