@@ -63,7 +63,7 @@ enum FormatoFactura: string implements HasDescription, HasLabel
     public static function para(mixed $escogido, ?Bodega $bodega): self
     {
         return (is_string($escogido) ? self::tryFrom($escogido) : null)
-            ?? $bodega?->formato_factura
+            ?? $bodega->formato_factura
             ?? self::Continuo;
     }
 
