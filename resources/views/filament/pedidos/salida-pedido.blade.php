@@ -1,16 +1,23 @@
 {{--
     Validar y Corregir: cuánto sale de cada producto (App\Filament\Schemas\Components\SalidaDePedido).
 
-    Pensado para pedidos largos (30 productos o más): cada producto es una
-    fila corta con lo que sale ("2 CJ12", "3 UN"), el nombre, lo que pidió y,
-    a la derecha, si cambió ("−1 CJ12", "+3 UN", "No sale") y cuánto queda en
-    la bodega. Al tocarla se abre: cuánto hay en la bodega de cada
-    presentación (cajas cerradas y sueltas aparte), cuánto saca este pedido y
-    cuánto quedaría; si las sueltas no alcanzan, qué caja se abre (lo escoge
-    bodega; viene sugerida la más chica que alcanza), y un contador con − y + por cada presentación
-    que se vende (CJ12, CJ8, UN…): se puede mandar menos, más o en otra
-    presentación (unidades sueltas si una caja vino dañada). Arriba, filtros: todos, con cambios, no alcanza. Abajo,
-    un resumen de lo que no va completo, de lo que va de más y de lo agregado.
+    Pensado para leerse rápido, también en pedidos largos (30 productos o más):
+    una lista en tres columnas con encabezado, Sale | Producto | Bodega.
+      - Sale: lo que sale ("2 CJ12", "3 UN").
+      - Producto: el nombre, el código y lo que pidió; si cambió, en palabras
+        debajo ("Falta 1 CJ12", "3 UN de más", "No sale", "Agregado").
+      - Bodega: si alcanza (verde), si hay que abrir una caja (ámbar, "Abrir 1
+        CJ12"), si falta (rojo, "Faltan 3 UN") o, al corregir, si regresa; y
+        debajo lo que hay. En el teléfono va debajo del nombre.
+    Al tocar una fila se abre: si cambió, en palabras; un contador con − y + por cada
+    presentación que se vende (CJ12, CJ8, UN…; se puede mandar menos, más o
+    en otra presentación), con lo que pidió debajo, y "No hay" / "Sí hay"; si las sueltas no alcanzan,
+    un aviso "Se abre 1 caja de 12" con el porqué (bodega puede escoger otra
+    caja; viene la más chica que alcanza); si no alcanza, un aviso en rojo; y
+    la bodega en palabras: lo que hay, lo que mueve al guardar (corregir) y lo
+    que queda. Con más de 6 productos, filtros: todos, con cambios, no
+    alcanza. Abajo, un resumen de lo que no va completo, de lo que va de más,
+    de las cajas que se abren y de lo agregado.
 
     "Agregar otro producto" (arriba): un botón que abre el buscador (así al
     abrir el modal no salta el teclado del teléfono). Busca un producto
@@ -99,19 +106,24 @@
             .sp-fila.sp-fila-nuevo { background: color-mix(in oklab, var(--success-500) 6%, transparent); }
             .sp-fila.sp-abierta { background: color-mix(in oklab, var(--primary-500) 6%, transparent); }
 
-            /* Fila corta: lo que sale, nombre, cambio y lo que queda. Al tocarla se abre. */
-            .sp-corta { display: flex; align-items: center; gap: 0.625rem; width: 100%; padding: 0.6rem 0.875rem; text-align: start; cursor: pointer; }
+            /* Encabezado de la lista y fila corta, en tres columnas: Sale | Producto | Bodega. Al tocar la fila se abre. */
+            .sp-cabeza, .sp-corta { display: grid; grid-template-columns: 4.75rem minmax(0, 1fr) 9.5rem 1rem; grid-template-areas: "cant texto bodega flecha"; align-items: center; column-gap: 0.75rem; padding: 0.6rem 0.875rem; }
+            .sp-cabeza { padding-block: 0.45rem; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--sp-tenue); background: var(--sp-suave); border-bottom: 1px solid var(--sp-linea); }
+            .sp-cabeza-cant { grid-area: cant; }
+            .sp-cabeza-texto { grid-area: texto; }
+            .sp-cabeza-bodega { grid-area: bodega; text-align: end; }
+            .sp-corta { width: 100%; text-align: start; cursor: pointer; }
+            .sp-corta:hover { background: var(--sp-suave); }
             .sp-corta:focus-visible { outline: 2px solid var(--primary-600); outline-offset: -2px; }
-            .sp-cants { flex-shrink: 0; display: grid; gap: 0.2rem; min-width: 3.6rem; }
+            .sp-cants { grid-area: cant; display: grid; gap: 0.2rem; }
             .sp-cant { padding: 0.25rem 0.4rem; border-radius: 0.5rem; text-align: center; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.02em; line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--primary-700); background: color-mix(in oklab, var(--primary-500) 14%, transparent); outline: 1px solid color-mix(in oklab, var(--primary-500) 45%, transparent); }
             .dark .sp-cant { color: var(--primary-200); }
             .sp-cant.sp-cant-caja, .dark .sp-cant.sp-cant-caja { color: #fff; background: var(--primary-600); outline-color: var(--primary-600); }
             .sp-cant.sp-cant-cero, .dark .sp-cant.sp-cant-cero { color: var(--sp-tenue); background: transparent; outline: 1px dashed var(--sp-borde); }
-            .sp-corta-texto { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.1rem; }
+            .sp-corta-texto { grid-area: texto; min-width: 0; display: grid; justify-items: start; gap: 0.15rem; }
             .sp-corta-nombre { font-size: 0.85rem; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
             .sp-fila-nada .sp-corta-nombre { text-decoration: line-through; color: var(--sp-tenue); }
             .sp-corta-meta { font-size: 0.72rem; color: var(--sp-tenue); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .sp-corta-lado { flex-shrink: 0; display: grid; justify-items: end; gap: 0.2rem; text-align: end; }
             .sp-chip { padding: 0.1rem 0.45rem; border-radius: 0.375rem; font-size: 0.7rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--warning-700); background: color-mix(in oklab, var(--warning-500) 14%, transparent); }
             .dark .sp-chip { color: var(--warning-300); }
             .sp-chip.sp-chip-mas { color: var(--info-700); background: color-mix(in oklab, var(--info-500) 14%, transparent); }
@@ -120,33 +132,48 @@
             .dark .sp-chip.sp-chip-nada { color: var(--danger-300); }
             .sp-chip.sp-chip-nuevo { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 14%, transparent); }
             .dark .sp-chip.sp-chip-nuevo { color: var(--success-300); }
-            .sp-corta-quedan { font-size: 0.7rem; color: var(--sp-tenue); white-space: nowrap; font-variant-numeric: tabular-nums; }
-            .sp-corta-quedan.sp-neg { font-weight: 700; color: var(--danger-600); }
-            .dark .sp-corta-quedan.sp-neg { color: var(--danger-400); }
-            .sp-flecha { flex-shrink: 0; width: 1rem; height: 1rem; color: var(--sp-tenue); transition: transform 0.15s ease; }
+
+            /* Bodega: ¿alcanza? (verde), hay que abrir una caja (ámbar), falta (rojo); abajo lo que hay. */
+            .sp-corta-bodega { grid-area: bodega; min-width: 0; display: grid; justify-items: end; gap: 0.15rem; text-align: end; }
+            .sp-b { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
+            .sp-b-icono { flex-shrink: 0; width: 1rem; height: 1rem; }
+            .sp-b-ok { color: var(--success-600); }
+            .dark .sp-b-ok { color: var(--success-400); }
+            .sp-b-abrir { color: var(--warning-600); }
+            .dark .sp-b-abrir { color: var(--warning-400); }
+            .sp-b-falta { color: var(--danger-600); }
+            .dark .sp-b-falta { color: var(--danger-400); }
+            .sp-b-regresa { color: var(--info-600); }
+            .dark .sp-b-regresa { color: var(--info-400); }
+            .sp-b-hay { max-width: 100%; font-size: 0.7rem; color: var(--sp-tenue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+            .sp-flecha { grid-area: flecha; width: 1rem; height: 1rem; color: var(--sp-tenue); transition: transform 0.15s ease; }
             .sp-abierta .sp-flecha { transform: rotate(180deg); }
 
-            /* Fila abierta. */
-            .sp-detalle { display: grid; gap: 0.65rem; padding: 0 0.875rem 0.875rem; }
+            /* Fila abierta: lo que pidió, los contadores, la bodega en palabras y los avisos. */
+            .sp-detalle { display: grid; gap: 0.75rem; padding: 0.15rem 0.875rem 0.9rem; }
             .sp-meta { display: flex; flex-wrap: wrap; gap: 0.1rem 0.65rem; font-size: 0.78rem; color: var(--sp-tenue); }
             .sp-meta strong { font-weight: 700; color: var(--gray-700); }
             .dark .sp-meta strong { color: var(--gray-200); }
 
-            /* En bodega → este pedido → quedan */
-            .sp-bodega { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: 0.5rem; background: var(--sp-suave); outline: 1px solid var(--sp-borde); }
-            .sp-bodega.sp-bodega-sola { grid-template-columns: minmax(0, 1fr); }
-            .sp-dato { min-width: 0; display: grid; gap: 0.05rem; padding: 0.35rem 0.55rem; }
-            .sp-dato + .sp-dato { border-inline-start: 1px solid var(--sp-borde); }
-            .sp-dato span { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--sp-tenue); }
-            .sp-dato strong { font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .sp-dato.sp-sale strong { color: var(--primary-600); }
-            .dark .sp-dato.sp-sale strong { color: var(--primary-400); }
-            .sp-dato.sp-regresa strong { color: var(--success-600); }
-            .dark .sp-dato.sp-regresa strong { color: var(--success-400); }
-            .sp-dato.sp-negativo strong { color: var(--danger-600); }
-            .dark .sp-dato.sp-negativo strong { color: var(--danger-400); }
-            .sp-dato.sp-justo strong { color: var(--warning-600); }
-            .dark .sp-dato.sp-justo strong { color: var(--warning-400); }
+            /* La bodega en palabras: lo que hay, lo que mueve al guardar (corregir) y lo que queda. */
+            .sp-info { display: grid; gap: 0.3rem; margin: 0; padding: 0.55rem 0.7rem; list-style: none; border-radius: 0.5rem; font-size: 0.8rem; color: var(--sp-tenue); background: var(--sp-suave); outline: 1px solid var(--sp-borde); }
+            .sp-info li { display: flex; align-items: baseline; gap: 0.45rem; }
+            .sp-info svg { flex-shrink: 0; align-self: center; width: 0.95rem; height: 0.95rem; }
+            .sp-info b { font-weight: 700; color: var(--gray-800); font-variant-numeric: tabular-nums; }
+            .dark .sp-info b { color: var(--gray-100); }
+
+            /* Avisos de la fila abierta: se abre una caja (ámbar), no alcanza (rojo). */
+            .sp-nota { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.8rem; line-height: 1.4; }
+            .sp-nota > svg { flex-shrink: 0; width: 1.15rem; height: 1.15rem; margin-top: 0.05rem; }
+            .sp-nota-texto { display: grid; gap: 0.2rem; min-width: 0; }
+            .sp-nota-texto strong { font-size: 0.85rem; font-weight: 800; }
+            .sp-nota-abrir { color: var(--warning-800); background: color-mix(in oklab, var(--warning-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--warning-500) 40%, transparent); }
+            .dark .sp-nota-abrir { color: var(--warning-300); }
+            .sp-nota-falta { color: var(--danger-800); background: color-mix(in oklab, var(--danger-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--danger-500) 40%, transparent); }
+            .dark .sp-nota-falta { color: var(--danger-300); }
+            .sp-otra-caja { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.15rem; font-weight: 600; }
+            .sp-otra-caja select { height: 2rem; padding: 0 1.75rem 0 0.5rem; border-radius: 0.4rem; border: 0; font: inherit; font-weight: 700; color: inherit; background-color: #fff; outline: 1px solid color-mix(in oklab, var(--warning-500) 45%, transparent); }
+            .dark .sp-otra-caja select { background-color: var(--gray-900); }
 
             .sp-estado { font-size: 0.78rem; font-weight: 700; color: var(--warning-600); }
             .dark .sp-estado { color: var(--warning-400); }
@@ -156,26 +183,20 @@
             .dark .sp-estado.sp-estado-mas { color: var(--info-400); }
             .sp-estado.sp-estado-nuevo { color: var(--success-700); }
             .dark .sp-estado.sp-estado-nuevo { color: var(--success-400); }
-            .sp-no-alcanza { font-size: 0.75rem; font-weight: 600; color: var(--danger-600); }
 
-            /* Las sueltas no alcanzan: qué caja se abre. */
-            .sp-abrir { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; padding: 0.5rem 0.65rem; border-radius: 0.5rem; font-size: 0.8rem; color: var(--warning-800); background: color-mix(in oklab, var(--warning-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--warning-500) 40%, transparent); }
-            .dark .sp-abrir { color: var(--warning-300); }
-            .sp-abrir strong { font-weight: 800; font-variant-numeric: tabular-nums; }
-            .sp-abrir select { height: 2rem; padding: 0 1.75rem 0 0.5rem; border-radius: 0.4rem; border: 0; font: inherit; font-weight: 700; color: inherit; background-color: #fff; outline: 1px solid color-mix(in oklab, var(--warning-500) 45%, transparent); }
-            .dark .sp-abrir select { background-color: var(--gray-900); }
-            .sp-abrir-control { display: inline-flex; align-items: center; gap: 0.4rem; }
-            .dark .sp-no-alcanza { color: var(--danger-400); }
-
-            /* Cajas y unidades, cada una con su − y + (como en la preventa). */
-            .sp-controles { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6rem 1rem; }
-            .sp-cantidad { display: grid; gap: 0.25rem; }
-            .sp-cantidad-etiqueta { display: flex; align-items: baseline; gap: 0.4rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--sp-tenue); }
-            .sp-cantidad-etiqueta em { font-style: normal; font-weight: 600; text-transform: none; letter-spacing: 0; }
+            /* Cuánto sale: cajas y unidades, cada una con su − y + (como en la preventa); abajo lo que pidió. */
+            .sp-controles { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem; }
+            .sp-cantidad { display: grid; justify-items: center; gap: 0.25rem; }
+            .sp-cantidad-etiqueta { font-size: 0.72rem; font-weight: 700; color: var(--gray-700); }
+            .dark .sp-cantidad-etiqueta { color: var(--gray-200); }
+            .sp-pidio { font-size: 0.7rem; color: var(--sp-tenue); font-variant-numeric: tabular-nums; }
+            .sp-cantidad.sp-cambiada .sp-pidio { font-weight: 700; color: var(--warning-600); }
+            .dark .sp-cantidad.sp-cambiada .sp-pidio { color: var(--warning-400); }
             .sp-stepper { display: inline-flex; align-items: center; border-radius: 0.5rem; background: #fff; outline: 1px solid rgb(3 7 18 / 0.12); }
             .dark .sp-stepper { background: rgb(255 255 255 / 0.03); outline-color: rgb(255 255 255 / 0.15); }
             .sp-stepper:focus-within { outline: 2px solid var(--primary-600); }
             .sp-stepper.sp-stepper-caja { outline-color: color-mix(in oklab, var(--primary-500) 55%, transparent); }
+            .sp-cantidad.sp-cambiada .sp-stepper { outline: 2px solid color-mix(in oklab, var(--warning-500) 70%, transparent); }
             .sp-paso { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; color: var(--gray-600); }
             .dark .sp-paso { color: var(--gray-300); }
             .sp-paso:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -207,10 +228,12 @@
             .sp-incompletas.sp-agregados { color: var(--success-800); background: color-mix(in oklab, var(--success-500) 10%, transparent); outline-color: color-mix(in oklab, var(--success-500) 40%, transparent); }
             .dark .sp-incompletas.sp-agregados { color: var(--success-300); }
 
-            /* Teléfono: un poco menos de relleno. */
+            /* Teléfono: la bodega va debajo del nombre (no cabe la tercera columna). */
             @media (max-width: 639.98px) {
-                .sp-corta { padding: 0.55rem 0.75rem; gap: 0.5rem; }
-                .sp-detalle { padding: 0 0.75rem 0.8rem; }
+                .sp-cabeza, .sp-corta { grid-template-columns: 4.25rem minmax(0, 1fr) 1rem; grid-template-areas: "cant texto flecha" "cant bodega flecha"; column-gap: 0.6rem; row-gap: 0.2rem; padding-inline: 0.75rem; }
+                .sp-cabeza-bodega { display: none; }
+                .sp-corta-bodega { display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.5rem; text-align: start; }
+                .sp-detalle { padding: 0.15rem 0.75rem 0.8rem; }
             }
         </style>
     @endonce
@@ -445,14 +468,6 @@
                 return plural.charAt(0).toUpperCase() + plural.slice(1)
             },
 
-            {{-- "1 caja de 12 y 3 unidades". --}}
-            pidio(grupo) {
-                return this.filasDe(grupo)
-                    .filter((fila) => this.n(fila.cantidad) > 0)
-                    .map((fila) => this.palabras(fila.cantidad, fila))
-                    .join(' y ')
-            },
-
             {{-- "2 CJ12 + 3 UN" (en la fila corta). --}}
             pidioCorto(grupo) {
                 return this.filasDe(grupo)
@@ -479,7 +494,7 @@
                 this.ajustarAperturas()
             },
 
-            {{-- A la derecha de la fila corta: "−1 CJ12", "+3 UN", "No sale", "Agregado"; vacío si sale como se pidió. --}}
+            {{-- Debajo del nombre: "Falta 1 CJ12", "3 UN de más", "No sale", "Agregado"; vacío si sale como se pidió. --}}
             cambioCorto(grupo) {
                 if (! this.difiere(grupo)) return ''
                 if (this.total(grupo) === 0) return 'No sale'
@@ -489,10 +504,11 @@
                     .filter((fila) => this.n(fila.sale) !== this.n(fila.cantidad))
                     .map((fila) => {
                         const diferencia = this.n(fila.sale) - this.n(fila.cantidad)
+                        const cuantas = Math.abs(diferencia) + ' ' + this.sigla(fila)
 
-                        return (diferencia > 0 ? '+' : '−') + Math.abs(diferencia) + ' ' + this.sigla(fila)
+                        return diferencia > 0 ? cuantas + ' de más' : (diferencia === -1 ? 'Falta ' : 'Faltan ') + cuantas
                     })
-                    .join(' ')
+                    .join(' · ')
             },
 
             claseCambio(grupo) {
@@ -620,13 +636,100 @@
                 return this.porPresentacion(grupo, (fila) => this.n(fila.hay_pres))
             },
 
-            {{-- "−2 CJ48 · −5 UN" (sale) o "+1 CJ48" (regresa al corregir). --}}
-            cambioTexto(grupo) {
-                return this.porPresentacion(grupo, (fila) => -this.cambioDe(fila)).replace(/(^|· )(\d)/g, '$1+$2').replace(/-/g, '−')
+            {{-- "15 cajas de 12 y 2 unidades" (las que dan 0 o menos no salen; "nada" si ninguna). --}}
+            enPalabras(grupo, cuanto) {
+                const partes = this.filasDe(grupo)
+                    .map((fila) => [cuanto(fila), fila])
+                    .filter(([cantidad]) => cantidad > 0)
+                    .map(([cantidad, fila]) => this.palabras(cantidad, fila))
+
+                if (partes.length === 0) return 'nada'
+
+                return partes.length === 1 ? partes[0] : partes.slice(0, -1).join(', ') + ' y ' + partes[partes.length - 1]
             },
 
-            quedanTexto(grupo) {
-                return this.porPresentacion(grupo, (fila) => this.quedanDe(grupo, fila))
+            {{-- Al corregir: "regresan 2 unidades a la bodega", "salen 1 caja de 12 más". --}}
+            movimientoPalabras(grupo) {
+                const regresan = this.enPalabras(grupo, (fila) => -this.cambioDe(fila))
+                const salen = this.enPalabras(grupo, (fila) => this.cambioDe(fila))
+                const partes = []
+
+                if (regresan !== 'nada') partes.push('regresan ' + regresan + ' a la bodega')
+                if (salen !== 'nada') partes.push('salen ' + salen + ' más')
+
+                return partes.join(' y ')
+            },
+
+            {{-- La columna Bodega: si alcanza (verde), si hay que abrir una caja (ámbar), si falta (rojo) o, al corregir, si regresa. --}}
+            bodegaClase(grupo) {
+                if (! grupo.info.mueve) return ''
+                if (this.noAlcanza(grupo)) return 'sp-b-falta'
+                if (this.aperturaTexto(grupo) !== '') return 'sp-b-abrir'
+                if (! this.paraValidar && this.cambio(grupo) < 0) return 'sp-b-regresa'
+                if (this.total(grupo) > 0 && (this.paraValidar || this.cambio(grupo) > 0)) return 'sp-b-ok'
+
+                return ''
+            },
+
+            bodegaTexto(grupo) {
+                const faltan = this.filasDe(grupo).filter((fila) => this.cambioDe(fila) > 0 && this.quedanDe(grupo, fila) < 0)
+
+                switch (this.bodegaClase(grupo)) {
+                    case 'sp-b-falta': return (faltan.length === 1 && this.quedanDe(grupo, faltan[0]) === -1 ? 'Falta ' : 'Faltan ') + this.faltaTexto(grupo)
+                    case 'sp-b-abrir': return 'Abrir ' + this.cajasPorAbrir(grupo) + ' ' + (this.cajaElegida(grupo)?.sigla ?? '')
+                    case 'sp-b-regresa': return 'Regresa'
+                    case 'sp-b-ok': return 'Alcanza'
+                    default: return ''
+                }
+            },
+
+            {{-- Debajo: "hay 15 CJ12 · 2 UN" o "no hay". --}}
+            hayCorto(grupo) {
+                const hay = this.enBodegaTexto(grupo)
+
+                return hay === '0' ? 'no hay' : 'hay ' + hay
+            },
+
+            {{-- "En bodega hay <b>15 cajas de 12 y 2 unidades</b>." (el texto viene de los datos: se escapa). --}}
+            frase(inicio, sinNada, texto) {
+                if (texto === 'nada') return sinNada + '.'
+
+                const seguro = String(texto).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+                return inicio + ' <b>' + seguro + '</b>.'
+            },
+
+            {{-- "Después queda 1 caja de 12" (una sola cosa, una) o "quedan". --}}
+            despuesQueda(grupo) {
+                const quedan = this.filasDe(grupo).map((fila) => this.quedanDe(grupo, fila)).filter((cantidad) => cantidad > 0)
+
+                return quedan.length === 1 && quedan[0] === 1
+            },
+
+            mayuscula(texto) {
+                texto = String(texto ?? '')
+
+                return texto.charAt(0).toUpperCase() + texto.slice(1)
+            },
+
+            {{-- "Solo hay 2 unidades sueltas y salen 5." / "No hay unidades sueltas y salen 5." --}}
+            razonAbrir(grupo) {
+                const base = this.baseDe(grupo)
+
+                if (! base) return ''
+
+                const hay = Math.max(0, this.n(base.hay_pres))
+                const sueltas = hay === 0 ? 'No hay ' + base.plural + ' sueltas' : 'Solo hay ' + this.palabras(hay, base) + ' sueltas'
+
+                return sueltas + ' y salen ' + this.cambioDe(base) + (this.paraValidar ? '' : ' más') + '.'
+            },
+
+            {{-- "faltan 3 unidades" / "falta 1 caja de 12". --}}
+            faltaFrase(grupo) {
+                const faltan = this.filasDe(grupo).filter((fila) => this.cambioDe(fila) > 0 && this.quedanDe(grupo, fila) < 0)
+                const texto = faltan.map((fila) => this.palabras(-this.quedanDe(grupo, fila), fila)).join(' y ')
+
+                return (faltan.length === 1 && this.quedanDe(grupo, faltan[0]) === -1 ? 'falta ' : 'faltan ') + texto
             },
 
             {{-- Lo que no alcanza: las presentaciones que quedarían en negativo por este pedido. --}}
@@ -732,12 +835,12 @@
                 if (mas > 0) partes.push(mas === 1 ? '1 va de más' : mas + ' van de más')
                 if (nuevos > 0) partes.push(nuevos === 1 ? '1 agregado' : nuevos + ' agregados')
 
-                return partes.length === 0 ? 'Sale como se pidió' : partes.join(' · ')
+                return partes.length === 0 ? 'Todo sale como se pidió' : partes.join(' · ')
             },
         }"
     >
         <div class="sp-resumen">
-            <span x-text="grupos().length === 1 ? '1 producto' : grupos().length + ' productos'">{{ $productos === 1 ? '1 producto' : $productos.' productos' }}</span>
+            <span x-text="(grupos().length === 1 ? '1 producto' : grupos().length + ' productos') + ' · toque uno para cambiar lo que sale'">{{ $productos === 1 ? '1 producto' : $productos.' productos' }} · toque uno para cambiar lo que sale</span>
             <span
                 x-bind:class="incompletas().length === 0 && deMas().length === 0 && agregados().length === 0 ? 'sp-resumen-ok' : 'sp-resumen-falta'"
                 x-text="textoResumen()"
@@ -808,16 +911,22 @@
         </div>
 
         {{-- Con muchos productos: ver solo los que cambiaron o los que no alcanzan. --}}
-        <div class="sp-filtros" x-show="grupos().length > 1">
+        <div class="sp-filtros" x-show="grupos().length > 6">
             <button type="button" class="sp-filtro" x-bind:class="{ 'sp-activo': filtro === 'todos' }" x-on:click="filtro = 'todos'">Todos <b x-text="grupos().length"></b></button>
             <button type="button" class="sp-filtro" x-bind:class="{ 'sp-activo': filtro === 'cambios' }" x-on:click="filtro = 'cambios'">Con cambios <b x-text="grupos().filter((grupo) => difiere(grupo)).length"></b></button>
             <button type="button" class="sp-filtro" x-show="filtro === 'alcance' || grupos().some((grupo) => noAlcanza(grupo))" x-bind:class="{ 'sp-activo': filtro === 'alcance' }" x-on:click="filtro = 'alcance'">No alcanza <b x-text="grupos().filter((grupo) => noAlcanza(grupo)).length"></b></button>
         </div>
 
         <ul class="sp-lista">
+            <li class="sp-cabeza" aria-hidden="true" x-show="gruposVisibles().length > 0">
+                <span class="sp-cabeza-cant">Sale</span>
+                <span class="sp-cabeza-texto">Producto</span>
+                <span class="sp-cabeza-bodega" x-show="grupos().some((grupo) => grupo.info.mueve)">Bodega</span>
+            </li>
+
             <template x-for="grupo in gruposVisibles()" x-bind:key="grupo.id">
                 <li class="sp-fila" x-bind:class="claseGrupo(grupo)" x-bind:data-producto="grupo.id">
-                    {{-- Fila corta --}}
+                    {{-- Fila corta: lo que sale | el producto (y si cambió) | si alcanza en la bodega. --}}
                     <button type="button" class="sp-corta" x-on:click="abrir(grupo)" x-bind:aria-expanded="abierta === grupo.id">
                         <span class="sp-cants">
                             <template x-for="fila in filasDe(grupo).filter((fila) => n(fila.sale) > 0)" x-bind:key="'cant-' + fila.presentacion_id">
@@ -829,62 +938,28 @@
                         <span class="sp-corta-texto">
                             <span class="sp-corta-nombre" x-text="grupo.info.descripcion ?? grupo.info.producto"></span>
                             <span class="sp-corta-meta" x-text="(grupo.info.codigo ? grupo.info.codigo + ' · ' : '') + (nuevo(grupo) ? 'no venía en el pedido' : 'pidió ' + pidioCorto(grupo))"></span>
+                            <span class="sp-chip" x-show="cambioCorto(grupo) !== ''" x-bind:class="claseCambio(grupo)" x-text="cambioCorto(grupo)"></span>
                         </span>
 
-                        <span class="sp-corta-lado">
-                            <span class="sp-chip" x-show="cambioCorto(grupo) !== ''" x-bind:class="claseCambio(grupo)" x-text="cambioCorto(grupo)"></span>
-                            <span
-                                class="sp-corta-quedan"
-                                x-show="grupo.info.mueve"
-                                x-bind:class="{ 'sp-neg': noAlcanza(grupo) }"
-                                x-text="(aperturaTexto(grupo) !== '' ? aperturaTexto(grupo) + ' · ' : '') + (noAlcanza(grupo) ? 'no alcanza: faltan ' + faltaTexto(grupo) : 'quedan ' + quedanTexto(grupo))"
-                            ></span>
+                        <span class="sp-corta-bodega" x-show="grupo.info.mueve">
+                            <span class="sp-b" x-show="bodegaClase(grupo) !== ''" x-bind:class="bodegaClase(grupo)">
+                                {{ svg('heroicon-m-check-circle', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-ok'"]) }}
+                                {{ svg('heroicon-m-cube', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-abrir'"]) }}
+                                {{ svg('heroicon-m-exclamation-triangle', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-falta'"]) }}
+                                {{ svg('heroicon-m-arrow-uturn-left', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-regresa'"]) }}
+                                <span x-text="bodegaTexto(grupo)"></span>
+                            </span>
+                            <span class="sp-b-hay" x-text="hayCorto(grupo)" x-bind:title="'En bodega: ' + enPalabras(grupo, (fila) => n(fila.hay_pres))"></span>
                         </span>
 
                         <svg class="sp-flecha" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
                     </button>
 
-                    {{-- Fila abierta --}}
+                    {{-- Fila abierta: si cambió (en palabras), cuánto sale (contadores, con lo que pidió), los avisos y la bodega en palabras. --}}
                     <div class="sp-detalle" x-show="abierta === grupo.id">
-                        <div class="sp-meta">
-                            <span x-show="! nuevo(grupo)">Pidió <strong x-text="pidio(grupo)"></strong></span>
-                            <span x-show="nuevo(grupo)"><strong>No venía en el pedido:</strong> lo agrega bodega.</span>
+                        <div class="sp-meta" x-show="nuevo(grupo)">
+                            <span><strong>No venía en el pedido:</strong> lo agrega bodega.</span>
                         </div>
-
-                        {{-- Del producto en la bodega del pedido. --}}
-                        <div class="sp-bodega" x-bind:class="{ 'sp-bodega-sola': ! grupo.info.mueve }">
-                            <div class="sp-dato">
-                                <span>En bodega</span>
-                                <strong x-text="enBodegaTexto(grupo)"></strong>
-                            </div>
-                            <div class="sp-dato" x-show="grupo.info.mueve" x-bind:class="cambio(grupo) < 0 ? 'sp-regresa' : 'sp-sale'">
-                                <span x-text="paraValidar ? 'Este pedido' : (cambio(grupo) < 0 ? 'Regresan' : (cambio(grupo) > 0 ? 'Salen más' : 'Sin cambio'))"></span>
-                                <strong x-text="cambioTexto(grupo)"></strong>
-                            </div>
-                            <div class="sp-dato" x-show="grupo.info.mueve" x-bind:class="{ 'sp-negativo': noAlcanza(grupo), 'sp-justo': ! noAlcanza(grupo) && quedanTexto(grupo) === '0' }">
-                                <span>Quedan</span>
-                                <strong x-text="quedanTexto(grupo)"></strong>
-                            </div>
-                        </div>
-
-                        {{-- Las sueltas no alcanzan: bodega escoge qué caja abre. --}}
-                        <div class="sp-abrir" x-show="faltanSueltas(grupo) > 0" x-cloak>
-                            <span x-text="'Faltan ' + faltanSueltas(grupo) + ' ' + (baseDe(grupo)?.sigla ?? 'UN') + ' sueltas:'"></span>
-                            <template x-if="opcionesAbrir(grupo).length > 0">
-                                <span class="sp-abrir-control">
-                                    <span>se abre<span x-show="cajasPorAbrir(grupo) !== 1">n</span></span>
-                                    <strong x-text="cajasPorAbrir(grupo)"></strong>
-                                    <select x-on:change="elegirCaja(grupo, $event.target.value)" aria-label="Qué caja se abre">
-                                        <template x-for="caja in opcionesAbrir(grupo)" x-bind:key="'abrir-' + caja.presentacion_id">
-                                            <option x-bind:value="caja.presentacion_id" x-bind:selected="n(caja.presentacion_id) === n(baseDe(grupo)?.abrir_de)" x-text="caja.sigla + ' (hay ' + libres(caja) + ')'"></option>
-                                        </template>
-                                    </select>
-                                </span>
-                            </template>
-                            <span x-show="opcionesAbrir(grupo).length === 0">no hay cajas cerradas para abrir.</span>
-                        </div>
-
-                        <div class="sp-no-alcanza" x-show="noAlcanza(grupo)" x-text="'No alcanza: faltan ' + faltaTexto(grupo) + ' en la bodega'"></div>
 
                         <template x-for="fila in filasDe(grupo)" x-bind:key="'estado-' + fila.presentacion_id">
                             <div class="sp-estado" x-bind:class="claseEstado(fila)" x-show="estado(fila) !== ''" x-text="estado(fila)"></div>
@@ -892,11 +967,8 @@
 
                         <div class="sp-controles">
                             <template x-for="fila in filasDe(grupo)" x-bind:key="'cantidad-' + fila.presentacion_id">
-                                <div class="sp-cantidad">
-                                    <span class="sp-cantidad-etiqueta">
-                                        <span x-text="titulo(fila)"></span>
-                                        <em x-text="n(fila.cantidad) > 0 ? 'pidió ' + n(fila.cantidad) : 'no pidió'"></em>
-                                    </span>
+                                <div class="sp-cantidad" x-bind:class="{ 'sp-cambiada': n(fila.sale) !== n(fila.cantidad) }">
+                                    <span class="sp-cantidad-etiqueta" x-text="titulo(fila)"></span>
                                     <div class="sp-stepper" x-bind:class="{ 'sp-stepper-caja': ! fila.es_base }">
                                         <button type="button" class="sp-paso" x-bind:aria-label="'Una menos: ' + fila.nombre" x-on:click="mover(fila, -1)" x-bind:disabled="n(fila.sale) <= 0">{{ svg('heroicon-m-minus') }}</button>
                                         <input
@@ -912,6 +984,7 @@
                                         >
                                         <button type="button" class="sp-paso" x-bind:aria-label="'Una más: ' + fila.nombre" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= maximo">{{ svg('heroicon-m-plus') }}</button>
                                     </div>
+                                    <span class="sp-pidio" x-text="n(fila.cantidad) > 0 ? 'pidió ' + n(fila.cantidad) : 'no pidió'"></span>
                                 </div>
                             </template>
 
@@ -923,6 +996,40 @@
                                 <button type="button" class="sp-enlace" x-show="grupos().length > 1" x-on:click="abierta = null">Listo</button>
                             </div>
                         </div>
+
+                        {{-- Las sueltas no alcanzan: se abre una caja (bodega puede escoger cuál). --}}
+                        <div class="sp-nota sp-nota-abrir" x-show="cajasPorAbrir(grupo) > 0" x-cloak>
+                            {{ svg('heroicon-m-cube') }}
+                            <div class="sp-nota-texto">
+                                <strong x-text="(cajasPorAbrir(grupo) === 1 ? 'Se abre ' : 'Se abren ') + palabras(cajasPorAbrir(grupo), cajaElegida(grupo) ?? {})"></strong>
+                                <span x-text="razonAbrir(grupo)"></span>
+                                <label class="sp-otra-caja" x-show="opcionesAbrir(grupo).length > 1">
+                                    <span>Caja que se abre:</span>
+                                    <select x-on:change="elegirCaja(grupo, $event.target.value)">
+                                        <template x-for="caja in opcionesAbrir(grupo)" x-bind:key="'abrir-' + caja.presentacion_id">
+                                            <option x-bind:value="caja.presentacion_id" x-bind:selected="n(caja.presentacion_id) === n(baseDe(grupo)?.abrir_de)" x-text="mayuscula(caja.singular) + ' (hay ' + libres(caja) + ')'"></option>
+                                        </template>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+
+                        {{-- No alcanza en la bodega. --}}
+                        <div class="sp-nota sp-nota-falta" x-show="noAlcanza(grupo)" x-cloak>
+                            {{ svg('heroicon-m-exclamation-triangle') }}
+                            <div class="sp-nota-texto">
+                                <strong x-text="'No alcanza: ' + faltaFrase(grupo)"></strong>
+                                <span x-show="faltanSueltas(grupo) > 0 && opcionesAbrir(grupo).length === 0">No hay cajas cerradas para abrir.</span>
+                                <span>{{ $controlar ? 'Baje lo que sale o toque "No hay".' : 'En el sistema la bodega quedaría en negativo.' }}</span>
+                            </div>
+                        </div>
+
+                        {{-- La bodega en palabras. --}}
+                        <ul class="sp-info" x-show="grupo.info.mueve">
+                            <li>{{ svg('heroicon-m-building-storefront') }}<span x-html="frase('En bodega hay', 'En bodega no hay nada', enPalabras(grupo, (fila) => n(fila.hay_pres)))"></span></li>
+                            <li x-show="! paraValidar && movimientoPalabras(grupo) !== ''">{{ svg('heroicon-m-arrows-right-left') }}<span>Al guardar <b x-text="movimientoPalabras(grupo)"></b>.</span></li>
+                            <li x-show="! noAlcanza(grupo)">{{ svg('heroicon-m-arrow-right') }}<span x-html="frase(despuesQueda(grupo) ? 'Después queda' : 'Después quedan', 'Después no queda nada', enPalabras(grupo, (fila) => quedanDe(grupo, fila)))"></span></li>
+                        </ul>
                     </div>
                 </li>
             </template>
@@ -952,7 +1059,7 @@
             <strong>Cajas que se abren</strong>
             <ul>
                 <template x-for="grupo in aperturas()" x-bind:key="'abre-' + grupo.id">
-                    <li><b x-text="grupo.info.descripcion ?? grupo.info.producto"></b> — <span x-text="aperturaTexto(grupo) + ' (sus unidades pasan a las sueltas)'"></span></li>
+                    <li><b x-text="grupo.info.descripcion ?? grupo.info.producto"></b> — <span x-text="(cajasPorAbrir(grupo) === 1 ? 'se abre ' : 'se abren ') + palabras(cajasPorAbrir(grupo), cajaElegida(grupo) ?? {})"></span></li>
                 </template>
             </ul>
         </div>

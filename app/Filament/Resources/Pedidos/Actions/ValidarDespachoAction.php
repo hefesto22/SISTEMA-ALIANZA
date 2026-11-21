@@ -71,13 +71,13 @@ final class ValidarDespachoAction
         $configuracion = Configuracion::actual();
 
         $precio = $configuracion->precio_al_despachar === PrecioAlDespachar::Pedido
-            ? 'Se cobra el precio del pedido (el de hoy si ese quedaría por debajo del costo)'
+            ? 'Se cobra el precio del pedido (el de hoy si quedaría bajo el costo)'
             : 'Se cobran los precios de hoy';
 
         $existencia = $configuracion->controlar_existencias
-            ? ' "Sale" ya viene con lo que alcanza en la bodega.'
+            ? ' Ya viene ajustado a lo que hay.'
             : '';
 
-        return "Cambie las cajas y unidades que salen con − y +: \"No hay\" si no hay, menos si no alcanzó, más o en la otra unidad si hace falta (unidades sueltas si una caja vino dañada). Si las unidades sueltas no alcanzan, escoja qué caja se abre. Con \"Agregar otro producto\" se manda uno que no venía en el pedido.{$existencia} {$precio}; lo que sale se descuenta de la bodega (cada presentación de la suya) y el pedido pasa a Por imprimir.";
+        return "Revise lo que sale de cada producto; si algo no hay o no alcanza, tóquelo y cámbielo.{$existencia} {$precio}. Al validar se descuenta de la bodega y el pedido pasa a Por imprimir.";
     }
 }
