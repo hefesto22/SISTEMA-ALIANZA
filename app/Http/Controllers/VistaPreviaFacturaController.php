@@ -84,7 +84,7 @@ class VistaPreviaFacturaController extends Controller
                 continue;
             }
 
-            $cai = $caiDe[$pedido->bodega_id] ??= Cai::paraBodega($pedido->bodega_id)?->id ?? 0;
+            $cai = $caiDe[$pedido->bodega_id] ??= Cai::paraBodega($pedido->bodega_id)->id ?? 0;
             $borrador = EmitirFactura::borrador($pedido, $usados[$cai] ?? 0);
 
             if ($borrador !== null) {
