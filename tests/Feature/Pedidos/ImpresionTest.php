@@ -104,11 +104,11 @@ test('el botón Imprimir emite y cuenta; la hoja firmada sale original y sin fir
         ->assertDontSee('SIN VALOR FISCAL');
 
     // Abrir la hoja no cambia nada; sin firma (o con la firma alterada) sale como copia.
-    $this->get(route('pedidos.imprimir', $pedido))->assertOk()->assertSee('COPIA · SIN VALOR FISCAL');
+    $this->get(route('pedidos.imprimir', $pedido))->assertOk()->assertSeeText('COPIA · SIN VALOR FISCAL');
     $this->get(route('pedidos.imprimir-lote', ['ids' => $pedido->id, 'originales' => $pedido->id]))
         ->assertOk()
-        ->assertSee('COPIA · SIN VALOR FISCAL');
-    $this->get(str_replace('originales='.$pedido->id, 'originales=0', (string) $url))->assertOk()->assertSee('COPIA · SIN VALOR FISCAL');
+        ->assertSeeText('COPIA · SIN VALOR FISCAL');
+    $this->get(str_replace('originales='.$pedido->id, 'originales=0', (string) $url))->assertOk()->assertSeeText('COPIA · SIN VALOR FISCAL');
 
     expect($pedido->fresh()?->impresiones)->toBe(1)
         ->and($factura->fresh()?->impresiones)->toBe(1)
@@ -134,11 +134,11 @@ test('copia sale como reimpresión; "No salió" repite la hoja igual sin contarl
         ->and($factura->reintento_por)->toBe($this->encargado->id);
 
     $copia = imprimir($pedido, $this->encargado, ModoImpresion::Copia);
-    $this->get($copia->url())->assertOk()->assertSee('REIMPRESIÓN · COPIA');
+    $this->get($copia->url())->assertOk()->assertSeeText('REIMPRESIÓN · COPIA');
 
     // Si la copia no salió, sale otra copia (no un original).
     $copiaOtraVez = imprimir($pedido, $this->encargado, ModoImpresion::NoSalio);
-    $this->get($copiaOtraVez->url())->assertOk()->assertSee('REIMPRESIÓN · COPIA');
+    $this->get($copiaOtraVez->url())->assertOk()->assertSeeText('REIMPRESIÓN · COPIA');
 
     expect($factura->fresh()?->impresiones)->toBe(2)
         ->and($factura->fresh()?->reintentos)->toBe(2)
@@ -310,7 +310,7 @@ test('se marcan varias y se imprimen de un solo: las por imprimir salen original
             return is_string($url);
         });
 
-    $this->get((string) $url)->assertOk()->assertSee('REIMPRESIÓN · COPIA');
+    $this->get((string) $url)->assertOk()->assertSeeText('REIMPRESIÓN · COPIA');
 
     expect(Factura::query()->where('pedido_id', $impreso->id)->sole()->impresiones)->toBe(2)
         ->and(Factura::query()->where('pedido_id', $porImprimir->id)->sole()->impresiones)->toBe(1)

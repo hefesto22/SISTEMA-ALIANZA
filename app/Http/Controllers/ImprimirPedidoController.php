@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Enums\FormatoFactura;
 use App\Models\DatosFiscales;
 use App\Models\Pedido;
 use Illuminate\Http\Request;
@@ -44,6 +45,8 @@ class ImprimirPedidoController extends Controller
             'fiscales'   => DatosFiscales::actual(),
             'firmado'    => false,
             'originales' => [],
+            'formato'    => FormatoFactura::para($request->query('hoja'), $pedido->bodega),
+            'enlaces'    => FormatoFactura::enlaces($request),
         ]);
     }
 }

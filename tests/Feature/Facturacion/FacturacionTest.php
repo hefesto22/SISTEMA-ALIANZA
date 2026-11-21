@@ -3,17 +3,21 @@
 declare(strict_types=1);
 
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Facturacion\RenglonFactura;
 use App\Domain\Pedidos\CorregirPedido;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
 use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
+use App\Enums\FormatoFactura;
 use App\Enums\ModoImpresion;
 use App\Enums\Rol;
+use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
 use App\Filament\Resources\Cais\Pages\ManageCais;
 use App\Filament\Resources\Facturas\Pages\ListFacturas;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
+use App\Http\Controllers\ImprimirPedidoController;
 use App\Models\Bodega;
 use App\Models\Cai;
 use App\Models\Cliente;
@@ -22,6 +26,7 @@ use App\Models\Factura;
 use App\Models\Municipio;
 use App\Models\Pedido;
 use App\Models\Producto;
+use App\Models\Promocion;
 use App\Models\Ruta;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -101,11 +106,11 @@ test('al imprimir se emite la factura con el CAI de la bodega; las copias usan e
         ->assertSee('FACTURA')
         ->assertSee('RUTA 001 SRC')
         ->assertSee('CONTADO')
-        ->assertSee('Datos del Adquiriente Exonerado')
+        ->assertSee('Adquiriente Exonerado')
         ->assertSee('Fin del Detalle de la Factura')
         ->assertSee('000-001-01-00000120')
         ->assertSee($cai->cai)
-        ->assertSee('del 000-001-01-00000120 al 000-001-01-00000130')
+        ->assertSeeText('del 000-001-01-00000120 al 000-001-01-00000130')
         ->assertSee($cai->fecha_limite->format('d/m/Y'))
         ->assertSee('05019000123456')
         ->assertSee('ALIANZA HOZANA')
@@ -406,4 +411,86 @@ test('la ruta de la factura es la del vendedor que lleva el municipio del client
 
     Ruta::factory()->cubre($municipio)->create(['bodega_id' => $this->cop->id, 'nombre' => 'RUTA B'])->vendedores()->attach($vendedor);
     expect(Ruta::delPedido($pedido->fresh() ?? $pedido)?->nombre)->toBe('RUTA B');
+});
+
+test('la factura sale en el papel de la bodega (media carta para la LX-350 o carta); ?hoja= lo cambia y el original lo sigue siendo', function (): void {
+    Cai::factory()->para($this->cop)->rango(1, 50)->create();
+    $pedido = pedidoValidado($this->cop, $this->vendedores['COP'], $this->gravado, $this->exento);
+
+    $this->actingAs($this->encargados['COP']);
+    $url = imprimir($pedido, $this->encargados['COP'], ModoImpresion::Originales)->url();
+
+    // De fábrica: papel continuo media carta, con los botones para cambiarlo.
+    $this->get($url)
+        ->assertOk()
+        ->assertSee('size: 8.5in 5.5in', false)
+        ->assertSee('hoja=carta', false)
+        ->assertDontSee('REIMPRESIÓN')
+        ->assertDontSee('SIN VALOR FISCAL');
+
+    // Cambiado en la hoja: la firma no cuenta ?hoja=, sigue saliendo como original.
+    $this->get($url.'&hoja=carta')
+        ->assertOk()
+        ->assertSee('size: 8.5in 11in', false)
+        ->assertDontSee('REIMPRESIÓN')
+        ->assertDontSee('SIN VALOR FISCAL');
+
+    // Bodega con impresora normal: carta sin escoger nada.
+    $this->cop->update(['formato_factura' => FormatoFactura::Carta]);
+
+    $this->get(route('pedidos.imprimir', $pedido))->assertOk()->assertSee('size: 8.5in 11in', false);
+    $this->get(route('pedidos.imprimir', ['pedido' => $pedido, 'hoja' => 'continuo']))->assertOk()->assertSee('size: 8.5in 5.5in', false);
+    $this->get(route('pedidos.imprimir', ['pedido' => $pedido, 'hoja' => 'otro']))->assertOk()->assertSee('size: 8.5in 11in', false);
+});
+
+test('cada bodega escoge en qué papel salen sus facturas', function (): void {
+    expect($this->cop->fresh()?->formato_factura)->toBe(FormatoFactura::Continuo);
+
+    $this->actingAs($this->admin);
+
+    Livewire::test(ManageBodegas::class)
+        ->callTableAction('edit', $this->cop, data: ['formato_factura' => FormatoFactura::Carta->value])
+        ->assertHasNoTableActionErrors();
+
+    expect($this->cop->fresh()?->formato_factura)->toBe(FormatoFactura::Carta)
+        ->and($this->oco->fresh()?->formato_factura)->toBe(FormatoFactura::Continuo);
+});
+
+test('en la factura las cajas y las unidades de un producto van en un renglón (CJ y UN); el regalo de la promoción, en el suyo', function (): void {
+    // Por cada unidad de toalla, 1 unidad del exento gratis.
+    $toalla = Producto::factory()->precio(20.0, 25.0)->create();
+    $promo = Promocion::factory()->para($toalla, $this->exento)->create();
+
+    $pedido = Pedido::query()->create([
+        'bodega_id'   => $this->cop->id,
+        'cliente_id'  => Cliente::factory()->create(['bodega_id' => $this->cop->id])->id,
+        'vendedor_id' => $this->vendedores['COP']->id,
+        'fecha'       => now(),
+    ]);
+    $pedido->items()->create(['producto_id' => $this->exento->id, 'presentacion_id' => caja($this->exento)->id, 'cantidad' => 3]);
+    $pedido->items()->create(['producto_id' => $this->exento->id, 'presentacion_id' => presentacion($this->exento)->id, 'cantidad' => 4]);
+    $pedido->items()->create(['producto_id' => $toalla->id, 'presentacion_id' => presentacion($toalla)->id, 'cantidad' => 2]);
+    $pedido->items()->create(['producto_id' => $this->gravado->id, 'presentacion_id' => presentacion($this->gravado)->id, 'cantidad' => 1]);
+    app(RecalcularPedido::class)->ejecutar($pedido);
+
+    $renglones = RenglonFactura::delPedido($pedido->fresh(ImprimirPedidoController::RELACIONES) ?? $pedido, validado: false);
+
+    // 3 CJ y 4 UN en un renglón; la toalla solo en UN (CJ vacía); el regalo
+    // (2 UN del exento) aparte, debajo de la toalla que lo ganó, sin cobro.
+    expect(array_map(fn (RenglonFactura $renglon): array => [$renglon->producto()->id, $renglon->cajas(), $renglon->unidades(), $renglon->esRegalo()], $renglones))->toBe([
+        [$this->exento->id, 3, 4, false],
+        [$toalla->id, null, 2, false],
+        [$this->exento->id, null, 2, true],
+        [$this->gravado->id, null, 1, false],
+    ])
+        ->and(array_column($renglones[0]->precios(), 0))->toBe(['CJ', 'UN'])
+        ->and($renglones[0]->total())->toBe(1700.0)
+        ->and($renglones[1]->precios())->toBe([['UN', 25.0]])
+        ->and($renglones[2]->total())->toBe(0.0)
+        ->and($renglones[2]->notas())->toBe(["Gratis por la promoción {$promo->codigo}"]);
+
+    $this->actingAs($this->encargados['COP'])
+        ->get(route('pedidos.imprimir', $pedido))
+        ->assertOk()
+        ->assertSeeInOrder(['CJ', 'UN', 'Código', $this->exento->descripcion, $toalla->descripcion, "Gratis por la promoción {$promo->codigo}", $this->gravado->descripcion]);
 });

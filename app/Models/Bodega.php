@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\FormatoFactura;
 use App\Models\Concerns\GuardaEnMayusculas;
 use Database\Factories\BodegaFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,6 +28,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $direccion
  * @property int|null $municipio_id
  * @property string|null $telefono
+ * @property FormatoFactura $formato_factura en qué papel imprime las facturas
  * @property bool $activa
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -48,6 +50,7 @@ class Bodega extends Model
         'direccion',
         'municipio_id',
         'telefono',
+        'formato_factura',
         'activa',
     ];
 
@@ -57,7 +60,8 @@ class Bodega extends Model
     protected function casts(): array
     {
         return [
-            'activa' => 'boolean',
+            'activa'          => 'boolean',
+            'formato_factura' => FormatoFactura::class,
         ];
     }
 

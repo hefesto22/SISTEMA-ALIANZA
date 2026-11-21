@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Domain\Facturacion\ImprimirFacturas;
+use App\Enums\FormatoFactura;
 use App\Models\DatosFiscales;
 use App\Models\Pedido;
 use App\Models\User;
@@ -18,6 +19,8 @@ use Illuminate\Http\Response;
  * copiado, vencido o armado a mano) todas salen COPIA · SIN VALOR FISCAL.
  *
  * Uso: /imprimir/pedidos?ids=12,15,18&originales=12,18&signature=…
+ * El papel es el de la bodega del primero (FormatoFactura); ?hoja=carta o
+ * ?hoja=continuo lo cambia.
  */
 class ImprimirPedidosController extends Controller
 {
@@ -29,7 +32,8 @@ class ImprimirPedidosController extends Controller
         $ids = self::ids($request->string('ids')->toString());
         abort_if($ids === [] || count($ids) > ImprimirFacturas::MAXIMO, 404, 'No hay pedidos para imprimir.');
 
-        $firmado = $request->hasValidSignature();
+        // Cambiar el papel en la hoja (?hoja=carta) no le quita la firma.
+        $firmado = $request->hasValidSignatureWhileIgnoring(['hoja']);
 
         $pedidos = Pedido::query()
             ->visiblePara($usuario)
@@ -46,6 +50,8 @@ class ImprimirPedidosController extends Controller
             'fiscales'   => DatosFiscales::actual(),
             'firmado'    => $firmado,
             'originales' => $firmado ? self::ids($request->string('originales')->toString()) : [],
+            'formato'    => FormatoFactura::para($request->query('hoja'), $pedidos->firstOrFail()->bodega),
+            'enlaces'    => FormatoFactura::enlaces($request),
         ]);
     }
 

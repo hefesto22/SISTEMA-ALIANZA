@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Bodegas;
 
+use App\Enums\FormatoFactura;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
 use App\Filament\Schemas\Components\UbicacionFields;
 use App\Models\Bodega;
@@ -11,6 +12,7 @@ use App\Support\Texto;
 use BackedEnum;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
@@ -66,6 +68,13 @@ class BodegaResource extends Resource
                     ->maxLength(30),
                 Toggle::make('activa')
                     ->default(true),
+                Radio::make('formato_factura')
+                    ->label('Impresora de facturas')
+                    ->helperText('En qué papel salen las facturas de esta bodega. En la hoja abierta en otra pestaña se puede cambiar en el momento.')
+                    ->options(FormatoFactura::class)
+                    ->default(FormatoFactura::Continuo)
+                    ->required()
+                    ->columnSpanFull(),
             ]);
     }
 
