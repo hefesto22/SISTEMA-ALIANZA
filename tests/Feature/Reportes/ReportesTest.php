@@ -429,8 +429,29 @@ test('desde Proveedores, Reportes abre sus compras o sus ventas de la semana, la
         ->assertSee('L. 1,600.00')
         ->assertDontSee('L. 1,700.00');
 
-    // Un periodo que no existe queda en este mes.
+    // De una fecha a otra: el enlace las lleva y el reporte se abre con ellas.
+    Livewire::test(ListProveedores::class)
+        ->callTableAction('reportes', $proveedor, data: ['reporte' => 'ventas', 'periodo' => 'otro', 'desde' => '2026-10-01', 'hasta' => '2026-10-31'])
+        ->assertRedirect(ReporteVentas::delProveedor($proveedor, 'otro', '2026-10-01', '2026-10-31'));
+
+    Livewire::withQueryParams(['proveedor' => $proveedor->id, 'periodo' => 'otro', 'desde' => '2026-10-01', 'hasta' => '2026-10-31'])
+        ->test(ReporteVentas::class)
+        ->assertFormSet(['periodo' => 'otro', 'desde' => '2026-10-01', 'hasta' => '2026-10-31']);
+
+    // Un periodo que no existe queda en este mes; las fechas solo van con "otro".
     expect(ReporteVentas::delProveedor($proveedor, 'siglo'))->toContain('periodo=mes')
+        ->and(ReporteCompras::delProveedor($proveedor, 'mes', '2026-10-01', '2026-10-31'))->not->toContain('desde=')
         ->and(Periodo::de('quincena_pasada', hoy: CarbonImmutable::parse('2026-11-19'), corte: 14)->texto())->toBe('01/11/2026 al 14/11/2026')
         ->and(Periodo::de('semana_pasada', hoy: CarbonImmutable::parse('2026-11-19'))->texto())->toBe('09/11/2026 al 15/11/2026');
+});
+
+test('el periodo en palabras y sus días, para leerlo de un vistazo', function (): void {
+    $hoy = CarbonImmutable::parse('2026-11-19');
+
+    expect(Periodo::de('hoy', hoy: $hoy)->textoLargo())->toBe('Jueves 19 de noviembre de 2026')
+        ->and(Periodo::de('semana', hoy: $hoy)->textoLargo())->toBe('Del lunes 16 al jueves 19 de noviembre de 2026')
+        ->and(Periodo::de('semana', hoy: $hoy)->dias())->toBe(4)
+        ->and(Periodo::de('otro', '2026-10-01', '2026-11-19', $hoy)->textoLargo())->toBe('Del jueves 1 de octubre al jueves 19 de noviembre de 2026')
+        ->and(Periodo::de('otro', '2025-12-01', '2026-11-19', $hoy)->textoLargo())->toBe('Del lunes 1 de diciembre de 2025 al jueves 19 de noviembre de 2026')
+        ->and(Periodo::de('mes_pasado', hoy: $hoy)->dias())->toBe(31);
 });

@@ -76,11 +76,19 @@ class ReporteVentas extends Page
     }
 
     /**
-     * Enlace al reporte con el proveedor y el periodo ya escogidos (desde Proveedores).
+     * Enlace al reporte con el proveedor y el periodo ya escogidos (desde
+     * Proveedores); con "otro", también las fechas.
      */
-    public static function delProveedor(Proveedor $proveedor, string $periodo = 'mes'): string
+    public static function delProveedor(Proveedor $proveedor, string $periodo = 'mes', ?string $desde = null, ?string $hasta = null): string
     {
-        return self::getUrl(['proveedor' => $proveedor->id, 'periodo' => self::periodo($periodo)]);
+        $periodo = self::periodo($periodo);
+
+        return self::getUrl(array_filter([
+            'proveedor' => $proveedor->id,
+            'periodo'   => $periodo,
+            'desde'     => $periodo === 'otro' ? Periodo::dia($desde) : null,
+            'hasta'     => $periodo === 'otro' ? Periodo::dia($hasta) : null,
+        ], fn (mixed $valor): bool => $valor !== null));
     }
 
     public function mount(): void
@@ -89,8 +97,8 @@ class ReporteVentas extends Page
 
         $this->form->fill([
             'periodo'      => self::periodo(request()->query('periodo')),
-            'desde'        => now()->startOfMonth()->toDateString(),
-            'hasta'        => now()->toDateString(),
+            'desde'        => Periodo::dia(request()->query('desde')) ?? now()->startOfMonth()->toDateString(),
+            'hasta'        => Periodo::dia(request()->query('hasta')) ?? now()->toDateString(),
             'bodega_id'    => null,
             'proveedor_id' => is_numeric($proveedor) && Proveedor::query()->whereKey((int) $proveedor)->exists() ? (int) $proveedor : null,
             'ver'          => 'todo',

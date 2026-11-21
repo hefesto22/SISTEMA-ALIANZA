@@ -35,7 +35,10 @@ final readonly class Periodo
         'otro'            => 'Otras fechas',
     ];
 
-    /** Los de semana, quincena y mes (los reportes de un proveedor, desde Proveedores). */
+    /**
+     * Los de semana, quincena y mes en pares (este / el pasado) y escoger las
+     * fechas: los reportes de un proveedor, desde Proveedores.
+     */
     public const SEMANA_QUINCENA_MES = [
         'semana'          => 'Esta semana',
         'semana_pasada'   => 'Semana pasada',
@@ -43,6 +46,7 @@ final readonly class Periodo
         'quincena_pasada' => 'Quincena pasada',
         'mes'             => 'Este mes',
         'mes_pasado'      => 'Mes pasado',
+        'otro'            => 'Escoger fechas',
     ];
 
     public CarbonImmutable $desde;
@@ -119,6 +123,51 @@ final readonly class Periodo
         return $this->desde->equalTo($this->hasta)
             ? $this->desde->format('Y-m-d')
             : $this->desde->format('Y-m-d').'_'.$this->hasta->format('Y-m-d');
+    }
+
+    /**
+     * En palabras, para leer de un vistazo:
+     * "Jueves 19 de noviembre de 2026",
+     * "Del lunes 16 al jueves 19 de noviembre de 2026",
+     * "Del jueves 1 de octubre al jueves 19 de noviembre de 2026" o
+     * "Del lunes 1 de diciembre de 2025 al jueves 19 de noviembre de 2026".
+     */
+    public function textoLargo(): string
+    {
+        $desde = $this->desde->locale('es');
+        $hasta = $this->hasta->locale('es');
+
+        if ($desde->equalTo($hasta)) {
+            return ucfirst($hasta->isoFormat('dddd D [de] MMMM [de] YYYY'));
+        }
+
+        $inicio = match (true) {
+            $desde->isSameMonth($hasta) => $desde->isoFormat('dddd D'),
+            $desde->isSameYear($hasta)  => $desde->isoFormat('dddd D [de] MMMM'),
+            default                     => $desde->isoFormat('dddd D [de] MMMM [de] YYYY'),
+        };
+
+        return 'Del '.$inicio.' al '.$hasta->isoFormat('dddd D [de] MMMM [de] YYYY');
+    }
+
+    /**
+     * Cuántos días abarca (los dos extremos cuentan).
+     */
+    public function dias(): int
+    {
+        return (int) $this->desde->diffInDays($this->hasta) + 1;
+    }
+
+    /**
+     * La fecha si viene como Y-m-d y existe (2026-02-30 no); null si no.
+     */
+    public static function dia(mixed $valor): ?string
+    {
+        if (! is_string($valor) || preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $valor, $partes) !== 1) {
+            return null;
+        }
+
+        return checkdate((int) $partes[2], (int) $partes[3], (int) $partes[1]) ? $valor : null;
     }
 
     private static function fecha(mixed $valor): ?CarbonImmutable
