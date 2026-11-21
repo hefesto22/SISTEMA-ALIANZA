@@ -1,0 +1,151 @@
+{{--
+    Por imprimir e Impresos de Pedidos (App\Filament\Resources\Pedidos\Pages\ListPedidos):
+    arriba el cambio de vista (Por día / Uno por uno); por día, un cuadro por día y
+    bodega (App\Domain\Facturacion\DiaDeFacturacion), del más reciente al más viejo.
+      - Por imprimir: Ver (las tarjetas de ese día) · Imprimir las N (modal con la vista previa).
+      - Impresos: Ver · Resumen del día (la hoja para cuadrar).
+    Por día la tabla no se dibuja y con ella no salen los modales de las
+    acciones: aquí se ponen (x-filament-actions::modals).
+    Datos: ListPedidos::datosPorDia().
+--}}
+@php
+    /** @var list<\App\Domain\Facturacion\DiaDeFacturacion> $dias */
+    $dias ??= [];
+    $porDia ??= true;
+    $impresos ??= false;
+    $hayMas ??= false;
+    $veTodo ??= false;
+    $imprime ??= false;
+    $resumen ??= false;
+@endphp
+
+<style>
+    /* Mismos tonos que las tarjetas de pedidos: en oscuro el texto tenue usa gray-400. */
+    .pd { --pd-tenue: var(--gray-500); --pd-borde: var(--gray-200); --pd-fondo: #fff; display: grid; gap: 1rem; min-width: 0; }
+    .dark .pd { --pd-tenue: var(--gray-400); --pd-borde: rgb(255 255 255 / 0.1); --pd-fondo: var(--gray-900); }
+    .pd-arriba { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem; }
+    .pd-vistas { display: inline-flex; gap: 0.25rem; padding: 0.25rem; border-radius: 0.75rem; border: 1px solid var(--pd-borde); background: var(--pd-fondo); }
+    .pd-vista { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.85rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 600; color: var(--pd-tenue); }
+    .pd-vista:hover { color: inherit; }
+    .pd-vista.activa { color: var(--primary-600); background: color-mix(in oklab, var(--primary-500) 12%, transparent); }
+    .dark .pd-vista.activa { color: var(--primary-400); }
+    .pd-icono { width: 1.1rem; height: 1.1rem; }
+    .pd-ayuda { margin: 0; font-size: 0.875rem; color: var(--pd-tenue); }
+    .pd-cuadros { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+    .pd-cuadro { min-width: 0; display: grid; align-content: start; gap: 0.85rem; padding: 1.1rem 1.25rem; border-radius: 0.75rem; border: 1px solid var(--pd-borde); background: var(--pd-fondo); }
+    .pd-cuadro.hoy { border-color: color-mix(in oklab, var(--primary-500) 55%, transparent); }
+    .pd-cabeza { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; min-width: 0; }
+    .pd-dia { font-size: 1.05rem; font-weight: 700; line-height: 1.3; }
+    .pd-fecha { font-size: 0.8rem; color: var(--pd-tenue); font-variant-numeric: tabular-nums; }
+    .pd-bodega { min-width: 0; max-width: 60%; font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 0.375rem; color: var(--primary-600); border: 1px solid color-mix(in oklab, var(--primary-500) 40%, transparent); background: color-mix(in oklab, var(--primary-500) 10%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dark .pd-bodega { color: var(--primary-400); }
+    .pd-cifras { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 0.75rem; }
+    .pd-cuantas strong { font-size: 1.75rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+    .pd-cuantas span { margin-inline-start: 0.3rem; font-size: 0.85rem; color: var(--pd-tenue); }
+    .pd-total { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pd-datos { margin: 0; padding: 0.75rem 0 0; list-style: none; display: grid; gap: 0.3rem; font-size: 0.85rem; border-top: 1px solid var(--pd-borde); }
+    .pd-datos li { display: flex; justify-content: space-between; gap: 0.75rem; }
+    .pd-datos span { color: var(--pd-tenue); }
+    .pd-datos b { font-weight: 600; text-align: end; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .pd-datos b.mal { color: var(--danger-600); }
+    .dark .pd-datos b.mal { color: var(--danger-400); }
+    .pd-botones { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .pd-vacio { padding: 3rem 1rem; text-align: center; color: var(--pd-tenue); border: 1px dashed var(--pd-borde); border-radius: 0.75rem; }
+    .pd-mas { display: flex; justify-content: center; }
+</style>
+
+<div class="pd" @if ($porDia) wire:poll.30s @endif>
+    <div class="pd-arriba">
+        <div class="pd-vistas" role="group" aria-label="Cómo ver los pedidos">
+            <button type="button" wire:click="$set('vista', null)" @class(['pd-vista', 'activa' => $porDia]) aria-pressed="{{ $porDia ? 'true' : 'false' }}">
+                {{ svg('heroicon-o-calendar-days', 'pd-icono') }}
+                Por día
+            </button>
+            <button type="button" wire:click="$set('vista', 'lista')" @class(['pd-vista', 'activa' => ! $porDia]) aria-pressed="{{ $porDia ? 'false' : 'true' }}">
+                {{ svg('heroicon-o-squares-2x2', 'pd-icono') }}
+                Uno por uno
+            </button>
+        </div>
+        @if ($porDia)
+            <p class="pd-ayuda">
+                {{ $impresos
+                    ? 'Las facturas por el día en que se emitieron: cuántas, por cuánto y con qué números.'
+                    : 'Los pedidos listos para imprimir, por el día del pedido: imprima todas las de un día de un solo.' }}
+            </p>
+        @endif
+    </div>
+
+    @if ($porDia)
+        @if ($dias === [])
+            <div class="pd-vacio">{{ $impresos ? 'Todavía no hay facturas impresas.' : 'No hay pedidos por imprimir.' }}</div>
+        @else
+            <div class="pd-cuadros">
+                @foreach ($dias as $d)
+                    @php
+                        $argumentos = \Illuminate\Support\Js::from(['dia' => $d->dia->format('Y-m-d'), 'bodega' => $d->bodegaId]);
+                    @endphp
+                    <article @class(['pd-cuadro', 'hoy' => $d->dia->isToday()]) wire:key="cuadro-{{ $d->clave() }}">
+                        <header class="pd-cabeza">
+                            <div>
+                                <div class="pd-dia">{{ $d->nombre() }}</div>
+                                <div class="pd-fecha">{{ $d->dia->format('d/m/Y') }}</div>
+                            </div>
+                            @if ($veTodo)
+                                <span class="pd-bodega" title="{{ $d->bodega }}">{{ $d->bodega }}</span>
+                            @endif
+                        </header>
+
+                        <div class="pd-cifras">
+                            <div class="pd-cuantas">
+                                <strong>{{ number_format($d->cuantas) }}</strong>
+                                <span>{{ $impresos ? ($d->cuantas === 1 ? 'factura' : 'facturas') : 'por imprimir' }}</span>
+                            </div>
+                            <div class="pd-total">{{ lempiras($d->total) }}</div>
+                        </div>
+
+                        <ul class="pd-datos">
+                            @if ($impresos)
+                                <li title="Del {{ $d->desde }} al {{ $d->hasta }}"><span>Números</span><b>{{ $d->numeros() }}</b></li>
+                                <li><span>Anuladas</span><b @class(['mal' => $d->anuladas > 0])>{{ number_format($d->anuladas) }}</b></li>
+                                <li><span>Copias</span><b>{{ number_format($d->copias) }}</b></li>
+                            @else
+                                <li><span>Vendedores</span><b>{{ number_format($d->vendedores) }}</b></li>
+                                @if ($d->reimpresiones > 0)
+                                    <li><span>Por reimprimir (corregidos)</span><b>{{ number_format($d->reimpresiones) }}</b></li>
+                                @endif
+                            @endif
+                        </ul>
+
+                        <footer class="pd-botones">
+                            <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-eye" wire:click="verDia('{{ $d->dia->format('Y-m-d') }}', {{ $d->bodegaId }})">
+                                Ver
+                            </x-filament::button>
+                            @if ($impresos)
+                                @if ($resumen)
+                                    <x-filament::button size="sm" icon="heroicon-o-document-text" wire:click="mountAction('resumenDia', {{ $argumentos }})">
+                                        Resumen del día
+                                    </x-filament::button>
+                                @endif
+                            @elseif ($imprime)
+                                <x-filament::button size="sm" icon="heroicon-o-printer" wire:click="mountAction('imprimirDia', {{ $argumentos }})">
+                                    {{ $d->cuantas === 1 ? 'Imprimir' : 'Imprimir las '.number_format($d->cuantas) }}
+                                </x-filament::button>
+                            @endif
+                        </footer>
+                    </article>
+                @endforeach
+            </div>
+
+            @if ($hayMas)
+                <div class="pd-mas">
+                    <x-filament::button color="gray" outlined icon="heroicon-o-chevron-down" wire:click="masDias">
+                        Ver más días
+                    </x-filament::button>
+                </div>
+            @endif
+        @endif
+
+        {{-- Por día no se dibuja la tabla, que es la que trae los modales de las acciones (Imprimir, Resumen del día). --}}
+        <x-filament-actions::modals />
+    @endif
+</div>

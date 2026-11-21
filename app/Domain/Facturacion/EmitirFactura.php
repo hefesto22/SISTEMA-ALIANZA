@@ -52,9 +52,10 @@ final class EmitirFactura
     /**
      * La factura como saldría si se imprime ahora, con el siguiente número
      * del CAI, sin guardarla ni gastar el número: para la vista previa del
-     * modal de Imprimir. Null si la bodega no tiene CAI vigente.
+     * modal de Imprimir. Con $despues, la que sale después de otras tantas
+     * del mismo CAI (varias de un solo). Null si la bodega no tiene CAI vigente.
      */
-    public static function borrador(Pedido $pedido): ?Factura
+    public static function borrador(Pedido $pedido, int $despues = 0): ?Factura
     {
         $cai = Cai::paraBodega($pedido->bodega_id);
 
@@ -63,7 +64,7 @@ final class EmitirFactura
         }
 
         return (new Factura)
-            ->forceFill(self::datos($pedido, $cai, $cai->siguiente))
+            ->forceFill(self::datos($pedido, $cai, $cai->siguiente + $despues))
             ->setRelation('reemplazaA', $pedido->facturaPorSustituir());
     }
 

@@ -23,6 +23,7 @@ use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirPedidoController;
 use App\Http\Controllers\ImprimirPedidosController;
 use App\Http\Controllers\ImprimirReporteController;
+use App\Http\Controllers\ResumenDiaController;
 use App\Http\Controllers\VistaPreviaFacturaController;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -39,6 +40,14 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
     // La factura como va a salir, dentro del modal de Imprimir (?modo=original|copia&hoja=continuo|carta).
     Route::get('pedidos/{pedido}/vista-previa', VistaPreviaFacturaController::class)
         ->name('pedidos.vista-previa');
+
+    // Varias de un solo (?ids=1,2,3), con los números seguidos: Imprimir las N de un día.
+    Route::get('vista-previa/pedidos', [VistaPreviaFacturaController::class, 'lote'])
+        ->name('pedidos.vista-previa-lote');
+
+    // Resumen de las facturas de un día (?dia=2026-11-18&bodega=2), para cuadrar.
+    Route::get('facturas/resumen-dia', ResumenDiaController::class)
+        ->name('facturas.resumen-dia');
 
     // Nota de crédito o constancia de una devolución.
     Route::get('devoluciones/{devolucion}/imprimir', ImprimirDevolucionController::class)

@@ -27,6 +27,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -105,7 +106,17 @@ class PedidosTable
                     ->columnSpan(2)
                     ->query(fn (Builder $query, array $data): Builder => $query
                         ->when($data['desde'] ?? null, fn (Builder $q, mixed $fecha): Builder => $q->whereDate('fecha', '>=', $fecha))
-                        ->when($data['hasta'] ?? null, fn (Builder $q, mixed $fecha): Builder => $q->whereDate('fecha', '<=', $fecha))),
+                        ->when($data['hasta'] ?? null, fn (Builder $q, mixed $fecha): Builder => $q->whereDate('fecha', '<=', $fecha)))
+                    ->indicateUsing(fn (array $data): array => self::indicadoresDeFecha($data)),
+                // El "Ver" de un cuadro de Impresos: las de la factura emitida ese día.
+                Filter::make('facturada')
+                    ->schema([
+                        DatePicker::make('el')->label('Facturada el'),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => $query
+                        ->when($data['el'] ?? null, fn (Builder $q, mixed $fecha): Builder => $q->whereHas('factura', fn (Builder $f): Builder => $f->whereDate('fecha_emision', $fecha))))
+                    ->indicateUsing(fn (array $data): ?string => filled($data['el'] ?? null) ? 'Facturadas el '.self::dma($data['el']) : null)
+                    ->visible(! $esVendedor),
             ])
             ->recordActions([
                 ViewAction::make()
@@ -148,6 +159,35 @@ class PedidosTable
             Gate::allows('corregir', $pedido) => 'corregir',
             default                           => null,
         };
+    }
+
+    /**
+     * Lo que se ve arriba de la lista con el filtro de fecha puesto.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<string>
+     */
+    private static function indicadoresDeFecha(array $data): array
+    {
+        $desde = filled($data['desde'] ?? null) ? self::dma($data['desde']) : null;
+        $hasta = filled($data['hasta'] ?? null) ? self::dma($data['hasta']) : null;
+
+        return match (true) {
+            $desde !== null && $desde === $hasta => ["Pedidos del {$desde}"],
+            default                              => array_values(array_filter([
+                $desde === null ? null : "Desde el {$desde}",
+                $hasta === null ? null : "Hasta el {$hasta}",
+            ])),
+        };
+    }
+
+    /**
+     * "2026-11-18" → "18/11/2026".
+     */
+    private static function dma(mixed $fecha): string
+    {
+        return is_string($fecha) ? Carbon::parse($fecha)->format('d/m/Y') : '';
     }
 
     /**

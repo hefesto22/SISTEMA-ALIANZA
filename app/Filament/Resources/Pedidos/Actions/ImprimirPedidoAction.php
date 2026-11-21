@@ -175,6 +175,26 @@ final class ImprimirPedidoAction
     }
 
     /**
+     * Como conVistaPrevia(), de varios (Imprimir las N de un día): la vista
+     * previa trae todas, una por página, con los números seguidos. Quien lo
+     * usa pone en fillForm 'ids' (separados por coma) y 'papel'.
+     */
+    public static function conVistaPreviaDeVarias(Action $action): Action
+    {
+        return $action
+            ->modalIcon(Heroicon::OutlinedPrinter)
+            ->modalDescription('Así van a salir, una por página. Escoja la impresora: la vista previa cambia al papel de cada una.')
+            ->modalWidth(Width::FiveExtraLarge)
+            ->modalSubmitActionLabel('Imprimir')
+            ->schema([
+                Hidden::make('ids'),
+                self::campoPapel()->live(),
+                View::make('filament.vista-previa-factura')
+                    ->viewData(fn (Get $get): array => self::hojasPrevias($get('ids'), $get('papel'))),
+            ]);
+    }
+
+    /**
      * Con qué abre el modal: el pedido (para la vista previa) y el papel de su bodega.
      *
      * @return array{pedido: int, papel: string}
@@ -307,6 +327,25 @@ final class ImprimirPedidoAction
 
         return [
             'url'     => route('pedidos.vista-previa', ['pedido' => (int) $pedido, 'modo' => $modo === ModoImpresion::Copia ? 'copia' : 'original', 'hoja' => $formato->value]),
+            'formato' => $formato,
+        ];
+    }
+
+    /**
+     * Para la vista del modal de varias: el enlace a todas en el papel escogido.
+     *
+     * @return array{url: string|null, formato: FormatoFactura}
+     */
+    private static function hojasPrevias(mixed $ids, mixed $papel): array
+    {
+        $formato = self::papel($papel);
+
+        if (! is_string($ids) || $ids === '') {
+            return ['url' => null, 'formato' => $formato];
+        }
+
+        return [
+            'url'     => route('pedidos.vista-previa-lote', ['ids' => $ids, 'hoja' => $formato->value]),
             'formato' => $formato,
         ];
     }

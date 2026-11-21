@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Facturacion\DiaDeFacturacion;
+use App\Domain\Facturacion\DiasDeFacturacion;
 use App\Domain\Pedidos\CorregirPedido;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
@@ -328,6 +330,7 @@ test('el botón Imprimir todos pide confirmación e imprime los que se ven', fun
     Livewire::test(ListPedidos::class)
         ->assertActionHidden('imprimirTodos')
         ->set('activeTab', EstadoPedido::PorImprimir->value)
+        ->set('vista', 'lista')
         ->assertCanSeeTableRecords([$primero, $segundo])
         ->assertActionVisible('imprimirTodos')
         ->assertActionHasLabel('imprimirTodos', 'Imprimir todos (2)')
@@ -417,6 +420,7 @@ test('corregir un pedido impreso: anula la factura, vuelve a por imprimir y al r
 
     Livewire::test(ListPedidos::class)
         ->set('activeTab', EstadoPedido::PorImprimir->value)
+        ->set('vista', 'lista')
         ->assertSee('Por reimprimir');
 
     $anulada = Factura::query()->where('pedido_id', $pedido?->id)->sole();
@@ -504,4 +508,85 @@ test('ver pedido: resumen con el cliente y el total, cada producto con lo que sa
         ->assertSee('1 UN')
         ->assertSee('No va completo: falta 1 unidad (pidió 2)')
         ->assertSee('L. 615.00');
+});
+
+test('Por imprimir e Impresos se ven por día: Imprimir las N de un día, Ver los de ese día y el resumen del día', function (): void {
+    $validar = fn (): Pedido => app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+    $ayerUno = $validar();
+    $ayerDos = $validar();
+    $hoy = $validar();
+    Pedido::query()->whereKey([$ayerUno->id, $ayerDos->id])->update(['fecha' => today()->subDay()]);
+    $ayer = today()->subDay()->toDateString();
+
+    $this->actingAs($this->encargado);
+
+    // Un cuadro por día: hoy 1, ayer 2.
+    expect(array_map(fn (DiaDeFacturacion $dia): array => [$dia->dia->toDateString(), $dia->cuantas], DiasDeFacturacion::porImprimir($this->encargado, 12)['dias']))
+        ->toBe([[today()->toDateString(), 1], [$ayer, 2]]);
+
+    // Ver: las tarjetas de ese día.
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::PorImprimir->value)
+        ->assertSee('Imprimir las 2')
+        ->call('verDia', $ayer, $this->bodega->id)
+        ->assertSet('vista', 'lista')
+        ->assertCanSeeTableRecords([$ayerUno, $ayerDos])
+        ->assertCanNotSeeTableRecords([$hoy]);
+
+    // La vista previa de las 2: los números que les tocan, seguidos, sin emitir nada.
+    $cai = Cai::query()->sole();
+
+    $this->get(route('pedidos.vista-previa-lote', ['ids' => "{$ayerUno->id},{$ayerDos->id}", 'hoja' => 'continuo']))
+        ->assertOk()
+        ->assertSeeInOrder([$cai->numero($cai->siguiente), $cai->numero($cai->siguiente + 1)])
+        ->assertSee('VISTA PREVIA');
+
+    expect(Factura::query()->count())->toBe(0);
+
+    // Imprimir las 2 de ayer en carta: salen como original; la de hoy sigue por imprimir.
+    $url = null;
+
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::PorImprimir->value)
+        ->callAction('imprimirDia', data: ['papel' => FormatoFactura::Carta->value], arguments: ['dia' => $ayer, 'bodega' => $this->bodega->id])
+        ->assertDispatched(ImprimirPedidoAction::EVENTO, function (string $nombre, array $datos) use (&$url): bool {
+            $url = $datos['url'] ?? null;
+
+            return is_string($url) && str_contains($url, 'hoja=carta');
+        });
+
+    expect($ayerUno->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and($ayerDos->fresh()?->estado)->toBe(EstadoPedido::Impreso)
+        ->and($hoy->fresh()?->estado)->toBe(EstadoPedido::PorImprimir);
+
+    $this->get((string) $url)
+        ->assertOk()
+        ->assertSee('size: 8.5in 11in', false)
+        ->assertDontSee('REIMPRESIÓN');
+
+    // Impresos: el día en que se emitieron (hoy), con sus números.
+    /** @var list<string> $numeros */
+    $numeros = Factura::query()->orderBy('numero')->pluck('numero')->all();
+    $impresas = DiasDeFacturacion::impresas($this->encargado, 12)['dias'];
+
+    expect($impresas)->toHaveCount(1)
+        ->and($impresas[0]->cuantas)->toBe(2)
+        ->and([$impresas[0]->desde, $impresas[0]->hasta])->toBe($numeros);
+
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::Impreso->value)
+        ->assertSee('Resumen del día')
+        ->call('verDia', today()->toDateString(), $this->bodega->id)
+        ->assertCanSeeTableRecords([$ayerUno, $ayerDos]);
+
+    // El resumen del día: las dos facturas y el total de las vigentes.
+    $this->get(route('facturas.resumen-dia', ['dia' => today()->toDateString(), 'bodega' => $this->bodega->id]))
+        ->assertOk()
+        ->assertSeeInOrder($numeros)
+        ->assertSee('Total de las 2 vigentes');
+
+    // El vendedor no ve el resumen.
+    $this->actingAs($this->vendedor)
+        ->get(route('facturas.resumen-dia', ['dia' => today()->toDateString()]))
+        ->assertForbidden();
 });
