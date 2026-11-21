@@ -14,7 +14,9 @@ use Illuminate\Database\Eloquent\Builder;
  * Resumen de las facturas de un día (y una bodega), para cuadrar: todas las
  * que se emitieron ese día en el orden de su número, con el total de las
  * vigentes. Las anuladas salen en la lista (su número se usó ese día) pero
- * no suman. Solo lo que el usuario ve (Factura::visiblesPara).
+ * no suman; cada una dice cuándo se anuló y cuál la sustituye, y la que
+ * sustituye dice a cuál (con su día, si es de otro). Solo lo que el usuario
+ * ve (Factura::visiblesPara).
  *
  * Hoja: App\Http\Controllers\ResumenDiaController.
  */
@@ -22,12 +24,14 @@ final class ResumenDelDia
 {
     /**
      * @return array{
+     *     dia: string,
      *     fecha: string,
      *     bodega: string,
      *     variasBodegas: bool,
      *     facturas: list<Factura>,
      *     vigentes: int,
      *     anuladas: int,
+     *     sustituciones: int,
      *     copias: int,
      *     exento: float,
      *     gravado: float,
@@ -42,7 +46,13 @@ final class ResumenDelDia
             ->visiblesPara($usuario)
             ->whereDate('facturas.fecha_emision', $dia)
             ->when($bodegaId !== null, fn (Builder $query): Builder => $query->where('facturas.bodega_id', $bodegaId))
-            ->with(['pedido:id,numero,vendedor_id', 'pedido.vendedor:id,name', 'reemplazo:id,reemplaza_a_id,numero', 'bodega:id,nombre'])
+            ->with([
+                'pedido:id,numero,vendedor_id',
+                'pedido.vendedor:id,name',
+                'reemplazo:id,reemplaza_a_id,numero,fecha_emision',
+                'reemplazaA:id,numero,fecha_emision',
+                'bodega:id,nombre',
+            ])
             ->orderBy('facturas.numero')
             ->get();
 
@@ -50,12 +60,14 @@ final class ResumenDelDia
         $suma = fn (string $campo): float => round((float) $vigentes->sum($campo), 2);
 
         return [
+            'dia'           => $dia,
             'fecha'         => self::fechaLarga($dia),
             'bodega'        => $bodegaId === null ? 'Todas las bodegas' : (string) Bodega::query()->whereKey($bodegaId)->value('nombre'),
             'variasBodegas' => $facturas->pluck('bodega_id')->unique()->count() > 1,
             'facturas'      => array_values($facturas->all()),
             'vigentes'      => $vigentes->count(),
             'anuladas'      => $facturas->count() - $vigentes->count(),
+            'sustituciones' => $vigentes->whereNotNull('reemplaza_a_id')->count(),
             'copias'        => (int) $facturas->sum(fn (Factura $factura): int => max(0, $factura->impresiones - 1)),
             'exento'        => $suma('importe_exento'),
             'gravado'       => $suma('importe_gravado'),

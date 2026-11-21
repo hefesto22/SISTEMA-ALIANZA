@@ -590,3 +590,38 @@ test('Por imprimir e Impresos se ven por día: Imprimir las N de un día, Ver lo
         ->get(route('facturas.resumen-dia', ['dia' => today()->toDateString()]))
         ->assertForbidden();
 });
+
+test('la factura que sustituye a una anulada cuenta el día en que se imprime; la anulada se queda en su día sin sumar', function (): void {
+    $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
+    imprimir($pedido, $this->encargado, ModoImpresion::Originales);
+
+    // Se imprimió ayer; hoy se corrige (no había en bodega) y se reimprime.
+    $anulada = Factura::query()->where('pedido_id', $pedido->id)->sole();
+    $anulada->forceFill(['fecha_emision' => now()->subDay()])->save();
+    $lineas = $pedido->items()->orderBy('id')->pluck('id')->all();
+    app(CorregirPedido::class)->ejecutar($pedido->fresh() ?? $pedido, [$lineas[0] => 1], $this->encargado, 'no había en bodega');
+    imprimir($pedido, $this->encargado, ModoImpresion::Originales);
+    $nueva = Factura::query()->where('pedido_id', $pedido->id)->where('estado', EstadoFactura::Vigente)->sole();
+
+    expect(array_map(
+        fn (DiaDeFacturacion $dia): array => [$dia->dia->toDateString(), $dia->cuantas, $dia->anuladas, $dia->sustituciones, $dia->total],
+        DiasDeFacturacion::impresas($this->encargado, 12)['dias'],
+    ))->toBe([
+        [today()->toDateString(), 1, 0, 1, $nueva->total],
+        [today()->subDay()->toDateString(), 0, 1, 0, 0.0],
+    ]);
+
+    $this->actingAs($this->encargado);
+
+    // Hoy: la nueva dice a cuál sustituye y de qué día es.
+    $this->get(route('facturas.resumen-dia', ['dia' => today()->toDateString(), 'bodega' => $this->bodega->id]))
+        ->assertOk()
+        ->assertSee("sustituye a {$anulada->numero} (del ".today()->subDay()->format('d/m').')');
+
+    // Ayer: la anulada, cuándo se anuló, cuál la sustituye y por qué.
+    $this->get(route('facturas.resumen-dia', ['dia' => today()->subDay()->toDateString(), 'bodega' => $this->bodega->id]))
+        ->assertOk()
+        ->assertSee('Anulada el '.today()->format('d/m'))
+        ->assertSee("la sustituye {$nueva->numero} (del ".today()->format('d/m').')')
+        ->assertSee('PEDIDO CORREGIDO: NO HABÍA EN BODEGA');
+});

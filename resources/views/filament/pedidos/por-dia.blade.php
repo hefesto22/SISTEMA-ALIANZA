@@ -108,6 +108,9 @@
                                 <li title="Del {{ $d->desde }} al {{ $d->hasta }}"><span>Números</span><b>{{ $d->numeros() }}</b></li>
                                 <li><span>Anuladas</span><b @class(['mal' => $d->anuladas > 0])>{{ number_format($d->anuladas) }}</b></li>
                                 <li><span>Copias</span><b>{{ number_format($d->copias) }}</b></li>
+                                @if ($d->sustituciones > 0)
+                                    <li title="Facturas de este día que sustituyen a una anulada (de este día o de antes)"><span>Sustituyen a anuladas</span><b>{{ number_format($d->sustituciones) }}</b></li>
+                                @endif
                             @else
                                 <li><span>Vendedores</span><b>{{ number_format($d->vendedores) }}</b></li>
                                 @if ($d->reimpresiones > 0)

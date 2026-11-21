@@ -22,7 +22,9 @@ use stdClass;
  *  - porImprimir(): por la fecha del pedido.
  *  - impresas(): por la fecha de emisión de la factura (la que va impresa);
  *    cuenta también las que se anularon después, porque sus números ya se
- *    usaron ese día.
+ *    usaron ese día. La que sustituye a una anulada cuenta el día en que se
+ *    imprimió (lleva esa fecha y el número que seguía), aunque la anulada
+ *    sea de un día antes.
  *  - idsPorImprimir(): los pedidos de un cuadro, para imprimirlos de un solo.
  */
 final class DiasDeFacturacion
@@ -77,8 +79,9 @@ final class DiasDeFacturacion
                 .'COALESCE(SUM(CASE WHEN facturas.estado = ? THEN facturas.total ELSE 0 END), 0) AS total, '
                 .'SUM(CASE WHEN facturas.estado = ? THEN 0 ELSE 1 END) AS anuladas, '
                 .'COALESCE(SUM(GREATEST(facturas.impresiones - 1, 0)), 0) AS copias, '
-                .'MIN(facturas.numero) AS desde, MAX(facturas.numero) AS hasta',
-                [$vigente, $vigente, $vigente],
+                .'MIN(facturas.numero) AS desde, MAX(facturas.numero) AS hasta, '
+                .'SUM(CASE WHEN facturas.estado = ? AND facturas.reemplaza_a_id IS NOT NULL THEN 1 ELSE 0 END) AS sustituciones',
+                [$vigente, $vigente, $vigente, $vigente],
             )
             ->groupByRaw('DATE(facturas.fecha_emision), facturas.bodega_id')
             ->orderByDesc('dia')
@@ -100,6 +103,7 @@ final class DiasDeFacturacion
                 copias: (int) $fila->copias,
                 desde: (string) $fila->desde,
                 hasta: (string) $fila->hasta,
+                sustituciones: (int) $fila->sustituciones,
             );
         }
 

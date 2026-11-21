@@ -8,12 +8,16 @@
     /** @var list<\App\Models\Factura> $facturas */
     $facturas = $d['facturas'];
     $columnas = $d['variasBodegas'] ? 5 : 4;
+    // " (del 20/11)" si la otra factura es de otro día.
+    $otroDia = fn (\App\Models\Factura $otra): string => $otra->fecha_emision->toDateString() === $d['dia'] ? '' : ' (del '.$otra->fecha_emision->format('d/m').')';
 @endphp
 
 <style>
     .rp tr.anulada td { color: var(--rp-tenue); }
     .rp tr.anulada td.monto { text-decoration: line-through; }
     .rp .estado-anulada { font-weight: 600; color: var(--rp-mal); }
+    .rp td.estado { min-width: 12rem; }
+    .rp td.estado small { display: block; font-size: 0.75rem; color: var(--rp-tenue); }
 </style>
 
 <div class="rp">
@@ -24,7 +28,9 @@
             <div class="rp-kpi principal">
                 <span>Total facturado</span>
                 <strong>{{ lempiras($d['total']) }}</strong>
-                <small>{{ $d['vigentes'] === 1 ? '1 factura vigente' : number_format($d['vigentes']).' facturas vigentes' }}</small>
+                <small>
+                    {{ $d['vigentes'] === 1 ? '1 factura vigente' : number_format($d['vigentes']).' facturas vigentes' }}{{ $d['sustituciones'] > 0 ? ' · '.($d['sustituciones'] === 1 ? '1 sustituye a una anulada' : $d['sustituciones'].' sustituyen a anuladas') : '' }}
+                </small>
             </div>
             <div class="rp-kpi">
                 <span>Sin ISV</span>
@@ -87,11 +93,20 @@
                                 <td class="n monto">{{ number_format($factura->importe_gravado, 2) }}</td>
                                 <td class="n monto">{{ number_format($factura->isv, 2) }}</td>
                                 <td class="n monto">{{ number_format($factura->total, 2) }}</td>
-                                <td>
+                                <td class="estado">
                                     @if ($factura->estaAnulada())
-                                        <span class="estado-anulada">Anulada</span>{{ $factura->reemplazo ? ' · la sustituye '.$factura->reemplazo->numero : '' }}
+                                        <span class="estado-anulada">Anulada{{ $factura->anulada_at ? ' el '.$factura->anulada_at->format('d/m') : '' }}</span>
+                                        @if ($factura->reemplazo)
+                                            · la sustituye {{ $factura->reemplazo->numero }}{{ $otroDia($factura->reemplazo) }}
+                                        @endif
+                                        @if ($factura->motivo_anulacion)
+                                            <small>{{ $factura->motivo_anulacion }}</small>
+                                        @endif
                                     @else
                                         Vigente
+                                        @if ($factura->reemplazaA)
+                                            · sustituye a {{ $factura->reemplazaA->numero }}{{ $otroDia($factura->reemplazaA) }}
+                                        @endif
                                     @endif
                                     @if ($factura->impresiones > 1)
                                         · {{ $factura->impresiones - 1 === 1 ? '1 copia' : ($factura->impresiones - 1).' copias' }}
@@ -114,6 +129,6 @@
             </div>
         </section>
 
-        <p class="rp-nota">Las anuladas salen en la lista porque su número se usó ese día, pero no suman al total.</p>
+        <p class="rp-nota">Las anuladas salen en la lista porque su número se usó ese día, pero no suman al total. La factura que sustituye a una anulada cuenta el día en que se imprimió, aunque la anulada sea de otro día.</p>
     @endif
 </div>

@@ -13,7 +13,9 @@ use Carbon\CarbonImmutable;
  *    cuántos $vendedores y cuántas son $reimpresiones (corregidos después
  *    de impresos).
  *  - Impresas: $cuantas facturas vigentes emitidas ese día y su $total, las
- *    $anuladas, las $copias y el primer y el último número usados.
+ *    $anuladas, las $copias, el primer y el último número usados y cuántas
+ *    vigentes son $sustituciones (de una anulada, de ese día o de antes: la
+ *    nueva cuenta el día en que se imprimió).
  */
 final readonly class DiaDeFacturacion
 {
@@ -29,6 +31,7 @@ final readonly class DiaDeFacturacion
         public int $copias = 0,
         public ?string $desde = null,
         public ?string $hasta = null,
+        public int $sustituciones = 0,
     ) {}
 
     /**
