@@ -6,6 +6,7 @@ namespace App\Filament\Schemas\Components;
 
 use App\Domain\Inventario\Disponible;
 use App\Domain\Precios\CalculadoraPrecio;
+use App\Domain\Promociones\UsoDePromociones;
 use App\Enums\EstadoPedido;
 use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
 use App\Filament\Support\Acceso;
@@ -203,7 +204,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     {
         $this->sinRedibujar();
 
-        return PedidoForm::resumenDe(self::normalizar($lineas), $this->bodegaDelPedido());
+        return PedidoForm::resumenDe(self::normalizar($lineas), $this->bodegaDelPedido(), $this->pedidoQueSeEdita());
     }
 
     /**
@@ -264,16 +265,27 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         }
 
         $promos = [];
+        $disponibles = UsoDePromociones::disponibles($promociones, $this->pedidoQueSeEdita());
 
         foreach ($promociones as $promocion) {
             $lineas = [];
 
-            foreach ($promocion->condiciones as $condicion) {
-                self::sumarLinea($lineas, $condicion->producto_id, $condicion->presentacion_id, $condicion->cantidad);
-            }
+            if ($promocion->cuentaUnidades()) {
+                // "24+1": se agregan las 24 del primer producto (en la caja que las trae, si hay).
+                $primera = $promocion->condiciones->first();
 
-            if (! $promocion->esBonificacion()) {
-                self::sumarLinea($lineas, $promocion->producto_beneficio_id, $promocion->beneficio_presentacion_id, $promocion->cantidad_beneficio);
+                if ($primera !== null) {
+                    [$presentacionId, $cuantas] = self::paraCompletar($primera->producto, (int) $promocion->compra_unidades);
+                    self::sumarLinea($lineas, $primera->producto_id, $presentacionId, $cuantas);
+                }
+            } else {
+                foreach ($promocion->condiciones as $condicion) {
+                    self::sumarLinea($lineas, $condicion->producto_id, $condicion->presentacion_id, $condicion->cantidad);
+                }
+
+                if (! $promocion->esBonificacion()) {
+                    self::sumarLinea($lineas, $promocion->producto_beneficio_id, $promocion->beneficio_presentacion_id, $promocion->cantidad_beneficio);
+                }
             }
 
             $promos[] = [
@@ -285,6 +297,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
                 'compra'  => array_values(array_unique($promocion->condiciones->pluck('producto_id')->all())),
                 'regalo'  => $promocion->producto_beneficio_id,
                 'lineas'  => array_values($lineas),
+                // Con tope: cuánto regalo queda de lo autorizado (0 = agotada); null = sin tope.
+                'tope'   => $promocion->tieneTope() ? (int) $promocion->tope_unidades : null,
+                'quedan' => $disponibles[$promocion->id] ?? null,
+                'sigla'  => $promocion->beneficioPresentacion->sigla(),
             ];
         }
 
@@ -592,6 +608,25 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         }
 
         return null;
+    }
+
+    /**
+     * Para completar N unidades de un producto: 1 de la presentación que trae
+     * justo N (una CJ24 para 24) o, si no hay, N de la base.
+     *
+     * @return array{0: int, 1: int} [presentacion_id, cuántas]
+     */
+    private static function paraCompletar(Producto $producto, int $unidades): array
+    {
+        $justa = $producto->presentaciones->first(fn (Presentacion $p): bool => $p->activo && $p->contenido === $unidades);
+
+        if ($justa instanceof Presentacion) {
+            return [$justa->id, 1];
+        }
+
+        $base = $producto->presentaciones->first(fn (Presentacion $p): bool => $p->es_base);
+
+        return [$base->id ?? 0, max(1, $unidades)];
     }
 
     /**

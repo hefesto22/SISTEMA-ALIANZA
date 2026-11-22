@@ -30,6 +30,8 @@
     al guardar, como bonificación). En el buscador los productos en promoción salen marcados y, al
     tocar uno que todavía no lleva, se pregunta si agrega la promoción o solo
     el producto. En la fila, lo que la promoción le descuenta (o "Gratis").
+    Las del plan del proveedor dicen cuánto regalo queda de lo autorizado
+    ("Quedan 140 de 500 UN de regalo"); agotada, no se ofrece ni se agrega.
 --}}
 @php
     use App\Domain\Precios\CalculadoraPrecio;
@@ -132,6 +134,10 @@
         .pv-promo-nombre { font-size: 0.9rem; font-weight: 700; line-height: 1.3; }
         .pv-promo-resumen { font-size: 0.82rem; line-height: 1.4; }
         .pv-promo-nota { font-size: 0.75rem; font-style: italic; color: var(--gray-500); }
+        .pv-promo-tope { justify-self: start; padding: 0.1rem 0.5rem; border-radius: 0.375rem; font-size: 0.75rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--success-700); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
+        .dark .pv-promo-tope { color: var(--success-400); }
+        .pv-promo-tope.pv-promo-agotada { color: var(--danger-700); background: color-mix(in oklab, var(--danger-500) 12%, transparent); }
+        .dark .pv-promo-tope.pv-promo-agotada { color: var(--danger-400); }
         .dark .pv-promo-nota { color: var(--gray-400); }
         .pv-promo-agregar { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; margin-top: 0.2rem; padding: 0.55rem 0.9rem; border-radius: 0.5rem; font-size: 0.85rem; font-weight: 700; color: #fff; background: var(--success-600); }
         .pv-promo-agregar:hover { background: var(--success-700); }
@@ -766,9 +772,23 @@
                 }
             },
 
-            {{-- Promociones en las que entra el producto: lo pide la promoción o es el regalo. --}}
+            {{-- Promociones en las que entra el producto: lo pide la promoción o es el regalo (las agotadas no). --}}
             promosDe(id) {
-                return this.promosHoy.filter((pr) => pr.compra.includes(Number(id)) || Number(pr.regalo) === Number(id))
+                return this.promosHoy.filter((pr) => ! this.agotada(pr) && (pr.compra.includes(Number(id)) || Number(pr.regalo) === Number(id)))
+            },
+
+            {{-- Con tope (plan del proveedor): ya se regaló todo lo autorizado. --}}
+            agotada(pr) {
+                return pr.quedan !== null && pr.quedan !== undefined && Number(pr.quedan) <= 0
+            },
+
+            {{-- "Quedan 140 de 500 UN de regalo" / "Agotada: ya se regalaron las 500 UN autorizadas". --}}
+            topeTexto(pr) {
+                if (pr.quedan === null || pr.quedan === undefined) return ''
+
+                return this.agotada(pr)
+                    ? 'Agotada: ya se regalaron las ' + pr.tope + ' ' + pr.sigla + ' autorizadas.'
+                    : 'Quedan ' + pr.quedan + ' de ' + pr.tope + ' ' + pr.sigla + ' de regalo.'
             },
 
             enPromo(id) {
@@ -964,8 +984,9 @@
                                 <span class="pv-promo-nombre" x-text="pr.nombre"></span>
                             </div>
                             <div class="pv-promo-resumen" x-text="pr.resumen"></div>
+                            <div class="pv-promo-tope" x-show="topeTexto(pr) !== ''" x-bind:class="{ 'pv-promo-agotada': agotada(pr) }" x-text="topeTexto(pr)"></div>
                             <div class="pv-promo-nota" x-show="pr.nota" x-text="pr.nota"></div>
-                            <button type="button" class="pv-promo-agregar" x-on:click="agregarPromo(pr)">
+                            <button type="button" class="pv-promo-agregar" x-show="! agotada(pr)" x-on:click="agregarPromo(pr)">
                                 {{ svg('heroicon-m-plus') }} Agregar al pedido
                             </button>
                         </div>
@@ -1088,6 +1109,7 @@
                             <span class="pv-promo-nombre" x-text="pr.nombre"></span>
                         </div>
                         <div class="pv-promo-resumen" x-text="pr.resumen"></div>
+                        <div class="pv-promo-tope" x-show="topeTexto(pr) !== ''" x-text="topeTexto(pr)"></div>
                         <div class="pv-promo-nota" x-show="pr.nota" x-text="pr.nota"></div>
                         <button type="button" class="pv-promo-agregar" x-on:click="agregarPromo(pr)">
                             {{ svg('heroicon-m-plus') }} Agregar la promoción

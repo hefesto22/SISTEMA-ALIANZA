@@ -8,6 +8,7 @@ use App\Domain\Precios\CalculadoraPrecio;
 use App\Domain\Promociones\LineaPromocion;
 use App\Domain\Promociones\MotorPromociones;
 use App\Domain\Promociones\ResultadoPromociones;
+use App\Domain\Promociones\UsoDePromociones;
 use App\Enums\Rol;
 use App\Filament\Resources\Clientes\Schemas\ClienteForm;
 use App\Filament\Schemas\Components\LineasPedido;
@@ -177,15 +178,16 @@ class PedidoForm
      * que ya aplican: lo mismo que verá bodega (misma cuenta que
      * RecalcularPedido). Lo pide la lista de productos cada que se deja de
      * tocar. "descuentos" es lo que la promoción le quita a cada producto,
-     * con ISV, para mostrarlo en su fila.
+     * con ISV, para mostrarlo en su fila. Las promociones con tope cuentan
+     * lo que les queda sin $sinPedido (el que se está editando).
      *
      * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      *
      * @return array{total: float, ahorro: float, promociones: string, descuentos: array<int, float>}
      */
-    public static function resumenDe(array $lineas, ?int $bodegaId = null): array
+    public static function resumenDe(array $lineas, ?int $bodegaId = null, ?int $sinPedido = null): array
     {
-        [$conProducto, $promociones] = self::calcular($lineas, $bodegaId);
+        [$conProducto, $promociones] = self::calcular($lineas, $bodegaId, $sinPedido);
         $tasaIsv = CalculadoraPrecio::tasaIsv();
         $total = 0.0;
         $ahorro = 0.0;
@@ -315,7 +317,7 @@ class PedidoForm
      *
      * @return array{0: array<int, array{producto: Producto, presentacion: Presentacion, cantidad: int}>, 1: ResultadoPromociones}
      */
-    private static function calcular(array $lineas, ?int $bodegaId): array
+    private static function calcular(array $lineas, ?int $bodegaId, ?int $sinPedido = null): array
     {
         if ($lineas === []) {
             return [[], new ResultadoPromociones];
@@ -340,7 +342,7 @@ class PedidoForm
 
         $vigentes = Promocion::query()->vigentes()->paraBodega($bodegaId)->with([...Promocion::PARA_CALCULAR, 'condiciones.producto'])->orderBy('id')->get();
 
-        return [$conProducto, app(MotorPromociones::class)->calcular($paraMotor, $vigentes)];
+        return [$conProducto, app(MotorPromociones::class)->calcular($paraMotor, $vigentes, UsoDePromociones::disponibles($vigentes, $sinPedido))];
     }
 
     private static function promocionesAplicadas(ResultadoPromociones $resultado): string
@@ -353,7 +355,11 @@ class PedidoForm
         }
 
         foreach ($resultado->regalos as $regalo) {
-            $filas[] = '<div style="color:#16a34a">'.self::icono('heroicon-m-gift').' '.e($regalo->texto()).' Se agrega solo al guardar.</div>';
+            $filas[] = '<div style="color:'.($regalo->recortado() ? '#d97706' : '#16a34a').'">'.self::icono('heroicon-m-gift').' '.e($regalo->texto()).' Se agrega solo al guardar.</div>';
+        }
+
+        foreach ($resultado->agotadas as $agotada) {
+            $filas[] = '<div style="color:#d97706">'.self::icono('heroicon-m-exclamation-triangle').' '.e($agotada->texto()).'</div>';
         }
 
         foreach ($resultado->faltantes as $faltante) {

@@ -39,7 +39,18 @@ use Illuminate\Support\Carbon;
  * Administración las arma para una o varias; el encargado, solo para la
  * suya (y solo cambia las que son únicamente de su bodega).
  *
+ * Plan del proveedor (PlanPromocion): cada línea autorizada del plan es una
+ * promoción con plan_id, que se arma y se cambia desde el plan. Cuenta
+ * UNIDADES (compra_unidades): "24+1" se cumple con 24 unidades de
+ * cualquiera de sus productos, mezclados, en cualquier presentación. Con
+ * tope_unidades, no se regala más de lo autorizado: lo que queda lo dice
+ * App\Domain\Promociones\UsoDePromociones.
+ *
  * @property int $id
+ * @property int|null $plan_id
+ * @property int|null $compra_unidades N de "N+M" contando unidades de los productos de la condición (null = presentación exacta)
+ * @property int|null $tope_unidades unidades de regalo autorizadas (null = sin tope)
+ * @property float|null $porcentaje_autorizado
  * @property string|null $codigo
  * @property string $nombre
  * @property string|null $descripcion
@@ -58,6 +69,7 @@ use Illuminate\Support\Carbon;
  * @property-read Producto $productoBeneficio
  * @property-read Presentacion $beneficioPresentacion
  * @property-read User|null $creador
+ * @property-read PlanPromocion|null $plan
  */
 class Promocion extends Model
 {
@@ -73,8 +85,12 @@ class Promocion extends Model
 
     /** @var list<string> */
     protected $fillable = [
+        'plan_id',
         'nombre',
         'descripcion',
+        'compra_unidades',
+        'tope_unidades',
+        'porcentaje_autorizado',
         'producto_beneficio_id',
         'cantidad_beneficio',
         'beneficio_presentacion_id',
@@ -102,6 +118,10 @@ class Promocion extends Model
             'cantidad_beneficio'        => 'integer',
             'beneficio_presentacion_id' => 'integer',
             'descuento_porcentaje'      => 'float',
+            'plan_id'                   => 'integer',
+            'compra_unidades'           => 'integer',
+            'tope_unidades'             => 'integer',
+            'porcentaje_autorizado'     => 'float',
             'activa'                    => 'boolean',
             'vigente_desde'             => 'date',
             'vigente_hasta'             => 'date',
@@ -164,6 +184,16 @@ class Promocion extends Model
     public function creador(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * El plan del proveedor del que sale (null = promoción propia).
+     *
+     * @return BelongsTo<PlanPromocion, $this>
+     */
+    public function plan(): BelongsTo
+    {
+        return $this->belongsTo(PlanPromocion::class, 'plan_id');
     }
 
     /**
@@ -327,6 +357,30 @@ class Promocion extends Model
     }
 
     /**
+     * "24+1": cuenta unidades de cualquiera de sus productos, mezclados.
+     */
+    public function cuentaUnidades(): bool
+    {
+        return $this->compra_unidades !== null && $this->compra_unidades > 0;
+    }
+
+    /**
+     * Tiene un tope de regalos (lo que autorizó el proveedor).
+     */
+    public function tieneTope(): bool
+    {
+        return $this->tope_unidades !== null && $this->esBonificacion();
+    }
+
+    /**
+     * "24+1" (o "8+1"). Vacío si no cuenta unidades.
+     */
+    public function mecanica(): string
+    {
+        return $this->cuentaUnidades() ? "{$this->compra_unidades}+{$this->cantidad_beneficio}" : '';
+    }
+
+    /**
      * El regalo es uno de los productos que hay que comprar ("compre 2 y lleve 1 más").
      */
     public function regaloEnCondicion(): bool
@@ -352,6 +406,10 @@ class Promocion extends Model
      */
     public function resumen(): string
     {
+        if ($this->cuentaUnidades()) {
+            return $this->resumenEnUnidades();
+        }
+
         $compra = $this->condiciones
             ->map(fn (PromocionCondicion $c): string => $c->texto())
             ->implode(' + ');
@@ -367,6 +425,30 @@ class Promocion extends Model
         }
 
         return "Compra {$compra} → {$beneficio} de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}";
+    }
+
+    /**
+     * "Por cada 24 unidades de NECTAR MANZANA, NECTAR PERA o NECTAR PIÑA
+     * (se pueden mezclar) lleva 1 unidad de NECTAR MANZANA gratis".
+     */
+    private function resumenEnUnidades(): string
+    {
+        $productos = $this->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->values();
+        $base = $this->condiciones->first()?->presentacion;
+        $cuantas = $base instanceof Presentacion ? $base->enPalabras((int) $this->compra_unidades) : $this->compra_unidades.' unidades';
+        $beneficio = $this->beneficioPresentacion->enPalabras($this->cantidad_beneficio);
+
+        $de = match ($productos->count()) {
+            0       => '',
+            1       => ' de '.$productos->first(),
+            default => ' de '.$productos->slice(0, -1)->implode(', ').' o '.$productos->last().' (se pueden mezclar)',
+        };
+
+        $regalo = $productos->count() === 1 && $this->regaloEnCondicion()
+            ? "{$beneficio} más"
+            : "{$beneficio} de {$this->productoBeneficio->descripcion}";
+
+        return "Por cada {$cuantas}{$de} lleva {$regalo} {$this->beneficioTexto()}";
     }
 
     public static function porcentajeTexto(float $porcentaje): string

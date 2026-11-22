@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Promociones;
 
+use App\Models\Presentacion;
 use App\Models\Promocion;
 
 /**
@@ -27,14 +28,22 @@ use App\Models\Promocion;
  *    queda como aviso para el vendedor.
  *  - Una línea recibe a lo sumo un descuento; las promociones se aplican en el orden recibido.
  *  - Descuento = precio sin ISV × las que cubre × % (gratis = 100 %, mitad = 50 %).
+ *  - En unidades (las del plan del proveedor, "24+1"): cuenta las UNIDADES
+ *    de todos sus productos juntos, en cualquier presentación (2 CJ12 = 24
+ *    unidades; 12 de manzana + 12 de pera también). Veces = unidades ÷ N.
+ *    Solo como bonificación (gratis).
+ *  - Tope (lo que autorizó el proveedor): $disponibles dice cuánto le queda
+ *    de regalo a cada promoción con tope. Si le toca más, se le da lo que
+ *    queda y se avisa; si ya no queda nada, va en `agotadas`.
  */
 final class MotorPromociones
 {
     /**
      * @param array<LineaPromocion> $lineas
      * @param iterable<Promocion> $promociones
+     * @param array<int, int> $disponibles [promocion_id => regalo que le queda] de las que tienen tope
      */
-    public function calcular(array $lineas, iterable $promociones): ResultadoPromociones
+    public function calcular(array $lineas, iterable $promociones, array $disponibles = []): ResultadoPromociones
     {
         $hay = [];
 
@@ -45,23 +54,33 @@ final class MotorPromociones
         $descuentos = [];
         $faltantes = [];
         $regalos = [];
+        $agotadas = [];
 
         foreach ($promociones as $promocion) {
-            $requerido = self::requerido($promocion, $hay);
-
-            if ($requerido === null || $promocion->cantidad_beneficio <= 0 || $promocion->descuento_porcentaje <= 0) {
+            if ($promocion->cantidad_beneficio <= 0 || $promocion->descuento_porcentaje <= 0) {
                 continue;
             }
 
             $regalo = $promocion->beneficioPresentacion;
             $porRegalo = $promocion->cantidad_beneficio;
 
-            if ($promocion->esBonificacion()) {
-                $veces = self::veces($requerido, $hay);
-
-                if ($veces > 0) {
-                    $regalos[] = new RegaloPromocion($promocion, $regalo, $veces * $porRegalo);
+            if ($promocion->cuentaUnidades()) {
+                if ($promocion->esBonificacion()) {
+                    $ganadas = self::vecesEnUnidades($promocion, $lineas) * $porRegalo;
+                    self::regalar($promocion, $regalo, $ganadas, $disponibles, $regalos, $agotadas);
                 }
+
+                continue;
+            }
+
+            $requerido = self::requerido($promocion, $hay);
+
+            if ($requerido === null) {
+                continue;
+            }
+
+            if ($promocion->esBonificacion()) {
+                self::regalar($promocion, $regalo, self::veces($requerido, $hay) * $porRegalo, $disponibles, $regalos, $agotadas);
 
                 continue;
             }
@@ -108,7 +127,52 @@ final class MotorPromociones
             }
         }
 
-        return new ResultadoPromociones($descuentos, $faltantes, $regalos);
+        return new ResultadoPromociones($descuentos, $faltantes, $regalos, $agotadas);
+    }
+
+    /**
+     * El regalo que le toca ($ganadas), hasta lo que le queda si tiene tope.
+     *
+     * @param array<int, int> $disponibles
+     * @param list<RegaloPromocion> $regalos
+     * @param list<RegaloPromocion> $agotadas
+     */
+    private static function regalar(Promocion $promocion, Presentacion $regalo, int $ganadas, array $disponibles, array &$regalos, array &$agotadas): void
+    {
+        if ($ganadas <= 0) {
+            return;
+        }
+
+        $da = array_key_exists($promocion->id, $disponibles) ? min($ganadas, max(0, $disponibles[$promocion->id])) : $ganadas;
+
+        if ($da > 0) {
+            $regalos[] = new RegaloPromocion($promocion, $regalo, $da, $ganadas);
+        } else {
+            $agotadas[] = new RegaloPromocion($promocion, $regalo, 0, $ganadas);
+        }
+    }
+
+    /**
+     * Veces que aplica contando unidades de todos sus productos juntos: unidades ÷ N.
+     *
+     * @param array<LineaPromocion> $lineas
+     */
+    private static function vecesEnUnidades(Promocion $promocion, array $lineas): int
+    {
+        $productos = [];
+        $unidades = 0;
+
+        foreach ($promocion->condiciones as $condicion) {
+            $productos[$condicion->producto_id] = true;
+        }
+
+        foreach ($lineas as $linea) {
+            if (isset($productos[$linea->productoId])) {
+                $unidades += $linea->unidades();
+            }
+        }
+
+        return intdiv($unidades, max(1, (int) $promocion->compra_unidades));
     }
 
     /**

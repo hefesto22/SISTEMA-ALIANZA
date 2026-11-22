@@ -8,10 +8,12 @@ use App\Domain\Precios\CalculadoraPrecio;
 use App\Domain\Promociones\LineaPromocion;
 use App\Domain\Promociones\MotorPromociones;
 use App\Domain\Promociones\RegaloPromocion;
+use App\Domain\Promociones\UsoDePromociones;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Promocion;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Recalcula líneas y totales de un pedido.
@@ -35,6 +37,11 @@ use Illuminate\Database\Eloquent\Collection;
  * sale (si ya no se cumple, sale 0 o se quita). Las condiciones solo
  * cuentan las líneas que se cobran.
  *
+ * Tope (promociones del plan del proveedor): el regalo no pasa de lo que
+ * queda autorizado sin contar este pedido (UsoDePromociones). Esas
+ * promociones se bloquean mientras se calcula, para que dos pedidos al mismo
+ * tiempo no tomen las mismas unidades; si ya no queda, no hay regalo.
+ *
  * Por línea: subtotal (bruto) − descuento = neto; el ISV va sobre el neto.
  */
 final class RecalcularPedido
@@ -42,6 +49,11 @@ final class RecalcularPedido
     public function __construct(private readonly MotorPromociones $motor) {}
 
     public function ejecutar(Pedido $pedido, bool $preciosVigentes = true, bool $respetarPromocionesDelPedido = false, bool $sinPerdida = false): Pedido
+    {
+        return DB::transaction(fn (): Pedido => $this->recalcular($pedido, $preciosVigentes, $respetarPromocionesDelPedido, $sinPerdida));
+    }
+
+    private function recalcular(Pedido $pedido, bool $preciosVigentes, bool $respetarPromocionesDelPedido, bool $sinPerdida): Pedido
     {
         $tasaIsv = CalculadoraPrecio::tasaIsv();
         $pedido->load(['items.producto', 'items.presentacion']);
@@ -76,7 +88,8 @@ final class RecalcularPedido
             );
         }
 
-        $resultado = $this->motor->calcular($lineas, $this->promociones($pedido, $items, $respetarPromocionesDelPedido));
+        $promociones = $this->promociones($pedido, $items, $respetarPromocionesDelPedido);
+        $resultado = $this->motor->calcular($lineas, $promociones, $this->disponibles($pedido, $promociones));
         $items = $this->bonificaciones($pedido, $items, $resultado->regalos);
 
         $subtotal = 0.0;
@@ -172,6 +185,33 @@ final class RecalcularPedido
         }
 
         return $quedan;
+    }
+
+    /**
+     * Lo que le queda de regalo a cada promoción con tope, sin contar este
+     * pedido. Bloquea esas promociones hasta que termina la transacción.
+     *
+     * @param Collection<int, Promocion> $promociones
+     *
+     * @return array<int, int>
+     */
+    private function disponibles(Pedido $pedido, Collection $promociones): array
+    {
+        $conTope = $promociones->filter(fn (Promocion $promocion): bool => $promocion->tieneTope());
+
+        if ($conTope->isEmpty()) {
+            return [];
+        }
+
+        // El tope de ahora mismo, con la promoción bloqueada.
+        $topes = Promocion::query()->whereKey($conTope->modelKeys())->lockForUpdate()->pluck('tope_unidades', 'id');
+
+        foreach ($conTope as $promocion) {
+            $tope = $topes->get($promocion->id);
+            $promocion->tope_unidades = is_numeric($tope) ? (int) $tope : null;
+        }
+
+        return UsoDePromociones::disponibles($conTope, $pedido->id);
     }
 
     /**

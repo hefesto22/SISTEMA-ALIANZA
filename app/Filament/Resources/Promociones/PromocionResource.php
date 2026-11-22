@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Promociones;
 
+use App\Domain\Promociones\UsoDePromociones;
 use App\Filament\Resources\Promociones\Pages\ManagePromociones;
 use App\Filament\Resources\Promociones\Schemas\PromocionForm;
 use App\Filament\Support\Acceso;
@@ -31,6 +32,10 @@ use Illuminate\Support\Facades\Gate;
  * desactivan con el interruptor. El vendedor solo ve las vigentes de su
  * bodega, y el menú le aparece únicamente cuando hay alguna; si no hay, la
  * preventa sigue igual que siempre.
+ *
+ * Las que salen de un plan del proveedor (PlanPromocionResource) se ven aquí
+ * con su plan y lo que queda de regalo, pero se cambian desde el plan; aquí
+ * solo se activan o desactivan.
  *
  * @extends \Filament\Resources\Resource<Promocion>
  */
@@ -66,7 +71,7 @@ class PromocionResource extends Resource
     {
         $usuario = Acceso::usuario();
         $query = Promocion::query()
-            ->with(['condiciones.producto', 'productoBeneficio', 'bodegas'])
+            ->with(['condiciones.producto', 'condiciones.presentacion', 'productoBeneficio', 'beneficioPresentacion.unidadMedida', 'bodegas', 'plan'])
             ->withCount('items');
 
         if ($usuario === null) {
@@ -133,7 +138,7 @@ class PromocionResource extends Resource
                     ->searchable()
                     ->weight('semibold')
                     ->wrap()
-                    ->description(fn (Promocion $record): string => $record->resumen()),
+                    ->description(fn (Promocion $record): string => $record->resumen().self::delPlan($record)),
                 TextColumn::make('estado')
                     ->label('Estado')
                     ->state(fn (Promocion $record): string => $record->estado())
@@ -176,14 +181,25 @@ class PromocionResource extends Resource
                     ->trueLabel('Activas')
                     ->falseLabel('Inactivas')
                     ->visible(! $esVendedor),
+                TernaryFilter::make('origen')
+                    ->label('Origen')
+                    ->trueLabel('De planes de proveedores')
+                    ->falseLabel('Propias')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereNotNull('plan_id'),
+                        false: fn (Builder $query): Builder => $query->whereNull('plan_id'),
+                    )
+                    ->visible(! $esVendedor),
             ])
             ->recordActions([
                 EditAction::make()
                     ->modalHeading(fn (Promocion $record): string => "Editar {$record->codigo}")
                     ->modalWidth(Width::SevenExtraLarge)
-                    ->mutateDataUsing(fn (array $data): array => PromocionForm::completar($data)),
+                    ->mutateDataUsing(fn (array $data): array => PromocionForm::completar($data))
+                    // Las del plan se cambian en el plan.
+                    ->hidden(fn (Promocion $record): bool => $record->plan_id !== null),
                 DeleteAction::make()
-                    ->hidden(fn (Promocion $record): bool => (int) $record->getAttribute('items_count') > 0),
+                    ->hidden(fn (Promocion $record): bool => $record->plan_id !== null || (int) $record->getAttribute('items_count') > 0),
             ])
             ->emptyStateIcon(Heroicon::OutlinedGift)
             ->emptyStateHeading($esVendedor ? 'Hoy no hay promociones' : 'Todavía no hay promociones')
@@ -203,6 +219,22 @@ class PromocionResource extends Resource
     public static function getGloballySearchableAttributes(): array
     {
         return ['codigo', 'nombre'];
+    }
+
+    /**
+     * " · Plan OPL NOVIEMBRE 2026 · quedan 140 de 500 UN de regalo" (vacío si es propia y sin tope).
+     */
+    private static function delPlan(Promocion $promocion): string
+    {
+        $texto = $promocion->plan !== null ? ' · '.$promocion->plan->nombre : '';
+
+        if ($promocion->tieneTope()) {
+            $quedan = UsoDePromociones::disponibles([$promocion])[$promocion->id] ?? 0;
+            $sigla = $promocion->beneficioPresentacion->sigla();
+            $texto .= $quedan > 0 ? " · quedan {$quedan} de {$promocion->tope_unidades} {$sigla} de regalo" : " · agotada ({$promocion->tope_unidades} {$sigla} autorizadas)";
+        }
+
+        return $texto;
     }
 
     private static function vigencia(Promocion $promocion): string
