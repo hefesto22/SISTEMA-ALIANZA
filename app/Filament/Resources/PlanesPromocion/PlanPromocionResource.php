@@ -52,6 +52,10 @@ class PlanPromocionResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Planes de proveedores';
 
+    protected static ?string $navigationLabel = 'Planes de proveedores';
+
+    protected static ?string $breadcrumb = 'Planes de proveedores';
+
     protected static ?string $slug = 'planes-proveedor';
 
     protected static ?int $navigationSort = 4;

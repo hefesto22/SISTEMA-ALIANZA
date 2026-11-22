@@ -37,7 +37,7 @@ use Illuminate\Support\Carbon;
  *   Proveedor · Nombre · Desde · Hasta
  *   Bodegas (ninguna = todas) · La hoja del proveedor (imagen o PDF) · Notas
  *   Líneas autorizadas, una fila por línea de la hoja:
- *     Productos que compra | Compra | Regala | Producto que se regala | Tope | % hoja | Al costo
+ *     Productos que compra | Compra | Regala | Producto que se regala | Tope (UN) | % hoja | Al costo
  *
  * "Compra + Regala" es la mecánica en UNIDADES: 24 + 1 se cumple con 24
  * unidades de cualquiera de los productos de la fila, mezclados, sueltas o
@@ -73,7 +73,7 @@ final class PlanPromocionForm
                         TextInput::make('nombre')
                             ->label('Nombre del plan')
                             ->placeholder('Ej. Plan OPL noviembre 2026')
-                            ->default(fn (): string => 'Plan OPL '.today()->locale('es')->monthName.' '.today()->year)
+                            ->default(fn (): string => 'Plan OPL '.today()->translatedFormat('F Y'))
                             ->required()
                             ->maxLength(255)
                             ->columnSpan(['xl' => 4]),
@@ -122,12 +122,12 @@ final class PlanPromocionForm
                             ->hiddenLabel()
                             ->table([
                                 TableColumn::make('Productos que compra')->markAsRequired(),
-                                TableColumn::make('Compra')->markAsRequired()->width('90px'),
-                                TableColumn::make('Regala')->markAsRequired()->width('90px'),
-                                TableColumn::make('Producto que se regala')->markAsRequired()->width('24%'),
-                                TableColumn::make('Tope')->markAsRequired()->width('110px'),
-                                TableColumn::make('% hoja')->width('100px'),
-                                TableColumn::make('Al costo')->width('150px'),
+                                TableColumn::make('Compra')->markAsRequired()->width('100px'),
+                                TableColumn::make('Regala')->markAsRequired()->width('100px'),
+                                TableColumn::make('Producto que se regala')->markAsRequired()->width('22%'),
+                                TableColumn::make('Tope (UN)')->markAsRequired()->width('130px'),
+                                TableColumn::make('% hoja')->width('110px'),
+                                TableColumn::make('Al costo')->width('170px'),
                             ])
                             ->schema([
                                 Hidden::make('id'),
@@ -160,7 +160,6 @@ final class PlanPromocionForm
                                     ->integer()
                                     ->minValue(1)
                                     ->default(1)
-                                    ->prefix('+')
                                     ->required()
                                     ->live(debounce: 500),
                                 Select::make('regalo_id')
@@ -177,7 +176,6 @@ final class PlanPromocionForm
                                     ->integer()
                                     ->minValue(0)
                                     ->placeholder('500')
-                                    ->suffix('UN')
                                     ->required()
                                     ->live(debounce: 500),
                                 TextInput::make('porcentaje')
@@ -186,7 +184,6 @@ final class PlanPromocionForm
                                     ->minValue(0)
                                     ->maxValue(100)
                                     ->placeholder('4.17')
-                                    ->suffix('%')
                                     ->live(debounce: 500),
                                 TextEntry::make('al_costo')
                                     ->hiddenLabel()
