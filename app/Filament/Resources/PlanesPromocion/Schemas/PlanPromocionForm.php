@@ -17,7 +17,6 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
@@ -28,7 +27,6 @@ use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\TextSize;
 use Filament\Support\Icons\Heroicon;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 
 /**
@@ -36,8 +34,10 @@ use Illuminate\Support\Carbon;
  *
  *   Proveedor · Nombre · Desde · Hasta
  *   Bodegas (ninguna = todas) · La hoja del proveedor (imagen o PDF) · Notas
- *   Líneas autorizadas, una fila por línea de la hoja:
- *     Productos que compra | Compra | Regala | Producto que se regala | Tope (UN) | % hoja | Al costo
+ *   Líneas autorizadas, una tarjeta por línea de la hoja (se encogen y se copian):
+ *     Productos que compra (del proveedor escogido arriba)
+ *     Compra · Regala · Producto que se regala · Tope autorizado · % de la hoja
+ *     Al costo: el % que da la mecánica y la inversión, o lo que falta para calcularlos
  *
  * "Compra + Regala" es la mecánica en UNIDADES: 24 + 1 se cumple con 24
  * unidades de cualquiera de los productos de la fila, mezclados, sueltas o
@@ -46,7 +46,8 @@ use Illuminate\Support\Carbon;
  * × costo del regalo); si regala bastante más que el % de la hoja, se marca.
  *
  * Al guardar, cada fila queda como una promoción del plan
- * (GuardarPlanPromocion). Los productos que se buscan son del proveedor.
+ * (GuardarPlanPromocion). Los productos de las líneas son solo los del
+ * proveedor escogido; si se cambia de proveedor, se quitan los de otro.
  */
 final class PlanPromocionForm
 {
@@ -67,8 +68,24 @@ final class PlanPromocionForm
                             ->options(fn (): array => self::proveedores())
                             ->searchable()
                             ->required()
-                            // Los productos que se buscan abajo son de este proveedor.
+                            // Los productos de las líneas son de este proveedor: si cambia, se quitan los de otro.
                             ->live()
+                            ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
+                                $suyos = self::productosDe($state);
+                                $lineas = is_array($get('lineas')) ? $get('lineas') : [];
+
+                                foreach ($lineas as $clave => $linea) {
+                                    if (! is_array($linea)) {
+                                        continue;
+                                    }
+
+                                    $linea['productos'] = array_values(array_filter(self::enteros($linea['productos'] ?? []), fn (int $id): bool => isset($suyos[$id])));
+                                    $linea['regalo_id'] = is_numeric($linea['regalo_id'] ?? null) && isset($suyos[(int) $linea['regalo_id']]) ? (int) $linea['regalo_id'] : null;
+                                    $lineas[$clave] = $linea;
+                                }
+
+                                $set('lineas', $lineas);
+                            })
                             ->columnSpan(['xl' => 4]),
                         TextInput::make('nombre')
                             ->label('Nombre del plan')
@@ -114,30 +131,24 @@ final class PlanPromocionForm
                     ]),
 
                 Section::make('Líneas autorizadas')
-                    ->description('Una fila por línea de la hoja. La mecánica cuenta unidades: 24 + 1 se cumple con 24 unidades de cualquiera de los productos de la fila (se pueden mezclar), sueltas o en caja. El tope son las unidades de regalo autorizadas: no se regala más.')
+                    ->description('Una por cada línea de la hoja. La mecánica cuenta unidades: 24 + 1 se cumple con 24 unidades de cualquiera de los productos de la línea (se pueden mezclar), sueltas o en caja. El tope son las unidades de regalo autorizadas: no se regala más.')
                     ->icon(Heroicon::OutlinedGift)
                     ->compact()
                     ->schema([
                         Repeater::make('lineas')
                             ->hiddenLabel()
-                            ->table([
-                                TableColumn::make('Productos que compra')->markAsRequired(),
-                                TableColumn::make('Compra')->markAsRequired()->width('100px'),
-                                TableColumn::make('Regala')->markAsRequired()->width('100px'),
-                                TableColumn::make('Producto que se regala')->markAsRequired()->width('22%'),
-                                TableColumn::make('Tope (UN)')->markAsRequired()->width('130px'),
-                                TableColumn::make('% hoja')->width('110px'),
-                                TableColumn::make('Al costo')->width('170px'),
-                            ])
+                            ->columns(['default' => 2, 'lg' => 12])
+                            ->itemLabel(fn (array $state): string => self::tituloLinea($state))
                             ->schema([
                                 Hidden::make('id'),
                                 Select::make('productos')
-                                    ->hiddenLabel()
+                                    ->label('Productos que compra el cliente (se pueden mezclar)')
                                     ->multiple()
                                     ->searchable()
-                                    ->placeholder('Buscar por código o nombre…')
-                                    ->getSearchResultsUsing(fn (string $search, Get $get): array => self::buscar($search, $get('../../proveedor_id')))
-                                    ->getOptionLabelsUsing(fn (array $values): array => self::etiquetas($values))
+                                    // Solo los del proveedor escogido arriba.
+                                    ->options(fn (Get $get): array => self::productosDe($get('../../proveedor_id')))
+                                    ->placeholder(fn (Get $get): string => filled($get('../../proveedor_id')) ? 'Escoja uno o varios productos…' : 'Primero escoja el proveedor arriba')
+                                    ->disabled(fn (Get $get): bool => blank($get('../../proveedor_id')))
                                     ->required()
                                     ->live()
                                     // El regalo suele ser el mismo: si no hay, el primero.
@@ -145,55 +156,64 @@ final class PlanPromocionForm
                                         if (blank($get('regalo_id')) && is_array($state) && $state !== []) {
                                             $set('regalo_id', (int) reset($state));
                                         }
-                                    }),
+                                    })
+                                    ->columnSpan(['default' => 2, 'lg' => 12]),
                                 TextInput::make('compra')
-                                    ->hiddenLabel()
+                                    ->label('Compra (unidades)')
                                     ->numeric()
                                     ->integer()
                                     ->minValue(1)
-                                    ->placeholder('24')
+                                    ->placeholder('Ej. 24')
                                     ->required()
-                                    ->live(debounce: 500),
+                                    ->live(debounce: 500)
+                                    ->columnSpan(['default' => 1, 'lg' => 2]),
                                 TextInput::make('regala')
-                                    ->hiddenLabel()
+                                    ->label('Regala (unidades)')
                                     ->numeric()
                                     ->integer()
                                     ->minValue(1)
                                     ->default(1)
                                     ->required()
-                                    ->live(debounce: 500),
+                                    ->live(debounce: 500)
+                                    ->columnSpan(['default' => 1, 'lg' => 2]),
                                 Select::make('regalo_id')
-                                    ->hiddenLabel()
+                                    ->label('Producto que se regala')
                                     ->searchable()
-                                    ->placeholder('Buscar…')
-                                    ->getSearchResultsUsing(fn (string $search, Get $get): array => self::buscar($search, $get('../../proveedor_id')))
-                                    ->getOptionLabelUsing(fn (mixed $value): ?string => self::etiquetas([$value])[(int) $value] ?? null)
+                                    ->options(fn (Get $get): array => self::productosDe($get('../../proveedor_id')))
+                                    ->placeholder(fn (Get $get): string => filled($get('../../proveedor_id')) ? 'Escoja el producto…' : 'Primero escoja el proveedor')
+                                    ->disabled(fn (Get $get): bool => blank($get('../../proveedor_id')))
                                     ->required()
-                                    ->live(),
+                                    ->live()
+                                    ->columnSpan(['default' => 2, 'lg' => 4]),
                                 TextInput::make('tope')
-                                    ->hiddenLabel()
+                                    ->label('Tope autorizado (UN)')
                                     ->numeric()
                                     ->integer()
                                     ->minValue(0)
-                                    ->placeholder('500')
+                                    ->placeholder('Ej. 500')
                                     ->required()
-                                    ->live(debounce: 500),
+                                    ->live(debounce: 500)
+                                    ->columnSpan(['default' => 1, 'lg' => 2]),
                                 TextInput::make('porcentaje')
-                                    ->hiddenLabel()
+                                    ->label('% de la hoja')
                                     ->numeric()
                                     ->minValue(0)
                                     ->maxValue(100)
-                                    ->placeholder('4.17')
-                                    ->live(debounce: 500),
+                                    ->placeholder('Ej. 4.17')
+                                    ->live(debounce: 500)
+                                    ->columnSpan(['default' => 1, 'lg' => 2]),
                                 TextEntry::make('al_costo')
-                                    ->hiddenLabel()
+                                    ->label('Al costo')
                                     ->state(fn (Get $get): string => self::alCosto($get))
                                     ->color(fn (Get $get): string => self::excede($get) ? 'danger' : 'gray')
                                     ->weight(fn (Get $get): ?FontWeight => self::excede($get) ? FontWeight::Bold : null)
-                                    ->size(TextSize::Small),
+                                    ->size(TextSize::Small)
+                                    ->columnSpan(['default' => 2, 'lg' => 12]),
                             ])
                             ->defaultItems(1)
                             ->minItems(1)
+                            ->collapsible()
+                            ->cloneable()
                             ->addActionLabel('Agregar otra línea')
                             ->reorderable(false),
                     ]),
@@ -283,56 +303,99 @@ final class PlanPromocionForm
     }
 
     /**
-     * Productos activos del proveedor (si ya se escogió) que coinciden.
+     * Los productos activos del proveedor, para escoger en las líneas (una
+     * consulta por proveedor en cada petición). Sin proveedor, ninguno.
      *
      * @return array<int, string>
      */
-    private static function buscar(string $texto, mixed $proveedorId): array
+    private static function productosDe(mixed $proveedorId): array
     {
-        /** @var array<int, string> $opciones */
-        $opciones = Producto::query()
-            ->activos()
-            ->buscar($texto)
-            ->when(is_numeric($proveedorId), fn (Builder $query): Builder => $query->where('proveedor_id', (int) $proveedorId))
-            ->orderBy('descripcion')
-            ->limit(50)
-            ->get()
-            ->mapWithKeys(fn (Producto $producto): array => [$producto->id => $producto->etiqueta()])
-            ->all();
+        if (! is_numeric($proveedorId)) {
+            return [];
+        }
 
-        return $opciones;
+        /** @var array<int, array<int, string>> $cache */
+        static $cache = [];
+
+        if (! isset($cache[(int) $proveedorId])) {
+            /** @var array<int, string> $opciones */
+            $opciones = Producto::query()
+                ->activos()
+                ->where('proveedor_id', (int) $proveedorId)
+                ->orderBy('descripcion')
+                ->get()
+                ->mapWithKeys(fn (Producto $producto): array => [$producto->id => $producto->etiqueta()])
+                ->all();
+
+            $cache[(int) $proveedorId] = $opciones;
+        }
+
+        return $cache[(int) $proveedorId];
     }
 
     /**
-     * @param array<mixed> $ids
+     * "Línea 24+1 · 3 productos · tope 500" (lo que lleva la línea, para cuando se encoge).
      *
-     * @return array<int, string>
+     * @param array<string, mixed> $state
      */
-    private static function etiquetas(array $ids): array
+    private static function tituloLinea(array $state): string
     {
-        /** @var array<int, string> $etiquetas */
-        $etiquetas = Producto::query()
-            ->whereKey(self::enteros($ids))
-            ->get()
-            ->mapWithKeys(fn (Producto $producto): array => [$producto->id => $producto->etiqueta()])
-            ->all();
+        $compra = is_numeric($state['compra'] ?? null) ? (int) $state['compra'] : null;
+        $regala = is_numeric($state['regala'] ?? null) ? (int) $state['regala'] : null;
+        $productos = count(self::enteros($state['productos'] ?? []));
+        $partes = [$compra !== null && $regala !== null ? "Línea {$compra}+{$regala}" : 'Línea nueva'];
 
-        return $etiquetas;
+        if ($productos > 0) {
+            $partes[] = $productos === 1 ? '1 producto' : "{$productos} productos";
+        }
+
+        if (is_numeric($state['tope'] ?? null)) {
+            $partes[] = 'tope '.number_format((int) $state['tope']);
+        }
+
+        return implode(' · ', $partes);
     }
 
     /**
-     * "4.17 % · L 5,875.00": el % que da la mecánica al costo y la inversión
-     * autorizada (tope × costo del regalo).
+     * "Regala 4.17 % al costo (la hoja dice 4.17 %) · Inversión autorizada
+     * L 3,435.00 (500 × L 6.87 la UN del regalo)". Si falta algo, lo dice.
      */
     private static function alCosto(Get $get): string
     {
-        [$porcentaje, $inversion] = self::calculo($get);
+        $faltan = [];
 
-        if ($porcentaje === null && $inversion === null) {
-            return '—';
+        if (self::enteros($get('productos') ?? []) === []) {
+            $faltan[] = 'los productos';
         }
 
-        return ($porcentaje !== null ? Promocion::porcentajeTexto($porcentaje) : '—').' · '.($inversion !== null ? lempiras($inversion) : '—');
+        if (self::entero($get('compra')) < 1) {
+            $faltan[] = 'cuántas compra';
+        }
+
+        if (! is_numeric($get('regalo_id'))) {
+            $faltan[] = 'el producto que se regala';
+        }
+
+        if (! is_numeric($get('tope'))) {
+            $faltan[] = 'el tope';
+        }
+
+        if ($faltan !== []) {
+            return 'Para calcular el % y la inversión falta: '.implode(', ', $faltan).'.';
+        }
+
+        [$porcentaje, $inversion, $costo] = self::calculo($get);
+        $autorizado = $get('porcentaje');
+
+        $texto = $porcentaje !== null
+            ? 'Regala '.Promocion::porcentajeTexto($porcentaje).' al costo'.(is_numeric($autorizado) ? ' (la hoja dice '.Promocion::porcentajeTexto((float) $autorizado).')' : '')
+            : 'Sin costo registrado para calcular el %';
+
+        if ($inversion !== null && $costo !== null) {
+            $texto .= ' · Inversión autorizada '.lempiras($inversion).' ('.number_format(self::entero($get('tope'))).' × '.lempiras($costo).' la unidad del regalo)';
+        }
+
+        return self::excede($get) ? $texto.' · Regala más que la hoja: revise la mecánica.' : $texto;
     }
 
     /**
@@ -347,7 +410,7 @@ final class PlanPromocionForm
     }
 
     /**
-     * @return array{0: float|null, 1: float|null} [% al costo, inversión autorizada]
+     * @return array{0: float|null, 1: float|null, 2: float|null} [% al costo, inversión autorizada, costo de la unidad del regalo]
      */
     private static function calculo(Get $get): array
     {
@@ -365,7 +428,7 @@ final class PlanPromocionForm
         $tope = $get('tope');
         $inversion = $baseRegalo instanceof Presentacion && is_numeric($tope) ? round((int) $tope * $baseRegalo->costo, 2) : null;
 
-        return [$porcentaje, $inversion];
+        return [$porcentaje, $inversion, $baseRegalo instanceof Presentacion ? round($baseRegalo->costo, 2) : null];
     }
 
     private static function entero(mixed $valor): int
