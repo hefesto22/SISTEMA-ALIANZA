@@ -19,9 +19,10 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Gate;
 
 /**
- * La carga: en ruta, lo que lleva (facturas y productos); liquidada, el
- * cuadre. Arriba: Liquidar (en ruta), Imprimir (hoja de carga, de cobro y
- * la liquidación), Editar y Borrar (en ruta).
+ * La carga: en ruta, lo que lleva (cada producto con sus cajas y unidades, y
+ * las facturas); liquidada, el cuadre. Arriba: Liquidar e Imprimir hoja de
+ * carga (en ruta, para ir marcando lo que se sube), Imprimir (hoja de carga,
+ * de cobro y la liquidación), Editar y Borrar (en ruta).
  */
 class ViewCarga extends ViewRecord
 {
@@ -37,6 +38,10 @@ class ViewCarga extends ViewRecord
                 ->icon(Heroicon::OutlinedBanknotes)
                 ->visible(fn (): bool => Gate::allows('liquidar', $this->carga()))
                 ->url(fn (): string => CargaResource::getUrl('liquidar', ['record' => $this->carga()])),
+            $this->hoja('imprimirHojaCarga', 'carga', Heroicon::OutlinedPrinter)
+                ->label('Imprimir hoja de carga')
+                ->color('gray')
+                ->visible(fn (): bool => $this->carga()->enRuta()),
             ActionGroup::make([
                 $this->hoja('hojaCarga', 'carga', Heroicon::OutlinedTruck),
                 $this->hoja('hojaCobro', 'cobro', Heroicon::OutlinedPencilSquare),

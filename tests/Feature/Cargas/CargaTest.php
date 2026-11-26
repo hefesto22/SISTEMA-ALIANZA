@@ -225,8 +225,15 @@ test('liquidar: lo entregado menos lo devuelto; la que no se entregó se anula y
         ->and(fn () => $liquidar->ejecutar($carga, ['entregas' => [], 'efectivo' => 0.0, 'cheques' => [], 'transferencias' => []], $this->encargado))
         ->toThrow(ReglaNegocioException::class, 'ya se liquidó');
 
-    // La hoja de carga suma lo que salió (también lo que regresó sin entregarse).
-    expect(HojaDeCarga::datos($carga->fresh())['productos'][0]['total'])->toBe(19);
+    // La hoja de carga suma lo que salió (también lo que regresó sin entregarse): un renglón por producto.
+    expect(HojaDeCarga::datos($carga->fresh())['productos'])->toBe([[
+        'codigo'      => $this->jabon->codigo,
+        'descripcion' => $this->jabon->descripcion,
+        'cajas'       => [],
+        'unidades'    => 19,
+        'suelta'      => 'UN',
+        'regalo'      => null,
+    ]]);
 });
 
 test('sale en otra carga: no se cobra y queda libre para cargarse otro día', function (): void {
@@ -288,13 +295,14 @@ test('bodega arma la carga desde Impresos, la ve, imprime sus hojas y la liquida
     $dos = pedidoParaCarga($this, 5);
     $this->actingAs($this->encargado);
 
-    // En Impresos, cada día trae "Cargar camión".
+    // En Impresos, cada día dice cuántas quedan sin cargar y trae "Cargar camión".
     Livewire::test(ListPedidos::class)
         ->set('activeTab', EstadoPedido::Impreso->value)
-        ->assertSee('Cargar camión')
-        ->assertSee(CargaResource::getUrl('create', ['dia' => today()->toDateString(), 'bodega' => $this->bodega->id]));
+        ->assertSee('Sin cargar')
+        ->assertSee('Cargar camión');
 
-    Livewire::withQueryParams(['dia' => today()->toDateString(), 'bodega' => $this->bodega->id])
+    // "Escoger una por una": Nueva carga con las de esos días marcadas.
+    Livewire::withQueryParams(['dias' => today()->toDateString(), 'bodega' => $this->bodega->id])
         ->test(CreateCarga::class)
         ->assertOk()
         ->assertSee('Facturas que lleva')
@@ -311,6 +319,7 @@ test('bodega arma la carga desde Impresos, la ve, imprime sus hojas y la liquida
     Livewire::test(ViewCarga::class, ['record' => $carga->getRouteKey()])
         ->assertOk()
         ->assertSee('Lo que se sube al camión')
+        ->assertSee('Imprimir hoja de carga')
         ->assertSee('JOSE RAMIREZ');
     Livewire::test(EditCarga::class, ['record' => $carga->getRouteKey()])
         ->assertOk()
@@ -345,6 +354,52 @@ test('bodega arma la carga desde Impresos, la ve, imprime sus hojas y la liquida
     $this->get(route('cargas.imprimir', ['carga' => $carga, 'hoja' => 'liquidacion']))->assertOk()->assertSee('Liquidación de la carga');
     $this->get(CargaResource::getUrl('liquidar', ['record' => $carga]))->assertForbidden();
     $this->get(CargaResource::getUrl('edit', ['record' => $carga]))->assertForbidden();
+});
+
+test('en Impresos se escogen varios días y el camión se carga de un solo con lo que queda de ellos', function (): void {
+    $hoy = today();
+    $dias = [$hoy->copy()->subDays(2)->toDateString(), $hoy->copy()->subDay()->toDateString()];
+    $otro = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $otro->assignRole(Rol::Vendedor->value);
+
+    $this->travelTo($hoy->copy()->subDays(2)->setTime(8, 0));
+    $antier = pedidoParaCarga($this, 2);
+    $this->travelTo($hoy->copy()->subDay()->setTime(8, 0));
+    $ayer = pedidoParaCarga($this, 3);
+    // De otro vendedor y ya va en una carga: no sale.
+    $yaVa = pedidoParaCarga($this, 1, $otro);
+    $this->travelBack();
+    $deHoy = pedidoParaCarga($this, 4);
+    cargaCon($this, [$yaVa]);
+
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::Impreso->value)
+        ->mountAction('cargarDias', ['dias' => $dias, 'bodega' => $this->bodega->id])
+        ->assertSee('Sale con')
+        ->assertSee('2 facturas')
+        ->assertSee('Escoger una por una')
+        ->callMountedAction()
+        ->assertHasActionErrors(['repartidor_id']);
+
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::Impreso->value)
+        ->callAction('cargarDias', data: ['repartidor_id' => $this->sale->id, 'camion' => 'pab 9'], arguments: ['dias' => $dias, 'bodega' => $this->bodega->id])
+        ->assertHasNoActionErrors()
+        ->assertRedirect();
+
+    $carga = Carga::query()->latest('id')->firstOrFail();
+
+    expect($carga->renglones()->pluck('factura_id')->all())->toEqualCanonicalizing([facturaDe($antier)->id, facturaDe($ayer)->id])
+        ->and([$carga->camion, $carga->repartidor_id, $carga->fecha->toDateString()])->toBe(['PAB 9', $this->sale->id, $hoy->toDateString()])
+        ->and(FacturasParaCargar::de($this->bodega->id)->modelKeys())->toBe([facturaDe($deHoy)->id]);
+
+    // Esos días ya no tienen qué cargar.
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::Impreso->value)
+        ->mountAction('cargarDias', ['dias' => $dias, 'bodega' => $this->bodega->id])
+        ->assertSee('ya no tienen facturas para cargar');
 });
 
 test('el vendedor no ve las cargas y el encargado no ve las de otra bodega', function (): void {

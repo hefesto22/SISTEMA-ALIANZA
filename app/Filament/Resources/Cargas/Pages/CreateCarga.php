@@ -12,6 +12,7 @@ use App\Filament\Resources\Cargas\Schemas\CargaForm;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Carga;
+use App\Models\Factura;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
@@ -19,10 +20,11 @@ use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Armar una carga. Desde Pedidos → Impresos ("Cargar camión" de un día)
- * llega con ?dia=2026-11-26&bodega=2: la bodega y las facturas de ese día
- * que todavía no van en otra carga vienen marcadas (si el día es de antes,
- * "Impresas desde" empieza en ese día).
+ * Armar una carga. Desde Pedidos → Impresos ("Escoger una por una" al
+ * cargar el camión con uno o varios días) llega con
+ * ?dias=2026-11-25,2026-11-26&bodega=2 (o ?dia=2026-11-26): la bodega y las
+ * facturas de esos días que todavía se pueden cargar vienen marcadas (si un
+ * día es de antes, "Impresas desde" empieza en el más viejo).
  */
 class CreateCarga extends CreateRecord
 {
@@ -39,20 +41,20 @@ class CreateCarga extends CreateRecord
         $usuario = Acceso::usuario();
         $pedida = request()->query('bodega');
         $bodega = $usuario?->veTodasLasBodegas() ? (is_numeric($pedida) ? (int) $pedida : null) : $usuario?->bodega_id;
-        $dia = Periodo::dia(request()->query('dia'));
+        $dias = self::diasPedidos();
 
         // Administración: la primera bodega que tiene facturas sin cargar.
         if ($bodega === null && $usuario?->veTodasLasBodegas()) {
             $bodega = self::bodegaConFacturas();
         }
 
-        // La lista empieza en los últimos días; si el día es de antes, en ese
-        // día; si en los últimos días no hay, en el último día que quedó sin cargar.
+        // La lista empieza en los últimos días; si piden días de antes, en el
+        // más viejo; si en los últimos días no hay, en el último día que quedó sin cargar.
         $desde = FacturasParaCargar::desdeDe()->toDateString();
 
-        if ($dia !== null && $dia < $desde) {
-            $desde = $dia;
-        } elseif ($dia === null && $bodega !== null && ! FacturasParaCargar::hayDesde($bodega, $desde)) {
+        if ($dias !== [] && min($dias) < $desde) {
+            $desde = min($dias);
+        } elseif ($dias === [] && $bodega !== null && ! FacturasParaCargar::hayDesde($bodega, $desde)) {
             $desde = FacturasParaCargar::anteriores($bodega, $desde)['ultimo'] ?? $desde;
         }
 
@@ -62,10 +64,33 @@ class CreateCarga extends CreateRecord
             'bodega_id' => $bodega,
             'fecha'     => today()->toDateString(),
             'desde'     => $desde,
-            'facturas'  => $bodega !== null && $dia !== null ? CargaForm::delDia($bodega, $dia) : [],
+            'facturas'  => $bodega !== null ? CargaForm::deLosDias($bodega, $dias)->map(fn (Factura $factura): string => (string) $factura->id)->values()->all() : [],
         ]);
 
         $this->callHook('afterFill');
+    }
+
+    /**
+     * Los días que vienen en la dirección (?dias=…, o ?dia=… de un solo día), sin repetir y en orden.
+     *
+     * @return list<string>
+     */
+    private static function diasPedidos(): array
+    {
+        $texto = request()->query('dias', request()->query('dia'));
+        $dias = [];
+
+        foreach (explode(',', is_string($texto) ? $texto : '') as $valor) {
+            $dia = Periodo::dia(trim($valor));
+
+            if ($dia !== null) {
+                $dias[$dia] = $dia;
+            }
+        }
+
+        ksort($dias);
+
+        return array_values($dias);
     }
 
     private static function bodegaConFacturas(): ?int

@@ -18,9 +18,9 @@ use App\Models\PedidoItem;
  * Lo que muestran la carga en pantalla y sus hojas para imprimir
  * (App\Http\Controllers\ImprimirCargaController):
  *
- *  - Hoja de carga: lo que se sube al camión, producto por producto (lo
- *    vendido y los regalos de las promociones), sumado de las facturas
- *    vigentes que lleva.
+ *  - Hoja de carga: lo que se sube al camión, un renglón por producto con
+ *    cuántas cajas y cuántas unidades (con los regalos de las
+ *    promociones), sumado de las facturas que lleva, para marcarlo.
  *  - Hoja de cobro: las facturas, para anotar lo que se cobró en cada una.
  *  - Liquidación: el cuadre que se guardó al liquidar, los cheques, las
  *    transferencias y las devoluciones.
@@ -39,7 +39,7 @@ final class HojaDeCarga
      *     facturas: list<array{id: int, numero: string, corto: string, cliente: string, municipio: string|null, vendio: string, ruta: string|null, pedido: string, pedido_id: int, total: float, vigente: bool, salio: bool, estado: EntregaFactura, nota: string|null}>,
      *     cuantas: int,
      *     total: float,
-     *     productos: list<array{codigo: string, descripcion: string, sigla: string, vendido: int, regalo: int, total: int}>,
+     *     productos: list<array{codigo: string, descripcion: string, cajas: list<array{cantidad: int, sigla: string}>, unidades: int, suelta: string, regalo: string|null}>,
      *     cheques: list<array{factura: string|null, banco: string|null, referencia: string|null, monto: float}>,
      *     transferencias: list<array{factura: string|null, banco: string|null, referencia: string|null, monto: float}>,
      *     devoluciones: list<array{numero: string, factura: string|null, cliente: string, tipo: string, credito: bool, total: float}>,
@@ -126,11 +126,14 @@ final class HojaDeCarga
     }
 
     /**
-     * Lo que va en el camión por presentación: de los pedidos de las
-     * facturas que siguen vigentes (las que el camión entrega), lo que se
-     * despachó de cada línea; los regalos aparte.
+     * Lo que va en el camión, un renglón por producto como en la factura:
+     * cuántas cajas (la presentación que trae varias: CJ12, FD6…; si van
+     * de más de un tamaño, cada una con su sigla) y cuántas unidades
+     * sueltas (la base), de los pedidos de las facturas que salieron en el
+     * camión. Los regalos de las promociones van sumados y se dice cuánto
+     * es regalo. Por descripción, para ir marcando en la bodega.
      *
-     * @return list<array{codigo: string, descripcion: string, sigla: string, vendido: int, regalo: int, total: int}>
+     * @return list<array{codigo: string, descripcion: string, cajas: list<array{cantidad: int, sigla: string}>, unidades: int, suelta: string, regalo: string|null}>
      */
     public static function productos(Carga $carga): array
     {
@@ -144,10 +147,11 @@ final class HojaDeCarga
         $items = PedidoItem::query()
             ->whereIn('pedido_id', $pedidos)
             ->with(['producto', 'presentacion.unidadMedida'])
+            ->orderBy('id')
             ->get();
 
-        /** @var array<int, array{codigo: string, descripcion: string, sigla: string, contenido: int, vendido: int, regalo: int, total: int}> $porPresentacion */
-        $porPresentacion = [];
+        /** @var array<int, array{codigo: string, descripcion: string, cajas: array<int, array{cantidad: int, sigla: string, contenido: int}>, unidades: int, suelta: string, regalos: array<string, int>}> $porProducto */
+        $porProducto = [];
 
         /** @var PedidoItem $item */
         foreach ($items as $item) {
@@ -157,31 +161,54 @@ final class HojaDeCarga
                 continue;
             }
 
-            $fila = $porPresentacion[$item->presentacion_id] ?? [
+            $presentacion = $item->presentacion;
+            $sigla = $presentacion->sigla();
+            $fila = $porProducto[$item->producto_id] ?? [
                 'codigo'      => $item->producto->codigo,
                 'descripcion' => $item->producto->descripcion,
-                'sigla'       => $item->presentacion->sigla(),
-                'contenido'   => $item->presentacion->contenido,
-                'vendido'     => 0,
-                'regalo'      => 0,
-                'total'       => 0,
+                'cajas'       => [],
+                'unidades'    => 0,
+                'suelta'      => 'UN',
+                'regalos'     => [],
             ];
 
-            $fila[$item->bonificacion ? 'regalo' : 'vendido'] += $cantidad;
-            $fila['total'] += $cantidad;
-            $porPresentacion[$item->presentacion_id] = $fila;
+            // Como en la factura: lo que trae varias va en caja; la base, suelta.
+            if ($item->contenido > 1) {
+                $caja = $fila['cajas'][$presentacion->id] ?? ['cantidad' => 0, 'sigla' => $sigla, 'contenido' => $item->contenido];
+                $caja['cantidad'] += $cantidad;
+                $fila['cajas'][$presentacion->id] = $caja;
+            } else {
+                $fila['unidades'] += $cantidad;
+                $fila['suelta'] = $presentacion->unidadMedida->codigo;
+            }
+
+            if ($item->bonificacion) {
+                $fila['regalos'][$sigla] = ($fila['regalos'][$sigla] ?? 0) + $cantidad;
+            }
+
+            $porProducto[$item->producto_id] = $fila;
         }
 
-        usort($porPresentacion, fn (array $a, array $b): int => [$a['descripcion'], -$a['contenido']] <=> [$b['descripcion'], -$b['contenido']]);
+        usort($porProducto, fn (array $a, array $b): int => [$a['descripcion'], $a['codigo']] <=> [$b['descripcion'], $b['codigo']]);
 
-        return array_map(fn (array $fila): array => [
-            'codigo'      => $fila['codigo'],
-            'descripcion' => $fila['descripcion'],
-            'sigla'       => $fila['sigla'],
-            'vendido'     => $fila['vendido'],
-            'regalo'      => $fila['regalo'],
-            'total'       => $fila['total'],
-        ], $porPresentacion);
+        return array_map(function (array $fila): array {
+            $cajas = $fila['cajas'];
+            usort($cajas, fn (array $a, array $b): int => $b['contenido'] <=> $a['contenido']);
+            $regalos = [];
+
+            foreach ($fila['regalos'] as $sigla => $cantidad) {
+                $regalos[] = number_format($cantidad).' '.$sigla;
+            }
+
+            return [
+                'codigo'      => $fila['codigo'],
+                'descripcion' => $fila['descripcion'],
+                'cajas'       => array_map(fn (array $caja): array => ['cantidad' => $caja['cantidad'], 'sigla' => $caja['sigla']], $cajas),
+                'unidades'    => $fila['unidades'],
+                'suelta'      => $fila['suelta'],
+                'regalo'      => $regalos === [] ? null : implode(' y ', $regalos),
+            ];
+        }, $porProducto);
     }
 
     /**

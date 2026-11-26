@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Pages;
 
+use App\Domain\Cargas\ArmarCarga;
+use App\Domain\Cargas\FacturasParaCargar;
+use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Facturacion\DiaDeFacturacion;
 use App\Domain\Facturacion\DiasDeFacturacion;
 use App\Domain\Facturacion\ResumenDelDia;
 use App\Domain\Reportes\Periodo;
 use App\Enums\EstadoPedido;
 use App\Enums\FormatoFactura;
 use App\Enums\ModoImpresion;
+use App\Filament\Resources\Cargas\CargaResource;
+use App\Filament\Resources\Cargas\Schemas\CargaForm;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
@@ -19,8 +25,13 @@ use App\Models\Carga;
 use App\Models\Factura;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\EmbeddedTable;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\RenderHook;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\View;
@@ -30,6 +41,8 @@ use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Contracts\View\View as Hoja;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -39,8 +52,10 @@ use Livewire\Attributes\Url;
  * se ven de entrada por día (resources/views/filament/pedidos/por-dia.blade.php):
  * un cuadro por día y bodega (DiasDeFacturacion) para imprimir de un solo
  * todas las de un día, o ver cuántas facturas salieron, con qué números y
- * por cuánto, y sacar el resumen del día. "Uno por uno" vuelve a las
- * tarjetas de cada pedido (?vista=lista).
+ * por cuánto, y sacar el resumen del día. En Impresos se escogen uno o
+ * varios días de una bodega y se carga el camión con ellos de un solo
+ * (cargarDias). "Uno por uno" vuelve a las tarjetas de cada pedido
+ * (?vista=lista).
  */
 class ListPedidos extends ListRecords
 {
@@ -60,6 +75,13 @@ class ListPedidos extends ListRecords
 
     /** @var list<int>|null */
     private ?array $idsPorImprimir = null;
+
+    /**
+     * Lo de paraCargar() por días y bodega, para no buscarlo varias veces en la misma petición.
+     *
+     * @var array<string, array{bodega: int|null, nombre: string, dias: list<string>, hasta: string|null, cuantas: int, total: float, porDia: list<array{dia: string, titulo: string, cuantas: int, total: float}>}>
+     */
+    private array $yaCalculadas = [];
 
     protected function getHeaderActions(): array
     {
@@ -201,6 +223,98 @@ class ListPedidos extends ListRecords
     }
 
     /**
+     * "Cargar camión" de Impresos, con uno o varios días de una bodega
+     * (argumentos dias y bodega): cuántas facturas lleva de cada día (las
+     * que todavía se pueden cargar), quién sale, la fecha y el camión, y
+     * Guardar carga, que la arma con todas y abre la carga con lo que lleva.
+     * "Escoger una por una" abre Nueva carga con esos días marcados.
+     */
+    public function cargarDiasAction(): Action
+    {
+        return Action::make('cargarDias')
+            ->visible(fn (): bool => Gate::allows('create', Carga::class))
+            ->modalHeading(fn (array $arguments): string => $this->tituloDeLaCarga($arguments))
+            ->modalIcon(Heroicon::OutlinedTruck)
+            ->modalWidth(Width::TwoExtraLarge)
+            ->fillForm(fn (array $arguments): array => [
+                'fecha' => max(today()->toDateString(), $this->paraCargar($arguments)['hasta'] ?? today()->toDateString()),
+            ])
+            ->schema(function (array $arguments): array {
+                $carga = $this->paraCargar($arguments);
+
+                return [
+                    View::make('filament.pedidos.cargar-dias')->viewData(['carga' => $carga]),
+                    Grid::make(['default' => 1, 'sm' => 2])
+                        ->visible($carga['cuantas'] > 0)
+                        ->schema([
+                            Select::make('repartidor_id')
+                                ->label('Quién sale')
+                                ->options(CargaForm::repartidores($carga['bodega']))
+                                ->searchable()
+                                ->required()
+                                ->helperText('Entrega las facturas y trae el dinero.'),
+                            DatePicker::make('fecha')
+                                ->label('Fecha de salida')
+                                ->minDate($carga['hasta'])
+                                ->maxDate(today()->addDays(2)->toDateString())
+                                ->required(),
+                            TextInput::make('camion')
+                                ->label('Camión o placa')
+                                ->placeholder('Ej. PAB 1234 (opcional)')
+                                ->maxLength(40),
+                        ]),
+                ];
+            })
+            ->modalSubmitActionLabel('Guardar carga')
+            ->modalSubmitAction(fn (Action $action, array $arguments): Action => $action->visible($this->paraCargar($arguments)['cuantas'] > 0))
+            ->extraModalFooterActions(fn (array $arguments): array => [
+                Action::make('escogerUnaPorUna')
+                    ->label('Escoger una por una')
+                    ->color('gray')
+                    ->icon(Heroicon::OutlinedListBullet)
+                    ->visible($this->paraCargar($arguments)['cuantas'] > 0)
+                    ->url(CargaResource::getUrl('create', [
+                        'dias'   => implode(',', $this->paraCargar($arguments)['dias']),
+                        'bodega' => $this->paraCargar($arguments)['bodega'],
+                    ])),
+            ])
+            ->action(function (array $data, array $arguments, Action $action): void {
+                $usuario = Acceso::usuario() ?? abort(403);
+                $carga = $this->paraCargar($arguments);
+                $fecha = max(Periodo::dia($data['fecha'] ?? null) ?? today()->toDateString(), $carga['hasta'] ?? today()->toDateString());
+                $facturas = $carga['bodega'] === null ? [] : CargaForm::deLosDias($carga['bodega'], $carga['dias'], $fecha)->modelKeys();
+
+                if ($facturas === []) {
+                    Notification::make()->title('Esos días ya no tienen facturas para cargar.')->warning()->send();
+                    $action->halt();
+                }
+
+                try {
+                    $nueva = app(ArmarCarga::class)->ejecutar(null, [
+                        'bodega_id'     => (int) $carga['bodega'],
+                        'fecha'         => $fecha,
+                        'repartidor_id' => (int) ($data['repartidor_id'] ?? 0),
+                        'camion'        => isset($data['camion']) && is_string($data['camion']) ? $data['camion'] : null,
+                        'facturas'      => array_map(intval(...), $facturas),
+                    ], $usuario);
+                } catch (ReglaNegocioException $e) {
+                    Notification::make()->title($e->getMessage())->danger()->send();
+                    $action->halt();
+
+                    return;
+                }
+
+                Notification::make()
+                    ->title("Carga {$nueva->numero()} lista: sale con ".lempiras($nueva->total_carga))
+                    ->body('Abajo está lo que lleva, producto por producto. Imprima la hoja de carga para ir marcando.')
+                    ->success()
+                    ->send();
+
+                $this->redirect(CargaResource::getUrl('view', ['record' => $nueva]));
+            });
+    }
+
+    /**
      * Bodega y administración no llevan texto: las pestañas ya dicen cuántos
      * hay de cada uno. El vendedor no tiene pestañas: se le dice por qué sus
      * pedidos desaparecen al validarlos.
@@ -286,6 +400,7 @@ class ListPedidos extends ListRecords
         $usuario = Acceso::usuario();
         $impresos = $this->activeTab === EstadoPedido::Impreso->value;
         $porDia = $this->esPorDia();
+        $cargar = $impresos && $porDia && Gate::allows('create', Carga::class);
         $cuadros = ['dias' => [], 'hayMas' => false];
 
         if ($porDia && $usuario !== null) {
@@ -294,16 +409,121 @@ class ListPedidos extends ListRecords
                 : DiasDeFacturacion::porImprimir($usuario, $this->cuadros);
         }
 
+        // sinCargar: cuántas quedan para cargar en cada cuadro de Impresos ("2026-11-18|5" => 23).
         return [
-            'porDia'   => $porDia,
-            'impresos' => $impresos,
-            'dias'     => $cuadros['dias'],
-            'hayMas'   => $cuadros['hayMas'],
-            'veTodo'   => Acceso::veTodo(),
-            'imprime'  => Acceso::puede('Validar:Pedido'),
-            'resumen'  => Gate::allows('viewAny', Factura::class),
-            'cargar'   => $impresos && Gate::allows('create', Carga::class),
+            'porDia'    => $porDia,
+            'impresos'  => $impresos,
+            'dias'      => $cuadros['dias'],
+            'hayMas'    => $cuadros['hayMas'],
+            'veTodo'    => Acceso::veTodo(),
+            'imprime'   => Acceso::puede('Validar:Pedido'),
+            'resumen'   => Gate::allows('viewAny', Factura::class),
+            'cargar'    => $cargar,
+            'sinCargar' => $cargar ? self::sinCargar($cuadros['dias']) : [],
         ];
+    }
+
+    /**
+     * Cuántas facturas quedan para cargar en cada cuadro ("2026-11-18|5" => 23).
+     *
+     * @param list<DiaDeFacturacion> $dias
+     *
+     * @return array<string, int>
+     */
+    private static function sinCargar(array $dias): array
+    {
+        $porBodega = [];
+
+        foreach ($dias as $d) {
+            $porBodega[$d->bodegaId][] = $d->dia->toDateString();
+        }
+
+        $cuantas = [];
+
+        foreach ($porBodega as $bodega => $fechas) {
+            foreach (FacturasParaCargar::porDia($bodega, min($fechas), max($fechas)) as $dia => $n) {
+                $cuantas[$dia.'|'.$bodega] = $n;
+            }
+        }
+
+        return $cuantas;
+    }
+
+    /**
+     * Lo que lleva "Cargar camión" con los días escogidos (argumentos dias y
+     * bodega; al encargado, siempre su bodega): los días que se pueden
+     * cargar, cuántas facturas de cada uno y cuánto suman.
+     *
+     * @param array<string, mixed> $arguments
+     *
+     * @return array{bodega: int|null, nombre: string, dias: list<string>, hasta: string|null, cuantas: int, total: float, porDia: list<array{dia: string, titulo: string, cuantas: int, total: float}>}
+     */
+    private function paraCargar(array $arguments): array
+    {
+        $clave = md5((string) json_encode([$arguments['dias'] ?? null, $arguments['bodega'] ?? null]));
+
+        return $this->yaCalculadas[$clave] ??= $this->calcularParaCargar($arguments);
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     *
+     * @return array{bodega: int|null, nombre: string, dias: list<string>, hasta: string|null, cuantas: int, total: float, porDia: list<array{dia: string, titulo: string, cuantas: int, total: float}>}
+     */
+    private function calcularParaCargar(array $arguments): array
+    {
+        $usuario = Acceso::usuario();
+        $pedida = $arguments['bodega'] ?? null;
+        $bodega = $usuario?->veTodasLasBodegas() ? (is_numeric($pedida) ? (int) $pedida : null) : $usuario?->bodega_id;
+        $dias = [];
+
+        foreach (is_array($arguments['dias'] ?? null) ? $arguments['dias'] : [] as $valor) {
+            $dia = Periodo::dia($valor);
+
+            if ($dia !== null) {
+                $dias[$dia] = $dia;
+            }
+        }
+
+        ksort($dias);
+        $dias = array_values($dias);
+        $facturas = $bodega === null ? new Collection : CargaForm::deLosDias($bodega, $dias);
+        $porDia = [];
+
+        foreach ($dias as $dia) {
+            $delDia = $facturas->filter(fn (Factura $factura): bool => $factura->fecha_emision->toDateString() === $dia);
+            $porDia[] = [
+                'dia'     => $dia,
+                'titulo'  => mb_ucfirst(Carbon::parse($dia)->translatedFormat('l d/m/Y')),
+                'cuantas' => $delDia->count(),
+                'total'   => round((float) $delDia->sum('total'), 2),
+            ];
+        }
+
+        return [
+            'bodega'  => $bodega,
+            'nombre'  => $bodega === null ? '' : (string) Bodega::query()->whereKey($bodega)->value('nombre'),
+            'dias'    => $dias,
+            'hasta'   => $dias === [] ? null : max($dias),
+            'cuantas' => $facturas->count(),
+            'total'   => round((float) $facturas->sum('total'), 2),
+            'porDia'  => $porDia,
+        ];
+    }
+
+    /**
+     * "Cargar camión · 3 días · OCOTEPEQUE".
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function tituloDeLaCarga(array $arguments): string
+    {
+        $carga = $this->paraCargar($arguments);
+        $dias = count($carga['dias']);
+
+        return 'Cargar camión'
+            .($dias === 1 ? ' · '.mb_strtolower($carga['porDia'][0]['titulo']) : ' · '.$dias.' días')
+            .(Acceso::veTodo() && $carga['nombre'] !== '' ? ' · '.$carga['nombre'] : '');
     }
 
     private function tieneVistaPorDia(): bool

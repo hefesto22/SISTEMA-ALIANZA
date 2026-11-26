@@ -78,6 +78,31 @@ final class FacturasParaCargar
     }
 
     /**
+     * Cuántas quedan para cargar de cada día (por la fecha de emisión), de
+     * $desde a $hasta, con la salida de hoy: para los cuadros de Impresos.
+     *
+     * @return array<string, int> "2026-11-18" => 23
+     */
+    public static function porDia(int $bodegaId, string $desde, string $hasta): array
+    {
+        $filas = self::sinCargar($bodegaId, null, today()->toDateString())
+            ->where('facturas.fecha_emision', '>=', Carbon::parse($desde)->startOfDay())
+            ->where('facturas.fecha_emision', '<=', Carbon::parse($hasta)->endOfDay())
+            ->selectRaw('CAST(facturas.fecha_emision AS DATE) AS dia, COUNT(*) AS cuantas')
+            ->groupByRaw('CAST(facturas.fecha_emision AS DATE)')
+            ->toBase()
+            ->get();
+
+        $cuantas = [];
+
+        foreach ($filas as $fila) {
+            $cuantas[Carbon::parse((string) $fila->dia)->toDateString()] = (int) $fila->cuantas;
+        }
+
+        return $cuantas;
+    }
+
+    /**
      * Si hay alguna sin cargar desde ese día hasta hoy.
      */
     public static function hayDesde(int $bodegaId, string $desde): bool

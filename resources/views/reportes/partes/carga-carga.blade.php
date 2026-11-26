@@ -1,59 +1,98 @@
 {{--
-    Hoja de carga: lo que se sube al camión, producto por producto (lo
-    vendido y los regalos), y las facturas que lleva. En papel, una casilla
-    para ir marcando lo que se subió y las firmas de bodega y de quien sale.
-    En pantalla (la carga en ruta) va sin casillas ni firmas.
+    Hoja de carga: lo que se sube al camión, un renglón por producto con
+    cuántas cajas (CJ) y cuántas unidades (UN), como en la factura (con los
+    regalos de las promociones sumados), y las facturas que lleva. En papel,
+    una casilla para ir marcando lo que se subió y las firmas de bodega y de
+    quien sale. En pantalla (la carga en ruta) va sin casillas ni firmas.
     Hoja: App\Http\Controllers\ImprimirCargaController (?hoja=carga).
     Datos: $d = App\Domain\Cargas\HojaDeCarga::datos(); $pantalla.
 --}}
 @php
     /** @var array<string, mixed> $d */
     $pantalla ??= false;
-    $hayRegalos = collect($d['productos'])->sum('regalo') > 0;
+    $productos = $d['productos'];
+    $cajas = array_sum(array_map(fn (array $p): int => array_sum(array_column($p['cajas'], 'cantidad')), $productos));
+    $unidades = array_sum(array_column($productos, 'unidades'));
+    $plural = fn (int $n, string $uno, string $varios): string => $n === 1 ? "1 {$uno}" : number_format($n)." {$varios}";
 @endphp
+
+<style>
+    .rp .cg-prod td { vertical-align: top; }
+    .rp .cg-cant { width: 5.5rem; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .rp th.cg-cant { text-align: right; }
+    .rp td.cg-cant b { font-size: 1rem; font-weight: 700; }
+    .rp td.cg-cant small { margin-inline-start: 0.2rem; font-size: 0.7rem; font-weight: 600; color: var(--rp-tenue); }
+    .rp td.cg-cant span { display: block; }
+    .rp .cg-prod td.marca { vertical-align: middle; }
+    .rp .cg-prod tfoot td { font-weight: 700; }
+    @media print {
+        .rp .cg-prod td { padding-top: 7px; padding-bottom: 7px; }
+        .rp td.cg-cant b { font-size: 13px; }
+        .rp .cg-prod tr { break-inside: avoid; }
+    }
+</style>
 
 <div class="rp">
     @include('reportes.partes.carga-datos', ['d' => $d, 'pantalla' => $pantalla])
 
     <section class="rp-seccion">
-        <h2>Lo que se sube al camión <small>{{ count($d['productos']) === 1 ? '1 producto' : count($d['productos']).' productos' }}, sumado de las facturas que lleva</small></h2>
-        @if ($d['productos'] === [])
+        <h2>Lo que se sube al camión <small>{{ $plural(count($productos), 'producto', 'productos') }} · {{ $plural($cajas, 'caja', 'cajas') }} y {{ $plural($unidades, 'unidad', 'unidades') }}, sumado de las facturas que lleva</small></h2>
+        @if ($productos === [])
             <div class="rp-vacio">La carga no lleva facturas vigentes.</div>
         @else
             <div class="rp-tabla">
-                <table>
+                <table class="cg-prod">
                     <thead>
                         <tr>
                             <th>Código</th>
                             <th>Producto</th>
-                            <th>Presentación</th>
-                            @if ($hayRegalos)
-                                <th class="n">Vendido</th>
-                                <th class="n">Regalo</th>
-                            @endif
-                            <th class="n">Sube</th>
+                            <th class="cg-cant">CJ</th>
+                            <th class="cg-cant">UN</th>
                             @unless ($pantalla)
                                 <th class="marca">Listo</th>
                             @endunless
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach ($d['productos'] as $p)
+                        @foreach ($productos as $p)
+                            @php
+                                // La sigla junto a la cantidad solo si no se sobreentiende (FD6, cajas de dos tamaños, BT).
+                                $conSigla = count($p['cajas']) > 1 || ($p['cajas'] !== [] && ! str_starts_with($p['cajas'][0]['sigla'], 'CJ'));
+                            @endphp
                             <tr>
                                 <td class="cod">{{ $p['codigo'] }}</td>
-                                <td class="nombre">{{ $p['descripcion'] }}</td>
-                                <td class="dia">{{ $p['sigla'] }}</td>
-                                @if ($hayRegalos)
-                                    <td class="n">{{ number_format($p['vendido']) }}</td>
-                                    <td class="n">{{ $p['regalo'] > 0 ? number_format($p['regalo']) : '' }}</td>
-                                @endif
-                                <td class="n"><b>{{ number_format($p['total']) }}</b></td>
+                                <td class="nombre">
+                                    {{ $p['descripcion'] }}
+                                    @if ($p['regalo'] !== null)
+                                        <small>Incluye de regalo: {{ $p['regalo'] }}</small>
+                                    @endif
+                                </td>
+                                <td class="cg-cant">
+                                    @foreach ($p['cajas'] as $caja)
+                                        <span><b>{{ number_format($caja['cantidad']) }}</b>@if ($conSigla)<small>{{ $caja['sigla'] }}</small>@endif</span>
+                                    @endforeach
+                                </td>
+                                <td class="cg-cant">
+                                    @if ($p['unidades'] > 0)
+                                        <span><b>{{ number_format($p['unidades']) }}</b>@if ($p['suelta'] !== 'UN')<small>{{ $p['suelta'] }}</small>@endif</span>
+                                    @endif
+                                </td>
                                 @unless ($pantalla)
                                     <td class="marca"><span class="caja"></span></td>
                                 @endunless
                             </tr>
                         @endforeach
                     </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="2">Total</td>
+                            <td class="cg-cant"><b>{{ number_format($cajas) }}</b></td>
+                            <td class="cg-cant"><b>{{ number_format($unidades) }}</b></td>
+                            @unless ($pantalla)
+                                <td></td>
+                            @endunless
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         @endif

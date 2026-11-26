@@ -150,16 +150,23 @@ final class CargaForm
     }
 
     /**
-     * Las de un día que todavía se pueden cargar (el botón "Cargar camión" de Impresos).
+     * Las de esos días que todavía se pueden cargar, en una carga que sale
+     * el día $fecha (hoy si no se dice): "Cargar camión" de Impresos, con
+     * uno o varios días escogidos.
      *
-     * @return list<string>
+     * @param list<string> $dias "2026-11-17", "2026-11-18"
+     *
+     * @return Collection<int, Factura>
      */
-    public static function delDia(int $bodegaId, string $dia): array
+    public static function deLosDias(int $bodegaId, array $dias, ?string $fecha = null): Collection
     {
-        return array_values(FacturasParaCargar::de($bodegaId, desde: $dia)
-            ->filter(fn (Factura $factura): bool => $factura->fecha_emision->toDateString() === $dia)
-            ->map(fn (Factura $factura): string => (string) $factura->id)
-            ->all());
+        if ($dias === []) {
+            return new Collection;
+        }
+
+        return FacturasParaCargar::de($bodegaId, $fecha, desde: min($dias))
+            ->filter(fn (Factura $factura): bool => in_array($factura->fecha_emision->toDateString(), $dias, true))
+            ->values();
     }
 
     /**
