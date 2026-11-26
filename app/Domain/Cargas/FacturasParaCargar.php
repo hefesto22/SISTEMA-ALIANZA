@@ -78,28 +78,16 @@ final class FacturasParaCargar
     }
 
     /**
-     * Cuántas quedan para cargar de cada día (por la fecha de emisión), de
-     * $desde a $hasta, con la salida de hoy: para los cuadros de Impresos.
+     * Todas las que quedan para cargar (de todas las bodegas, o de una), con
+     * la salida de hoy si no se dice otra: la pestaña Impreso de Pedidos (lo
+     * que falta de cargar), Cargado (el resto de los impresos) y lo que
+     * falta de cargar de cada día.
      *
-     * @return array<string, int> "2026-11-18" => 23
+     * @return Builder<Factura>
      */
-    public static function porDia(int $bodegaId, string $desde, string $hasta): array
+    public static function paraCargar(?int $bodegaId = null, ?string $salida = null): Builder
     {
-        $filas = self::sinCargar($bodegaId, null, today()->toDateString())
-            ->where('facturas.fecha_emision', '>=', Carbon::parse($desde)->startOfDay())
-            ->where('facturas.fecha_emision', '<=', Carbon::parse($hasta)->endOfDay())
-            ->selectRaw('CAST(facturas.fecha_emision AS DATE) AS dia, COUNT(*) AS cuantas')
-            ->groupByRaw('CAST(facturas.fecha_emision AS DATE)')
-            ->toBase()
-            ->get();
-
-        $cuantas = [];
-
-        foreach ($filas as $fila) {
-            $cuantas[Carbon::parse((string) $fila->dia)->toDateString()] = (int) $fila->cuantas;
-        }
-
-        return $cuantas;
+        return self::sinCargar($bodegaId, null, Carbon::parse($salida ?? 'today')->toDateString());
     }
 
     /**
@@ -113,7 +101,7 @@ final class FacturasParaCargar
     }
 
     /**
-     * Vigentes, de la bodega, de pedidos impresos, que no van en otra carga
+     * Vigentes, de la bodega (o de todas), de pedidos impresos, que no van en otra carga
      * ni se entregaron ya (las de la carga que se está cambiando sí salen) y
      * que no son de un día que ya salió para su ruta y vendedor: otra carga
      * (no la que se cambia) llevó facturas de esa ruta y vendedor de un día
@@ -122,10 +110,10 @@ final class FacturasParaCargar
      *
      * @return Builder<Factura>
      */
-    private static function sinCargar(int $bodegaId, ?int $carga, string $salida): Builder
+    private static function sinCargar(?int $bodegaId, ?int $carga, string $salida): Builder
     {
         return Factura::query()
-            ->where('facturas.bodega_id', $bodegaId)
+            ->when($bodegaId !== null, fn (Builder $q): Builder => $q->where('facturas.bodega_id', $bodegaId))
             ->where('facturas.estado', EstadoFactura::Vigente)
             ->whereHas('pedido', fn (Builder $q): Builder => $q->where('estado', EstadoPedido::Impreso))
             ->whereNotExists(function (QueryBuilder $q) use ($carga): void {

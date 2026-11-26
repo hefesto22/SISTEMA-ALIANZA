@@ -1,12 +1,14 @@
 {{--
-    Por imprimir e Impresos de Pedidos (App\Filament\Resources\Pedidos\Pages\ListPedidos):
+    Por imprimir, Impreso y Cargado de Pedidos (App\Filament\Resources\Pedidos\Pages\ListPedidos):
     arriba el cambio de vista (Por día / Uno por uno); por día, un cuadro por día y
     bodega (App\Domain\Facturacion\DiaDeFacturacion), del más reciente al más viejo.
       - Por imprimir: Ver (las tarjetas de ese día) · Imprimir las N (modal con la vista previa).
-      - Impresos: Ver · Resumen del día (la hoja para cuadrar) · Cargar camión (las
-        facturas de ese día que todavía se pueden cargar; ListPedidos::cargarDiasAction).
-        Cada cuadro dice cuántas quedan sin cargar y trae una casilla: se marcan
-        varios días de una bodega y la barra de abajo carga el camión con todos.
+      - Impreso (los días con facturas por cargar): Ver · Resumen del día (la hoja
+        para cuadrar) · Cargar camión (las facturas de ese día que todavía se pueden
+        cargar; ListPedidos::cargarDiasAction). Cada cuadro dice cuántas van cargadas
+        y cuántas faltan, y trae una casilla: se marcan varios días de una bodega y
+        la barra de abajo carga el camión con todos.
+      - Cargado (los días con facturas que ya van en una carga): Ver · Resumen del día.
     Por día la tabla no se dibuja y con ella no salen los modales de las
     acciones: aquí se ponen (x-filament-actions::modals).
     Datos: ListPedidos::datosPorDia().
@@ -21,7 +23,7 @@
     $imprime ??= false;
     $resumen ??= false;
     $cargar ??= false;
-    $sinCargar ??= [];
+    $cargados ??= false;
 @endphp
 
 <style>
@@ -115,23 +117,29 @@
         </div>
         @if ($porDia)
             <p class="pd-ayuda">
-                {{ $impresos
-                    ? 'Las facturas por el día en que se emitieron: cuántas, por cuánto y con qué números.'.($cargar ? ' Marque uno o varios días para cargar el camión de un solo.' : '')
-                    : 'Los pedidos listos para imprimir, por el día del pedido: imprima todas las de un día de un solo.' }}
+                {{ match (true) {
+                    $cargados => 'Los días que ya tienen facturas en una carga del camión (o ya entregadas), por el día en que se emitieron.',
+                    $impresos => 'Los días que tienen facturas por cargar en el camión, por el día en que se emitieron: cuántas, por cuánto y con qué números.'.($cargar ? ' Marque uno o varios días para cargar el camión de un solo.' : ''),
+                    default => 'Los pedidos listos para imprimir, por el día del pedido: imprima todas las de un día de un solo.',
+                } }}
             </p>
         @endif
     </div>
 
     @if ($porDia)
         @if ($dias === [])
-            <div class="pd-vacio">{{ $impresos ? 'Todavía no hay facturas impresas.' : 'No hay pedidos por imprimir.' }}</div>
+            <div class="pd-vacio">{{ match (true) {
+                $cargados => 'Todavía no hay facturas en una carga del camión.',
+                $impresos => 'No hay facturas por cargar: todas las impresas ya van en una carga.',
+                default => 'No hay pedidos por imprimir.',
+            } }}</div>
         @else
             <div class="pd-cuadros">
                 @foreach ($dias as $d)
                     @php
                         $argumentos = \Illuminate\Support\Js::from(['dia' => $d->dia->format('Y-m-d'), 'bodega' => $d->bodegaId]);
                         $valor = $d->dia->format('Y-m-d').'|'.$d->bodegaId;
-                        $pendientes = $sinCargar[$valor] ?? 0;
+                        $pendientes = $d->sinCargar;
                     @endphp
                     <article @class(['pd-cuadro', 'hoy' => $d->dia->isToday()]) wire:key="cuadro-{{ $d->clave() }}">
                         <header class="pd-cabeza">
@@ -182,9 +190,8 @@
                                 <li title="Del {{ $d->desde }} al {{ $d->hasta }}"><span>Números</span><b>{{ $d->numeros() }}</b></li>
                                 <li><span>Anuladas</span><b @class(['mal' => $d->anuladas > 0])>{{ number_format($d->anuladas) }}</b></li>
                                 <li><span>Copias</span><b>{{ number_format($d->copias) }}</b></li>
-                                @if ($cargar)
-                                    <li title="Facturas de este día que todavía no van en una carga"><span>Sin cargar</span><b @class(['pend' => $pendientes > 0])>{{ number_format($pendientes) }}</b></li>
-                                @endif
+                                <li title="Facturas de este día que ya van en una carga, ya se entregaron o su día ya salió en su ruta"><span>Cargadas</span><b>{{ number_format($d->cargadas()) }}</b></li>
+                                <li title="Facturas de este día que todavía no van en una carga"><span>Sin cargar</span><b @class(['pend' => $pendientes > 0])>{{ number_format($pendientes) }}</b></li>
                                 @if ($d->sustituciones > 0)
                                     <li title="Facturas de este día que sustituyen a una anulada (de este día o de antes)"><span>Sustituyen a anuladas</span><b>{{ number_format($d->sustituciones) }}</b></li>
                                 @endif

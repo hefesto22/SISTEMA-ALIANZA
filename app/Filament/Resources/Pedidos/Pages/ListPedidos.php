@@ -7,7 +7,6 @@ namespace App\Filament\Resources\Pedidos\Pages;
 use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Cargas\FacturasParaCargar;
 use App\Domain\Exceptions\ReglaNegocioException;
-use App\Domain\Facturacion\DiaDeFacturacion;
 use App\Domain\Facturacion\DiasDeFacturacion;
 use App\Domain\Facturacion\ResumenDelDia;
 use App\Domain\Reportes\Periodo;
@@ -23,6 +22,7 @@ use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
 use App\Models\Carga;
 use App\Models\Factura;
+use App\Models\Pedido;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\DatePicker;
@@ -48,8 +48,9 @@ use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 
 /**
- * Pedidos en tarjetas, con una pestaña por estado. Por imprimir e Impresos
- * se ven de entrada por día (resources/views/filament/pedidos/por-dia.blade.php):
+ * Pedidos en tarjetas, con una pestaña por estado (Impreso, los que faltan
+ * de cargar en el camión; Cargado, los que ya van en una carga). Por
+ * imprimir, Impreso y Cargado se ven de entrada por día (resources/views/filament/pedidos/por-dia.blade.php):
  * un cuadro por día y bodega (DiasDeFacturacion) para imprimir de un solo
  * todas las de un día, o ver cuántas facturas salieron, con qué números y
  * por cuánto, y sacar el resumen del día. En Impresos se escogen uno o
@@ -60,7 +61,14 @@ use Livewire\Attributes\Url;
 class ListPedidos extends ListRecords
 {
     /** Pestañas que se ven por día. */
-    private const POR_DIA = [EstadoPedido::PorImprimir->value, EstadoPedido::Impreso->value];
+    private const POR_DIA = [EstadoPedido::PorImprimir->value, EstadoPedido::Impreso->value, self::CARGADO];
+
+    /**
+     * Pestaña de los impresos que ya van en una carga del camión (o ya se
+     * entregaron, o su día ya salió en su ruta). En Impreso quedan los que
+     * faltan de cargar. El pedido sigue Impreso: es solo para verlos aparte.
+     */
+    public const CARGADO = 'cargado';
 
     /** Cuadros que se ven de entrada; "Ver más días" suma otros tantos. */
     private const CUADROS = 12;
@@ -145,7 +153,7 @@ class ListPedidos extends ListRecords
 
     /**
      * "Ver" de un cuadro: las tarjetas de ese día (y esa bodega), con los
-     * filtros de siempre (Fecha en Por imprimir, Facturada el en Impresos).
+     * filtros de siempre (Fecha en Por imprimir, Facturada el en Impreso y Cargado).
      */
     public function verDia(string $dia, int|string $bodega): void
     {
@@ -157,7 +165,7 @@ class ListPedidos extends ListRecords
 
         $filtros = $this->tableFilters ?? [];
 
-        if ($this->activeTab === EstadoPedido::Impreso->value) {
+        if (in_array($this->activeTab, [EstadoPedido::Impreso->value, self::CARGADO], true)) {
             $filtros['facturada'] = ['el' => $dia];
         } else {
             $filtros['fecha'] = ['desde' => $dia, 'hasta' => $dia];
@@ -345,17 +353,52 @@ class ListPedidos extends ListRecords
         $tabs = [];
 
         foreach (EstadoPedido::cases() as $estado) {
-            $cantidad = PedidoResource::getEloquentQuery()->where('estado', $estado)->count();
+            $filtro = fn (Builder $query): Builder => $estado === EstadoPedido::Impreso
+                ? self::impresos($query, cargados: false)
+                : $query->where('estado', $estado);
+            $cantidad = $filtro(PedidoResource::getEloquentQuery())->count();
 
             $tabs[$estado->value] = Tab::make($estado->getLabel())
                 ->badge($cantidad > 0 && $estado !== EstadoPedido::Anulado ? (string) $cantidad : null)
                 ->badgeColor($estado->getColor())
-                ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('estado', $estado));
+                ->modifyQueryUsing($filtro);
+
+            // Después de Impreso, los que ya van en una carga.
+            if ($estado === EstadoPedido::Impreso) {
+                $cargados = self::impresos(PedidoResource::getEloquentQuery(), cargados: true)->count();
+
+                $tabs[self::CARGADO] = Tab::make('Cargado')
+                    ->badge($cargados > 0 ? (string) $cargados : null)
+                    ->badgeColor('primary')
+                    ->modifyQueryUsing(fn (Builder $query): Builder => self::impresos($query, cargados: true));
+            }
         }
 
         $tabs['todos'] = Tab::make('Todos');
 
         return $tabs;
+    }
+
+    /**
+     * Los impresos que faltan de cargar en el camión (Impreso) o los que ya
+     * van en una carga, ya se entregaron o su día ya salió en su ruta
+     * (Cargado), con la misma regla de la carga (FacturasParaCargar).
+     *
+     * @param Builder<Pedido> $query
+     *
+     * @return Builder<Pedido>
+     */
+    public static function impresos(Builder $query, bool $cargados): Builder
+    {
+        $paraCargar = FacturasParaCargar::paraCargar()->select('facturas.pedido_id');
+
+        return $query
+            ->where('pedidos.estado', EstadoPedido::Impreso)
+            ->when(
+                $cargados,
+                fn (Builder $q): Builder => $q->whereNotIn('pedidos.id', $paraCargar),
+                fn (Builder $q): Builder => $q->whereIn('pedidos.id', $paraCargar),
+            );
     }
 
     /**
@@ -398,55 +441,30 @@ class ListPedidos extends ListRecords
     private function datosPorDia(): array
     {
         $usuario = Acceso::usuario();
-        $impresos = $this->activeTab === EstadoPedido::Impreso->value;
+        $cargados = $this->activeTab === self::CARGADO;
+        $impresos = $cargados || $this->activeTab === EstadoPedido::Impreso->value;
         $porDia = $this->esPorDia();
-        $cargar = $impresos && $porDia && Gate::allows('create', Carga::class);
+        $cargar = $impresos && ! $cargados && $porDia && Gate::allows('create', Carga::class);
         $cuadros = ['dias' => [], 'hayMas' => false];
 
+        // Impreso: los días que tienen facturas por cargar; Cargado: los que tienen cargadas.
         if ($porDia && $usuario !== null) {
             $cuadros = $impresos
-                ? DiasDeFacturacion::impresas($usuario, $this->cuadros)
+                ? DiasDeFacturacion::impresas($usuario, $this->cuadros, $cargados)
                 : DiasDeFacturacion::porImprimir($usuario, $this->cuadros);
         }
 
-        // sinCargar: cuántas quedan para cargar en cada cuadro de Impresos ("2026-11-18|5" => 23).
         return [
-            'porDia'    => $porDia,
-            'impresos'  => $impresos,
-            'dias'      => $cuadros['dias'],
-            'hayMas'    => $cuadros['hayMas'],
-            'veTodo'    => Acceso::veTodo(),
-            'imprime'   => Acceso::puede('Validar:Pedido'),
-            'resumen'   => Gate::allows('viewAny', Factura::class),
-            'cargar'    => $cargar,
-            'sinCargar' => $cargar ? self::sinCargar($cuadros['dias']) : [],
+            'porDia'   => $porDia,
+            'impresos' => $impresos,
+            'cargados' => $cargados,
+            'dias'     => $cuadros['dias'],
+            'hayMas'   => $cuadros['hayMas'],
+            'veTodo'   => Acceso::veTodo(),
+            'imprime'  => Acceso::puede('Validar:Pedido'),
+            'resumen'  => Gate::allows('viewAny', Factura::class),
+            'cargar'   => $cargar,
         ];
-    }
-
-    /**
-     * Cuántas facturas quedan para cargar en cada cuadro ("2026-11-18|5" => 23).
-     *
-     * @param list<DiaDeFacturacion> $dias
-     *
-     * @return array<string, int>
-     */
-    private static function sinCargar(array $dias): array
-    {
-        $porBodega = [];
-
-        foreach ($dias as $d) {
-            $porBodega[$d->bodegaId][] = $d->dia->toDateString();
-        }
-
-        $cuantas = [];
-
-        foreach ($porBodega as $bodega => $fechas) {
-            foreach (FacturasParaCargar::porDia($bodega, min($fechas), max($fechas)) as $dia => $n) {
-                $cuantas[$dia.'|'.$bodega] = $n;
-            }
-        }
-
-        return $cuantas;
     }
 
     /**

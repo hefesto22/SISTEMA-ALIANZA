@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\EntregaFactura;
 use App\Enums\EstadoFactura;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
@@ -58,6 +61,7 @@ use Illuminate\Support\Carbon;
  * @property-read Cai $autorizacion
  * @property-read Factura|null $reemplazaA
  * @property-read Factura|null $reemplazo
+ * @property-read Collection<int, CargaFactura> $renglonesDeCarga
  * @property-read User|null $emisor
  * @property-read User|null $anulador
  */
@@ -142,6 +146,27 @@ class Factura extends Model
     public function reemplazo(): HasOne
     {
         return $this->hasOne(self::class, 'reemplaza_a_id');
+    }
+
+    /**
+     * En qué cargas del camión ha ido (carga_factura), la más reciente al final.
+     *
+     * @return HasMany<CargaFactura, $this>
+     */
+    public function renglonesDeCarga(): HasMany
+    {
+        return $this->hasMany(CargaFactura::class)->orderBy('id');
+    }
+
+    /**
+     * La carga en que va o en que se entregó (null si no ha ido en una, o si
+     * la liquidación la mandó a otra carga y todavía no sale).
+     */
+    public function cargaActual(): ?CargaFactura
+    {
+        return $this->renglonesDeCarga
+            ->filter(fn (CargaFactura $renglon): bool => in_array($renglon->estado, [EntregaFactura::EnRuta, EntregaFactura::Entregada], true))
+            ->last();
     }
 
     /**

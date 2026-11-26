@@ -9,6 +9,7 @@ use App\Domain\Cargas\HojaDeCarga;
 use App\Domain\Cargas\LiquidarCarga;
 use App\Domain\Devoluciones\RegistrarDevolucion;
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Facturacion\DiasDeFacturacion;
 use App\Domain\Inventario\RegistrarCompra;
 use App\Domain\Pedidos\CorregirPedido;
 use App\Domain\Pedidos\RecalcularPedido;
@@ -400,6 +401,51 @@ test('en Impresos se escogen varios días y el camión se carga de un solo con l
         ->set('activeTab', EstadoPedido::Impreso->value)
         ->mountAction('cargarDias', ['dias' => $dias, 'bodega' => $this->bodega->id])
         ->assertSee('ya no tienen facturas para cargar');
+});
+
+test('en Pedidos, lo que ya va en una carga pasa de Impreso a Cargado', function (): void {
+    $uno = pedidoParaCarga($this, 2);
+    $dos = pedidoParaCarga($this, 3);
+    $carga = cargaCon($this, [$uno]);
+
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::Impreso->value)
+        ->set('vista', 'lista')
+        ->assertCanSeeTableRecords([$dos])
+        ->assertCanNotSeeTableRecords([$uno])
+        ->set('activeTab', ListPedidos::CARGADO)
+        ->set('vista', 'lista')
+        ->assertCanSeeTableRecords([$uno])
+        ->assertCanNotSeeTableRecords([$dos])
+        ->assertSee($carga->numero());
+
+    // Por día: el mismo día sale en las dos pestañas, con cuántas van cargadas y cuántas faltan.
+    $porCargar = DiasDeFacturacion::impresas($this->encargado, 12, cargadas: false)['dias'];
+
+    expect([count($porCargar), $porCargar[0]->cuantas, $porCargar[0]->sinCargar, $porCargar[0]->cargadas()])->toBe([1, 2, 1, 1])
+        ->and(DiasDeFacturacion::impresas($this->encargado, 12, cargadas: true)['dias'])->toHaveCount(1);
+
+    // Con las dos en una carga, Impreso queda sin días.
+    cargaCon($this, [$dos]);
+
+    expect(DiasDeFacturacion::impresas($this->encargado, 12, cargadas: false)['dias'])->toBe([])
+        ->and(DiasDeFacturacion::impresas($this->encargado, 12, cargadas: true)['dias'][0]->sinCargar)->toBe(0);
+
+    // La que la liquidación manda a otra carga vuelve a Impreso.
+    app(LiquidarCarga::class)->ejecutar($carga, [
+        'entregas'       => [facturaDe($uno)->id => CuentaCarga::OTRA_CARGA],
+        'efectivo'       => 0.0,
+        'cheques'        => [],
+        'transferencias' => [],
+    ], $this->encargado);
+
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::Impreso->value)
+        ->set('vista', 'lista')
+        ->assertCanSeeTableRecords([$uno])
+        ->assertCanNotSeeTableRecords([$dos]);
 });
 
 test('el vendedor no ve las cargas y el encargado no ve las de otra bodega', function (): void {

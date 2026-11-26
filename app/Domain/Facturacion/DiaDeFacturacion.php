@@ -15,7 +15,9 @@ use Carbon\CarbonImmutable;
  *  - Impresas: $cuantas facturas vigentes emitidas ese día y su $total, las
  *    $anuladas, las $copias, el primer y el último número usados y cuántas
  *    vigentes son $sustituciones (de una anulada, de ese día o de antes: la
- *    nueva cuenta el día en que se imprimió).
+ *    nueva cuenta el día en que se imprimió). De las vigentes, cuántas
+ *    quedan $sinCargar en un camión (App\Domain\Cargas\FacturasParaCargar);
+ *    las demás ya van en una carga o su día ya salió en su ruta (cargadas()).
  */
 final readonly class DiaDeFacturacion
 {
@@ -32,7 +34,16 @@ final readonly class DiaDeFacturacion
         public ?string $desde = null,
         public ?string $hasta = null,
         public int $sustituciones = 0,
+        public int $sinCargar = 0,
     ) {}
+
+    /**
+     * Las vigentes que ya van en una carga (o ya se entregaron, o su día ya salió en su ruta).
+     */
+    public function cargadas(): int
+    {
+        return max(0, $this->cuantas - $this->sinCargar);
+    }
 
     /**
      * "2026-11-18-3": para wire:key y para los argumentos de las acciones.

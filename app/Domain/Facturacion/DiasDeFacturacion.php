@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Facturacion;
 
+use App\Domain\Cargas\FacturasParaCargar;
 use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
 use App\Models\Bodega;
@@ -11,7 +12,9 @@ use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use stdClass;
 
 /**
@@ -24,7 +27,9 @@ use stdClass;
  *    cuenta también las que se anularon después, porque sus números ya se
  *    usaron ese día. La que sustituye a una anulada cuenta el día en que se
  *    imprimió (lleva esa fecha y el número que seguía), aunque la anulada
- *    sea de un día antes.
+ *    sea de un día antes. Dice cuántas quedan sin cargar en un camión y,
+ *    para las pestañas Impreso y Cargado, solo trae los días que tienen
+ *    facturas sin cargar ($cargadas = false) o ya cargadas (true).
  *  - idsPorImprimir(): los pedidos de un cuadro, para imprimirlos de un solo.
  */
 final class DiasDeFacturacion
@@ -66,11 +71,13 @@ final class DiasDeFacturacion
     /**
      * @return array{dias: list<DiaDeFacturacion>, hayMas: bool}
      */
-    public static function impresas(User $usuario, int $limite): array
+    public static function impresas(User $usuario, int $limite, ?bool $cargadas = null): array
     {
         $vigente = EstadoFactura::Vigente->value;
+        // Las que quedan para cargar (una sola vez para todas: no depende de cada fila).
+        $paraCargar = FacturasParaCargar::paraCargar()->select('facturas.id');
 
-        $filas = Factura::query()
+        $dias = Factura::query()
             ->visiblesPara($usuario)
             ->toBase()
             ->selectRaw(
@@ -80,12 +87,18 @@ final class DiasDeFacturacion
                 .'SUM(CASE WHEN facturas.estado = ? THEN 0 ELSE 1 END) AS anuladas, '
                 .'COALESCE(SUM(GREATEST(facturas.impresiones - 1, 0)), 0) AS copias, '
                 .'MIN(facturas.numero) AS desde, MAX(facturas.numero) AS hasta, '
-                .'SUM(CASE WHEN facturas.estado = ? AND facturas.reemplaza_a_id IS NOT NULL THEN 1 ELSE 0 END) AS sustituciones',
-                [$vigente, $vigente, $vigente, $vigente],
+                .'SUM(CASE WHEN facturas.estado = ? AND facturas.reemplaza_a_id IS NOT NULL THEN 1 ELSE 0 END) AS sustituciones, '
+                .'SUM(CASE WHEN facturas.id IN ('.$paraCargar->toSql().') THEN 1 ELSE 0 END) AS sin_cargar',
+                [$vigente, $vigente, $vigente, $vigente, ...$paraCargar->getBindings()],
             )
-            ->groupByRaw('DATE(facturas.fecha_emision), facturas.bodega_id')
-            ->orderByDesc('dia')
-            ->orderBy('facturas.bodega_id')
+            ->groupByRaw('DATE(facturas.fecha_emision), facturas.bodega_id');
+
+        $filas = DB::query()
+            ->fromSub($dias, 'd')
+            ->when($cargadas === false, fn (QueryBuilder $q): QueryBuilder => $q->where('d.sin_cargar', '>', 0))
+            ->when($cargadas === true, fn (QueryBuilder $q): QueryBuilder => $q->whereColumn('d.cuantas', '>', 'd.sin_cargar'))
+            ->orderByDesc('d.dia')
+            ->orderBy('d.bodega_id')
             ->limit($limite + 1)
             ->get();
 
@@ -104,6 +117,7 @@ final class DiasDeFacturacion
                 desde: (string) $fila->desde,
                 hasta: (string) $fila->hasta,
                 sustituciones: (int) $fila->sustituciones,
+                sinCargar: (int) $fila->sin_cargar,
             );
         }
 

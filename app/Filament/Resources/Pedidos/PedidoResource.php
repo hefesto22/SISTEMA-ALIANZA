@@ -64,7 +64,7 @@ class PedidoResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $usuario = Acceso::usuario();
-        $query = Pedido::query()->with(['cliente.municipio.departamento', 'vendedor', 'bodega', 'factura'])->withCount('items');
+        $query = Pedido::query()->with(['cliente.municipio.departamento', 'vendedor', 'bodega', 'factura.renglonesDeCarga.carga'])->withCount('items');
 
         return $usuario === null ? $query->whereRaw('1 = 0') : $query->visiblePara($usuario);
     }

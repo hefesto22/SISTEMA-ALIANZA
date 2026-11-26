@@ -9,6 +9,8 @@
     $lineas = (int) ($pedido->items_count ?? $pedido->items()->count());
     $ubicacion = collect([$pedido->numero, $cliente->codigo, $cliente->municipio?->nombre])->filter()->implode(' · ');
     $factura = $pedido->factura;
+    // La carga en que va (o en que se entregó): la pestaña Cargado.
+    $enCarga = $pedido->estado === \App\Enums\EstadoPedido::Impreso ? $factura?->cargaActual() : null;
     $porSustituir = $pedido->esReimpresion() ? $pedido->facturaPorSustituir() : null;
     $quien = \App\Filament\Support\Acceso::esVendedor()
         ? $pedido->bodega->nombre
@@ -27,12 +29,14 @@
         .pt-pill.por_imprimir { color: var(--info-700); border-color: color-mix(in oklab, var(--info-500) 45%, transparent); background: color-mix(in oklab, var(--info-500) 12%, transparent); }
         .pt-pill.reimprimir { color: var(--primary-700); border-color: color-mix(in oklab, var(--primary-500) 55%, transparent); background: color-mix(in oklab, var(--primary-500) 14%, transparent); }
         .pt-pill.impreso { color: var(--success-700); border-color: color-mix(in oklab, var(--success-500) 45%, transparent); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
+        .pt-pill.cargado { color: var(--primary-700); border-color: color-mix(in oklab, var(--primary-500) 45%, transparent); background: color-mix(in oklab, var(--primary-500) 12%, transparent); }
         .pt-pill.anulado { color: var(--pt-tenue); border-color: var(--pt-borde); background: color-mix(in oklab, var(--gray-400) 12%, transparent); }
         .pt-pill.fuera { color: var(--danger-700); border-color: color-mix(in oklab, var(--danger-500) 45%, transparent); background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
         .dark .pt-pill.pendiente { color: var(--warning-400); }
         .dark .pt-pill.por_imprimir { color: var(--info-400); }
         .dark .pt-pill.reimprimir { color: var(--primary-400); }
         .dark .pt-pill.impreso { color: var(--success-400); }
+        .dark .pt-pill.cargado { color: var(--primary-400); }
         .dark .pt-pill.fuera { color: var(--danger-400); }
         .pt-tiempo { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.78rem; color: var(--pt-tenue); }
         .pt-tiempo svg { width: 0.9rem; height: 0.9rem; }
@@ -73,6 +77,8 @@
     <div class="pt-meta">
         @if ($pedido->esReimpresion())
             <span class="pt-pill reimprimir" title="Se corrigió después de impreso{{ $pedido->corregido_at ? ' · '.$pedido->corregido_at->format('d/m/Y H:i') : '' }}{{ $porSustituir ? '. Sale factura nueva; retire la N° '.$porSustituir->numero.' (anulada).' : '' }}">Por reimprimir</span>
+        @elseif ($enCarga !== null)
+            <span class="pt-pill cargado" title="Carga {{ $enCarga->carga->numero() }} · sale el {{ $enCarga->carga->fecha->format('d/m/Y') }}">{{ $enCarga->estado === \App\Enums\EntregaFactura::Entregada ? 'Entregado' : 'Cargado' }}</span>
         @elseif ($pedido->estado === \App\Enums\EstadoPedido::Impreso)
             <span class="pt-pill impreso" title="{{ $pedido->impreso_at?->format('d/m/Y H:i') }}">Impreso{{ $pedido->impresiones > 1 ? ' · '.$pedido->impresiones.' veces' : '' }}</span>
         @else
@@ -91,7 +97,7 @@
     <div class="pt-codigo">{{ $ubicacion }}</div>
 
     @if ($factura)
-        <div class="pt-codigo">Factura {{ $factura->numero }}</div>
+        <div class="pt-codigo">Factura {{ $factura->numero }}{{ $enCarga !== null ? ' · carga '.$enCarga->carga->numero() : '' }}</div>
     @elseif ($porSustituir)
         <div class="pt-codigo pt-anulada">Factura {{ $porSustituir->numero }} anulada: retirarla</div>
     @endif
