@@ -74,12 +74,12 @@ final class DiasDeFacturacion
     public static function impresas(User $usuario, int $limite, ?bool $cargadas = null): array
     {
         $vigente = EstadoFactura::Vigente->value;
-        // Las que quedan para cargar (una sola vez para todas: no depende de cada fila).
-        $paraCargar = FacturasParaCargar::paraCargar()->select('facturas.id');
 
+        // Las que quedan para cargar se juntan una sola vez (no dependen de cada fila).
         $dias = Factura::query()
             ->visiblesPara($usuario)
             ->toBase()
+            ->leftJoinSub(FacturasParaCargar::paraCargar()->select('facturas.id AS id'), 'por_cargar', 'por_cargar.id', '=', 'facturas.id')
             ->selectRaw(
                 'DATE(facturas.fecha_emision) AS dia, facturas.bodega_id, '
                 .'SUM(CASE WHEN facturas.estado = ? THEN 1 ELSE 0 END) AS cuantas, '
@@ -88,8 +88,8 @@ final class DiasDeFacturacion
                 .'COALESCE(SUM(GREATEST(facturas.impresiones - 1, 0)), 0) AS copias, '
                 .'MIN(facturas.numero) AS desde, MAX(facturas.numero) AS hasta, '
                 .'SUM(CASE WHEN facturas.estado = ? AND facturas.reemplaza_a_id IS NOT NULL THEN 1 ELSE 0 END) AS sustituciones, '
-                .'SUM(CASE WHEN facturas.id IN ('.$paraCargar->toSql().') THEN 1 ELSE 0 END) AS sin_cargar',
-                [$vigente, $vigente, $vigente, $vigente, ...$paraCargar->getBindings()],
+                .'SUM(CASE WHEN por_cargar.id IS NULL THEN 0 ELSE 1 END) AS sin_cargar',
+                [$vigente, $vigente, $vigente, $vigente],
             )
             ->groupByRaw('DATE(facturas.fecha_emision), facturas.bodega_id');
 

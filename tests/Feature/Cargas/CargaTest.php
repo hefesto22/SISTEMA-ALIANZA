@@ -378,9 +378,7 @@ test('en Impresos se escogen varios días y el camión se carga de un solo con l
     Livewire::test(ListPedidos::class)
         ->set('activeTab', EstadoPedido::Impreso->value)
         ->mountAction('cargarDias', ['dias' => $dias, 'bodega' => $this->bodega->id])
-        ->assertSee('Sale con')
-        ->assertSee('2 facturas')
-        ->assertSee('Escoger una por una')
+        ->assertMountedActionModalSee(['Sale con', '2 facturas', 'Escoger una por una'])
         ->callMountedAction()
         ->assertHasActionErrors(['repartidor_id']);
 
@@ -400,7 +398,7 @@ test('en Impresos se escogen varios días y el camión se carga de un solo con l
     Livewire::test(ListPedidos::class)
         ->set('activeTab', EstadoPedido::Impreso->value)
         ->mountAction('cargarDias', ['dias' => $dias, 'bodega' => $this->bodega->id])
-        ->assertSee('ya no tienen facturas para cargar');
+        ->assertMountedActionModalSee('ya no tienen facturas para cargar');
 });
 
 test('en Pedidos, lo que ya va en una carga pasa de Impreso a Cargado', function (): void {
