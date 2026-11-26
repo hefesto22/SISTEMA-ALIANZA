@@ -6,9 +6,11 @@ namespace App\Http\Controllers;
 
 use App\Domain\Reportes\AlcanceReporte;
 use App\Domain\Reportes\ComprasDelPeriodo;
+use App\Domain\Reportes\DevolucionesDelPeriodo;
 use App\Domain\Reportes\InventarioValorizado;
 use App\Domain\Reportes\Periodo;
 use App\Domain\Reportes\VentasDelPeriodo;
+use App\Filament\Pages\ReporteDevoluciones;
 use App\Models\DatosFiscales;
 use App\Models\Proveedor;
 use App\Models\User;
@@ -27,6 +29,7 @@ use Illuminate\Http\Response;
  * Uso: /reportes/ventas/imprimir?desde=2026-11-01&hasta=2026-11-30&bodega=2&proveedor=5&ver=vendedores
  *      /reportes/compras/imprimir?desde=2026-11-01&hasta=2026-11-14&proveedor=5&ver=productos
  *      /reportes/inventario/imprimir?bodega=2&proveedor=5&buscar=aceite&todos=1
+ *      /reportes/devoluciones/imprimir?desde=2026-11-01&hasta=2026-11-30&proveedor=5&ver=perdidas
  */
 class ImprimirReporteController extends Controller
 {
@@ -96,6 +99,31 @@ class ImprimirReporteController extends Controller
             'usuario'   => $usuario->name,
             'parte'     => 'reportes.partes.inventario',
             'd'         => $reporte->datos(),
+            'embebido'  => $request->boolean('embebido'),
+        ]);
+    }
+
+    /**
+     * Con un proveedor y "Pérdidas" es lo que se le reclama: lo dañado de sus productos.
+     */
+    public function devoluciones(Request $request): Response
+    {
+        $usuario = self::usuario($request, ReporteDevoluciones::PERMISO);
+
+        $reporte = new DevolucionesDelPeriodo(
+            Periodo::de('otro', $request->string('desde')->toString(), $request->string('hasta')->toString()),
+            AlcanceReporte::bodega($usuario, $request->input('bodega')),
+            AlcanceReporte::proveedor($request->input('proveedor')),
+        );
+        $ver = DevolucionesDelPeriodo::ver($request->input('ver'));
+
+        return response()->view('reportes.imprimir', [
+            'titulo'    => $reporte->titulo($ver),
+            'subtitulo' => $reporte->periodo->texto().' · '.$reporte->alcance(),
+            'empresa'   => DatosFiscales::actual()->nombreParaMostrar(),
+            'usuario'   => $usuario->name,
+            'parte'     => 'reportes.partes.devoluciones',
+            'd'         => $reporte->datos($ver),
             'embebido'  => $request->boolean('embebido'),
         ]);
     }

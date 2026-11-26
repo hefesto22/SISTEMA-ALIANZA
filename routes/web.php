@@ -69,4 +69,6 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
         ->name('reportes.compras.imprimir');
     Route::get('reportes/inventario/imprimir', [ImprimirReporteController::class, 'inventario'])
         ->name('reportes.inventario.imprimir');
+    Route::get('reportes/devoluciones/imprimir', [ImprimirReporteController::class, 'devoluciones'])
+        ->name('reportes.devoluciones.imprimir');
 });
