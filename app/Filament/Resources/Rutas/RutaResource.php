@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Rutas;
 use App\Enums\Rol;
 use App\Filament\Resources\Rutas\Pages\ManageRutas;
 use App\Filament\Support\Acceso;
+use App\Models\Bodega;
 use App\Models\Departamento;
 use App\Models\Municipio;
 use App\Models\Ruta;
@@ -35,7 +36,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rules\Unique;
 
 /**
- * Rutas de cada bodega: su número (sale en la factura), municipios que
+ * Rutas de cada bodega: su número (con el prefijo de la bodega, el código que
+ * sale en la factura: CO1, CO2…), municipios que
  * cubre y vendedores que la trabajan. Cada vendedor solo ve y crea clientes
  * de los municipios de sus rutas.
  *
@@ -82,7 +84,8 @@ class RutaResource extends Resource
                     ->maxValue(9999)
                     ->required(fn (?Ruta $record): bool => $record !== null)
                     ->placeholder(fn (Get $get): string => 'Siguiente libre: '.Ruta::siguienteNumero(self::bodegaDe($get('bodega_id'))))
-                    ->helperText('El que sale en la factura (Ruta N° 22). Si lo deja vacío, toma el siguiente libre.')
+                    ->prefix(fn (Get $get): ?string => ($bodega = self::bodegaDe($get('bodega_id'))) !== null ? Bodega::query()->find($bodega)?->prefijoDeRutas() : null)
+                    ->helperText('Con el prefijo de la bodega es el código que sale en la factura (CO1, CO2…). Si lo deja vacío, toma el siguiente libre.')
                     ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('bodega_id', self::bodegaDe($get('bodega_id'))))
                     ->validationMessages(['unique' => 'Ese número ya es de otra ruta de la bodega.']),
                 TextInput::make('nombre')
@@ -180,11 +183,13 @@ class RutaResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('numero')
-                    ->label('N°')
+                    ->label('Código')
+                    ->formatStateUsing(fn (Ruta $record): string => $record->codigo())
                     ->sortable()
-                    ->searchable()
+                    ->searchable(query: fn (Builder $query, string $search): Builder => ($numero = (int) preg_replace('/\D/', '', $search)) > 0 ? $query->where('numero', $numero) : $query)
                     ->weight('bold')
-                    ->alignCenter(),
+                    ->badge()
+                    ->color('primary'),
                 TextColumn::make('nombre')
                     ->label('Ruta')
                     ->searchable()

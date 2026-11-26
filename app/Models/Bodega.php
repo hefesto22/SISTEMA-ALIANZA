@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
  *
  * @property int $id
  * @property string $codigo
+ * @property string|null $prefijo_ruta lo que va antes del número de sus rutas (CO → CO1, CO2…)
  * @property string $nombre
  * @property string|null $direccion
  * @property int|null $municipio_id
@@ -46,6 +47,7 @@ class Bodega extends Model
     /** @var list<string> */
     protected $fillable = [
         'codigo',
+        'prefijo_ruta',
         'nombre',
         'direccion',
         'municipio_id',
@@ -63,6 +65,15 @@ class Bodega extends Model
             'activa'          => 'boolean',
             'formato_factura' => FormatoFactura::class,
         ];
+    }
+
+    /**
+     * Lo que va antes del número en el código de sus rutas (CO → CO1, CO2…):
+     * el prefijo de la bodega o, si no tiene, las dos primeras letras del código.
+     */
+    public function prefijoDeRutas(): string
+    {
+        return filled($this->prefijo_ruta) ? (string) $this->prefijo_ruta : mb_strtoupper(mb_substr($this->codigo, 0, 2));
     }
 
     /**
@@ -132,6 +143,6 @@ class Bodega extends Model
      */
     protected function camposEnMayusculas(): array
     {
-        return ['codigo', 'nombre', 'direccion'];
+        return ['codigo', 'prefijo_ruta', 'nombre', 'direccion'];
     }
 }

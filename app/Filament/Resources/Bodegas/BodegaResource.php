@@ -55,6 +55,16 @@ class BodegaResource extends Resource
                     ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : $state)
                     ->unique(ignoreRecord: true)
                     ->dehydrateStateUsing(fn (?string $state): string => mb_strtoupper(trim((string) $state))),
+                TextInput::make('prefijo_ruta')
+                    ->label('Prefijo de rutas')
+                    ->placeholder('Ej. CO')
+                    ->helperText('Las rutas de esta bodega salen así en la factura: CO1, CO2… Si lo deja vacío, se usan las dos primeras letras del código.')
+                    ->maxLength(4)
+                    ->rule('alpha')
+                    ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : null)
+                    ->unique(ignoreRecord: true)
+                    ->validationMessages(['unique' => 'Ese prefijo ya es de otra bodega.', 'alpha' => 'Solo letras.'])
+                    ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? mb_strtoupper(trim($state)) : null),
                 TextInput::make('nombre')
                     ->required()
                     ->maxLength(255),
@@ -97,7 +107,8 @@ class BodegaResource extends Resource
                     ->placeholder('—'),
                 TextColumn::make('rutas_count')
                     ->label('Rutas')
-                    ->counts('rutas'),
+                    ->counts('rutas')
+                    ->description(fn (Bodega $record): string => $record->prefijoDeRutas().'1, '.$record->prefijoDeRutas().'2…'),
                 TextColumn::make('usuarios_count')
                     ->label('Usuarios')
                     ->counts('usuarios'),

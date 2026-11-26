@@ -20,7 +20,7 @@
 
     // [etiqueta, valor, detalle, aviso, sin dato]
     $datos = [
-        ['Vendedor', $pedido->vendedor->name, collect([$pedido->vendedor->codigo, $ruta !== null ? 'Ruta '.$ruta->numero : null])->filter()->implode(' · '), null, false],
+        ['Vendedor', $pedido->vendedor->name, collect([$pedido->vendedor->codigo, $ruta !== null ? 'Ruta '.$ruta->codigo() : null])->filter()->implode(' · '), null, false],
         ['Bodega', $pedido->bodega->nombre, null, null, false],
         ['Validó', $pedido->validador->name ?? 'Sin validar', $pedido->validado_at?->format('d/m/Y H:i'), null, $pedido->validador === null],
     ];

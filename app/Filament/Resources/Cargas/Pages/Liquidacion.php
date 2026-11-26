@@ -463,7 +463,7 @@ class Liquidacion extends Page
     private function filas(): array
     {
         $carga = $this->carga();
-        $carga->load(['renglones.factura.pedido.cliente.municipio', 'renglones.factura.pedido.vendedor', 'renglones.factura.pedido.ruta']);
+        $carga->load(['renglones.factura.pedido.cliente.municipio', 'renglones.factura.pedido.vendedor', 'renglones.factura.pedido.ruta.bodega']);
         $filas = [];
 
         /** @var CargaFactura $renglon */
@@ -475,13 +475,13 @@ class Liquidacion extends Page
             }
 
             $municipio = $factura->pedido->cliente->municipio?->nombre;
-            $ruta = $factura->pedido->ruta?->numero;
+            $ruta = $factura->pedido->ruta?->codigo();
 
             $filas[] = [
                 'id'      => $factura->id,
                 'corto'   => HojaDeCarga::corto($factura->numero),
                 'cliente' => $factura->cliente_nombre,
-                'detalle' => ($ruta !== null ? 'Ruta '.$ruta.' · ' : '').($municipio !== null ? $municipio.' · ' : '').'vendió '.$factura->pedido->vendedor->name,
+                'detalle' => ($ruta !== null ? $ruta.' · ' : '').($municipio !== null ? $municipio.' · ' : '').'vendió '.$factura->pedido->vendedor->name,
                 'monto'   => $factura->total,
                 'entrega' => CuentaCarga::ENTREGADA,
             ];

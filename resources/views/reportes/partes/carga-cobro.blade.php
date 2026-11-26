@@ -35,7 +35,7 @@
                         <tr>
                             <td class="n">{{ $i + 1 }}</td>
                             <td class="dia">{{ $f['corto'] }}</td>
-                            <td class="nombre">{{ $f['cliente'] }}<small>{{ $f['ruta'] !== null ? 'Ruta '.$f['ruta'].' · ' : '' }}{{ $f['municipio'] !== null ? $f['municipio'].' · ' : '' }}vendió {{ $f['vendio'] }}</small></td>
+                            <td class="nombre">{{ $f['cliente'] }}<small>{{ $f['ruta'] !== null ? $f['ruta'].' · ' : '' }}{{ $f['municipio'] !== null ? $f['municipio'].' · ' : '' }}vendió {{ $f['vendio'] }}</small></td>
                             <td class="n"><b>{{ number_format($f['total'], 2) }}</b></td>
                             <td class="blanco"></td>
                             <td class="blanco"></td>

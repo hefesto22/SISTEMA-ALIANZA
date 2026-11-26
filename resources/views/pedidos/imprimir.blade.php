@@ -264,7 +264,7 @@
                 @endif
                 <div class="fila"><span class="etiqueta">Vendedor:</span><span>{{ $pedido->vendedor->name }}</span></div>
                 @if ($ruta)
-                    <div class="fila"><span class="etiqueta">Ruta:</span><span><b>N° {{ $ruta->numero }}</b> · {{ \Illuminate\Support\Str::limit($ruta->nombre, 30) }}</span></div>
+                    <div class="fila"><span class="etiqueta">Ruta:</span><span><b>{{ $ruta->codigo() }}</b></span></div>
                 @endif
                 @if ($pedido->fuera_de_ruta)
                     <div class="fila"><span class="etiqueta">Fuera de ruta:</span><span>{{ $pedido->motivo_fuera_ruta }}</span></div>

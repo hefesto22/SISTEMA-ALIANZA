@@ -104,7 +104,7 @@ test('al imprimir se emite la factura con el CAI de la bodega; las copias usan e
     $this->get(imprimir($primero, $this->encargados['COP'], ModoImpresion::Originales)->url())
         ->assertOk()
         ->assertSee('FACTURA')
-        ->assertSee('RUTA 001 SRC')
+        ->assertSee('CO1')
         ->assertSee('CONTADO')
         ->assertSee('Adquiriente Exonerado')
         ->assertSee('Fin del Detalle de la Factura')

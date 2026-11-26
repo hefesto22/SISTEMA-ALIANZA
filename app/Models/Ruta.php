@@ -16,8 +16,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Ruta de una bodega: su número (la ruta 22, único en la bodega; sale en la
- * factura), los municipios que cubre y los vendedores que la trabajan. Un
+ * Ruta de una bodega: su número (único en la bodega; con el prefijo de la
+ * bodega es el código que sale en la factura: CO22), los municipios que
+ * cubre y los vendedores que la trabajan. Un
  * vendedor ve los clientes de los municipios de sus rutas activas; para
  * cubrir a otro (vacaciones, suplencia) se le agrega a la ruta.
  * Si se crea sin número, toma el siguiente libre de la bodega.
@@ -82,11 +83,11 @@ class Ruta extends Model
     }
 
     /**
-     * "Ruta 22".
+     * El código de la ruta: prefijo de la bodega y número ("CO22").
      */
-    public function etiqueta(): string
+    public function codigo(): string
     {
-        return 'Ruta '.$this->numero;
+        return $this->bodega->prefijoDeRutas().$this->numero;
     }
 
     /**

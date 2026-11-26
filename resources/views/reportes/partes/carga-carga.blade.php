@@ -82,7 +82,7 @@
                                     <small class="aviso">{{ $f['nota'] }}</small>
                                 @endif
                             </td>
-                            <td>@if ($f['ruta'] !== null)<b>Ruta {{ $f['ruta'] }}</b> · @endif{{ $f['vendio'] }}</td>
+                            <td>@if ($f['ruta'] !== null)<b>{{ $f['ruta'] }}</b> · @endif{{ $f['vendio'] }}</td>
                             <td class="n monto">{{ number_format($f['total'], 2) }}</td>
                         </tr>
                     @endforeach

@@ -68,7 +68,8 @@ class FacturaResource extends Resource
         $usuario = Acceso::usuario();
         $query = Factura::query()->with([
             'pedido:id,numero,estado,bodega_id,ruta_id',
-            'pedido.ruta:id,numero',
+            'pedido.ruta:id,bodega_id,numero',
+            'pedido.ruta.bodega:id,codigo,prefijo_ruta',
             'bodega:id,nombre',
             'reemplazaA:id,numero',
             'reemplazo:id,reemplaza_a_id,numero',
@@ -112,9 +113,9 @@ class FacturaResource extends Resource
                     ->size(TextSize::Small)
                     ->color('gray')
                     ->visibleFrom('lg'),
-                TextColumn::make('pedido.ruta.numero')
+                TextColumn::make('ruta')
                     ->label('Ruta')
-                    ->formatStateUsing(fn (?int $state): ?string => $state !== null ? 'N° '.$state : null)
+                    ->state(fn (Factura $record): ?string => $record->pedido->ruta?->codigo())
                     ->placeholder('—')
                     ->size(TextSize::Small)
                     ->weight(FontWeight::SemiBold)
@@ -210,7 +211,7 @@ class FacturaResource extends Resource
     }
 
     /**
-     * Las rutas para el filtro: "N° 22 · RUTA CENTRO" (bodega: las suyas).
+     * Las rutas para el filtro: "CO22 · RUTA CENTRO" (bodega: las suyas).
      *
      * @return array<int, string>
      */
@@ -220,9 +221,11 @@ class FacturaResource extends Resource
 
         return Ruta::query()
             ->when($usuario !== null && ! $usuario->veTodasLasBodegas(), fn (Builder $q): Builder => $q->where('bodega_id', $usuario?->bodega_id))
+            ->with('bodega:id,codigo,prefijo_ruta')
+            ->orderBy('bodega_id')
             ->orderBy('numero')
-            ->get(['id', 'numero', 'nombre'])
-            ->mapWithKeys(fn (Ruta $ruta): array => [$ruta->id => 'N° '.$ruta->numero.' · '.$ruta->nombre])
+            ->get(['id', 'bodega_id', 'numero', 'nombre'])
+            ->mapWithKeys(fn (Ruta $ruta): array => [$ruta->id => $ruta->codigo().' · '.$ruta->nombre])
             ->all();
     }
 

@@ -23,9 +23,9 @@ use Filament\Facades\Filament;
 use Livewire\Livewire;
 
 /**
- * Número de ruta (la ruta 22 de la bodega): sale en la factura, queda fijo
- * en el pedido desde su primera factura, y con él se ven y se filtran las
- * facturas y se arman las cargas.
+ * Número de ruta (la ruta 22 de la bodega; con el prefijo de la bodega,
+ * CO22): sale en la factura, queda fijo en el pedido desde su primera
+ * factura, y con él se ven y se filtran las facturas y se arman las cargas.
  */
 beforeEach(function (): void {
     Filament::setCurrentPanel('admin');
@@ -71,7 +71,12 @@ test('cada ruta lleva su número, único en la bodega; si no se pone, toma el si
     expect(Ruta::factory()->create(['bodega_id' => $this->bodega->id, 'numero' => 22])->numero)->toBe(22)
         ->and(Ruta::factory()->create(['bodega_id' => $this->bodega->id])->numero)->toBe(23)
         ->and(Ruta::factory()->create(['bodega_id' => $otra->id])->numero)->toBe(1)
-        ->and(Ruta::siguienteNumero($this->bodega->id))->toBe(24);
+        ->and(Ruta::siguienteNumero($this->bodega->id))->toBe(24)
+        ->and(Ruta::query()->where('numero', 22)->sole()->codigo())->toBe('CO22');
+
+    // El prefijo de la bodega cambia el código; único entre bodegas.
+    $this->bodega->update(['prefijo_ruta' => 'src']);
+    expect(Ruta::query()->where('numero', 22)->sole()->codigo())->toBe('SRC22');
 
     $this->actingAs($this->admin);
 
@@ -85,7 +90,7 @@ test('cada ruta lleva su número, único en la bodega; si no se pone, toma el si
         ->assertHasActionErrors(['numero']);
 });
 
-test('la factura dice la ruta del pedido y queda fija aunque después cambien las rutas', function (): void {
+test('la factura dice el código de la ruta del pedido y queda fijo aunque después cambien las rutas', function (): void {
     $cliente = Cliente::factory()->create(['bodega_id' => $this->bodega->id]);
     $ruta = Ruta::factory()->cubre($cliente->municipio)->para($this->vendedor)->create(['bodega_id' => $this->bodega->id, 'numero' => 22, 'nombre' => 'Ruta centro']);
     $pedido = pedidoDeRuta($this, $cliente);
@@ -96,8 +101,7 @@ test('la factura dice la ruta del pedido y queda fija aunque después cambien la
 
     $this->get(imprimir($pedido, $this->encargado)->url())
         ->assertOk()
-        ->assertSee('N° 22')
-        ->assertSee('RUTA CENTRO');
+        ->assertSee('CO22');
 
     expect($pedido->fresh()->ruta_id)->toBe($ruta->id);
 
@@ -107,8 +111,8 @@ test('la factura dice la ruta del pedido y queda fija aunque después cambien la
 
     $this->get(imprimir($pedido->fresh(), $this->encargado, ModoImpresion::Copia)->url())
         ->assertOk()
-        ->assertSee('N° 22')
-        ->assertDontSee('N° 30');
+        ->assertSee('CO22')
+        ->assertDontSee('CO30');
 });
 
 test('en Facturas se ve y se filtra por ruta, y al cargar el camión salen por ruta', function (): void {
@@ -130,7 +134,7 @@ test('en Facturas se ve y se filtra por ruta, y al cargar el camión salen por r
 
     Livewire::test(ListFacturas::class)
         ->assertCanSeeTableRecords([$deUno, $deDos])
-        ->assertSee('N° 22')
+        ->assertSee('CO22')
         ->filterTable('ruta', $veintidos->id)
         ->assertCanSeeTableRecords([$deUno])
         ->assertCanNotSeeTableRecords([$deDos]);
@@ -138,5 +142,5 @@ test('en Facturas se ve y se filtra por ruta, y al cargar el camión salen por r
     // En la carga, una tarjeta por ruta y vendedor, en orden de ruta.
     Livewire::test(CreateCarga::class)
         ->assertOk()
-        ->assertSeeInOrder(['Ruta 7', 'MARLON', 'Ruta 22']);
+        ->assertSeeInOrder(['CO7', 'MARLON', 'CO22']);
 });

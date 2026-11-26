@@ -8,7 +8,7 @@
       filtro por ruta y vendedor, "Impresas desde", "Solo las marcadas" y "Marcar las
       N que se ven".
     - Las facturas por día (la más reciente primero) y, dentro, una tarjeta por
-      ruta y vendedor ("Ruta 22 · ALVARO"; sin ruta, al final). La casilla del
+      ruta y vendedor ("CO22 · ALVARO"; sin ruta, al final). La casilla del
       día o de la tarjeta marca o quita todas las que se ven de ese grupo; toda
       la fila marca la factura.
     - Si no hay facturas desde ese día pero quedaron sin cargar de días atrás,

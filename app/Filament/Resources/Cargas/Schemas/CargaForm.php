@@ -202,7 +202,7 @@ final class CargaForm
 
     /**
      * Lo que muestra la lista para escoger: las facturas por día (la más
-     * reciente primero) y, dentro, por ruta y vendedor (Ruta 22 · ALVARO; las
+     * reciente primero) y, dentro, por ruta y vendedor (CO22 · ALVARO; las
      * de pedidos sin ruta, al final); para el navegador, cada una con su
      * total, su ruta y vendedor y el texto en que se busca; y cuántas
      * quedaron sin cargar de días atrás.
@@ -233,15 +233,15 @@ final class CargaForm
         $deGrupo = [];
 
         foreach ($facturas as $factura) {
-            $ruta = $factura->pedido->ruta?->numero;
+            $ruta = $factura->pedido->ruta;
             $vendedor = (string) $factura->pedido->vendedor->name;
             // Por número de ruta y, dentro, por vendedor; sin ruta, al final.
-            $grupo = sprintf('%05d|%s', $ruta ?? 99999, $vendedor);
+            $grupo = sprintf('%05d|%s', $ruta->numero ?? 99999, $vendedor);
 
             $deGrupo[$grupo] ??= [
-                'ruta'     => $ruta !== null ? 'Ruta '.$ruta : null,
+                'ruta'     => $ruta?->codigo(),
                 'nombre'   => $vendedor,
-                'etiqueta' => ($ruta !== null ? 'Ruta '.$ruta : 'Sin ruta').' · '.$vendedor,
+                'etiqueta' => ($ruta?->codigo() ?? 'Sin ruta').' · '.$vendedor,
             ];
             $porDia[$factura->fecha_emision->toDateString()][$grupo][] = $factura;
         }
@@ -299,7 +299,7 @@ final class CargaForm
             ];
         }
 
-        // Para el filtro: "Ruta 22 · ALVARO" => cuántas, en orden de ruta.
+        // Para el filtro: "CO22 · ALVARO" => cuántas, en orden de ruta.
         $vendedores = [];
 
         foreach ($deGrupo as $grupo => $info) {
