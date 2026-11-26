@@ -10,6 +10,7 @@ use App\Domain\Reportes\Periodo;
 use App\Filament\Resources\Cargas\CargaResource;
 use App\Filament\Resources\Cargas\Schemas\CargaForm;
 use App\Filament\Support\Acceso;
+use App\Models\Bodega;
 use App\Models\Carga;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -39,9 +40,21 @@ class CreateCarga extends CreateRecord
         $pedida = request()->query('bodega');
         $bodega = $usuario?->veTodasLasBodegas() ? (is_numeric($pedida) ? (int) $pedida : null) : $usuario?->bodega_id;
         $dia = Periodo::dia(request()->query('dia'));
-        // La lista empieza en los últimos días; si el día es de antes, en ese día.
+
+        // Administración: la primera bodega que tiene facturas sin cargar.
+        if ($bodega === null && $usuario?->veTodasLasBodegas()) {
+            $bodega = self::bodegaConFacturas();
+        }
+
+        // La lista empieza en los últimos días; si el día es de antes, en ese
+        // día; si en los últimos días no hay, en el último día que quedó sin cargar.
         $desde = FacturasParaCargar::desdeDe()->toDateString();
-        $desde = $dia !== null && $dia < $desde ? $dia : $desde;
+
+        if ($dia !== null && $dia < $desde) {
+            $desde = $dia;
+        } elseif ($dia === null && $bodega !== null && ! FacturasParaCargar::hayDesde($bodega, $desde)) {
+            $desde = FacturasParaCargar::anteriores($bodega, $desde)['ultimo'] ?? $desde;
+        }
 
         $this->callHook('beforeFill');
 
@@ -53,6 +66,15 @@ class CreateCarga extends CreateRecord
         ]);
 
         $this->callHook('afterFill');
+    }
+
+    private static function bodegaConFacturas(): ?int
+    {
+        $bodegas = Bodega::query()->orderBy('nombre')->pluck('id')->map(fn (mixed $id): int => (int) $id);
+        $desde = FacturasParaCargar::desdeDe()->subDays(FacturasParaCargar::ATRAS)->toDateString();
+
+        return $bodegas->first(fn (int $id): bool => FacturasParaCargar::hayDesde($id, $desde))
+            ?? ($bodegas->count() === 1 ? $bodegas->first() : null);
     }
 
     /**

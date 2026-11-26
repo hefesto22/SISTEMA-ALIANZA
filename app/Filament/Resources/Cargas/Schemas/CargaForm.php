@@ -6,44 +6,39 @@ namespace App\Filament\Resources\Cargas\Schemas;
 
 use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Cargas\FacturasParaCargar;
+use App\Domain\Cargas\HojaDeCarga;
 use App\Enums\EstadoFactura;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Carga;
 use App\Models\Factura;
 use App\Models\User;
-use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Infolists\Components\TextEntry;
+use Filament\Forms\Components\ViewField;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
-use Filament\Support\Enums\FontWeight;
-use Filament\Support\Enums\TextSize;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
-use Livewire\Component;
-use WeakMap;
+use Illuminate\Support\Str;
 
 /**
  * Armar o cambiar una carga del camión: la salida (bodega, fecha, quién
- * sale, camión) y las facturas que lleva, escogidas de una lista que se
- * busca por número, cliente, vendedor o municipio. La lista trae las
- * impresas desde "Impresas desde" (los últimos días si no se cambia).
- * Arriba de la lista, con cuántas facturas y con cuánto sale. Lo guarda ArmarCarga.
+ * sale, camión) y las facturas que lleva.
+ *
+ * Las facturas se escogen en resources/views/filament/cargas/escoger-facturas.blade.php:
+ * agrupadas por día y por vendedor (se marca un grupo entero de un toque),
+ * con buscador, filtro por vendedor, "Impresas desde" y, arriba, la barra
+ * fija con cuántas lleva, con cuánto sale y Guardar. Todo eso pasa en el
+ * navegador; al servidor solo va "Impresas desde" (trae otra lista) y Guardar.
+ * Lo guarda ArmarCarga.
  */
 final class CargaForm
 {
-    /**
-     * Lo consultado en la petición, por pantalla abierta (cada petición trae otra).
-     *
-     * @var WeakMap<Component, array<string, Collection<int, Factura>>>|null
-     */
-    private static ?WeakMap $consultadas = null;
-
     public static function configure(Schema $schema): Schema
     {
         return $schema
@@ -83,45 +78,19 @@ final class CargaForm
                     ]),
 
                 Section::make('Facturas que lleva')
-                    ->description('Marque las facturas impresas que van en el camión (las que ya van en otra carga no salen). Busque por número, cliente, vendedor o municipio; "Seleccionar todas" marca las que se ven.')
-                    ->columns(['default' => 1, 'md' => 4])
+                    ->description('Marque las facturas impresas que van en el camión. Las que ya van en otra carga no salen.')
                     ->schema([
-                        DatePicker::make('desde')
-                            ->label('Impresas desde')
+                        Hidden::make('desde')
                             ->default(fn (): string => FacturasParaCargar::desdeDe()->toDateString())
-                            ->maxDate(fn (Get $get): ?string => is_string($get('fecha')) && $get('fecha') !== '' ? $get('fecha') : null)
-                            ->required()
-                            ->live()
-                            ->dehydrated(false)
-                            ->helperText('Para ver facturas de días atrás, cambie esta fecha.'),
-                        TextEntry::make('lleva')
-                            ->label('Lleva')
-                            ->state(fn (Get $get, ?Carga $record, Component $livewire): string => self::lleva($get, $record, $livewire))
-                            ->size(TextSize::Large)
-                            ->weight(FontWeight::Bold)
-                            ->columnSpan(['default' => 1, 'md' => 3]),
-                        TextEntry::make('sin_facturas')
+                            ->dehydrated(false),
+                        ViewField::make('facturas')
                             ->hiddenLabel()
-                            ->state(fn (Get $get): string => self::bodega($get) === null
-                                ? 'Escoja la bodega para ver sus facturas.'
-                                : 'No hay facturas impresas desde el '.self::desde($get)->format('d/m/Y').' que no vayan ya en una carga. Para ver las de días atrás, cambie "Impresas desde".')
-                            ->color('gray')
-                            ->columnSpanFull()
-                            ->visible(fn (Get $get, ?Carga $record, Component $livewire): bool => self::facturas($get, $record, $livewire)->isEmpty()),
-                        CheckboxList::make('facturas')
-                            ->hiddenLabel()
-                            ->options(fn (Get $get, ?Carga $record, Component $livewire): array => self::facturas($get, $record, $livewire)->mapWithKeys(fn (Factura $factura): array => [$factura->id => FacturasParaCargar::etiqueta($factura)])->all())
-                            ->descriptions(fn (Get $get, ?Carga $record, Component $livewire): array => self::facturas($get, $record, $livewire)->mapWithKeys(fn (Factura $factura): array => [$factura->id => FacturasParaCargar::descripcion($factura)])->all())
-                            ->searchable()
-                            ->searchPrompt('Buscar número, cliente, vendedor o municipio…')
-                            ->noSearchResultsMessage('Ninguna factura coincide.')
-                            ->bulkToggleable()
-                            ->columns(['default' => 1, 'lg' => 2, '2xl' => 3])
+                            ->view('filament.cargas.escoger-facturas')
+                            ->viewData(fn (Get $get, ?Carga $record): array => self::paraEscoger($get, $record))
+                            ->default([])
                             ->required()
-                            ->validationMessages(['required' => 'Escoja las facturas que lleva el camión.'])
-                            ->live()
-                            ->columnSpanFull()
-                            ->visible(fn (Get $get, ?Carga $record, Component $livewire): bool => self::facturas($get, $record, $livewire)->isNotEmpty()),
+                            ->rule('array')
+                            ->validationMessages(['required' => 'Marque las facturas que lleva el camión.']),
                     ]),
             ]);
     }
@@ -232,38 +201,114 @@ final class CargaForm
     }
 
     /**
-     * Las que se pueden escoger (una sola consulta por bodega, fecha y carga en cada petición).
+     * Lo que muestra la lista para escoger: las facturas por día (la más
+     * reciente primero) y, dentro, por vendedor; para el navegador, cada una
+     * con su total, su vendedor y el texto en que se busca; y cuántas quedaron
+     * sin cargar de días atrás.
      *
-     * @return Collection<int, Factura>
+     * @return array{
+     *     bodega: int|null,
+     *     desde: string,
+     *     hasta: string,
+     *     clave: string,
+     *     dias: list<array{clave: string, titulo: string, cuantas: int, total: float, vendedores: list<array{clave: string, nombre: string, cuantas: int, total: float, facturas: list<array{id: string, numero: string, cliente: string, municipio: string|null, total: float}>}>}>,
+     *     grupos: array<string, list<string>>,
+     *     mapa: array<string, array{t: float, v: string, b: string}>,
+     *     vendedores: array<string, int>,
+     *     anteriores: array{cuantas: int, desde: string|null, ultimo: string|null}
+     * }
      */
-    private static function facturas(Get $get, ?Carga $carga, Component $livewire): Collection
+    public static function paraEscoger(Get $get, ?Carga $carga): array
     {
         $bodega = $carga->bodega_id ?? self::bodega($get);
-
-        if ($bodega === null) {
-            return new Collection;
-        }
-
-        $fecha = is_string($get('fecha')) && $get('fecha') !== '' ? Carbon::parse($get('fecha'))->toDateString() : today()->toDateString();
+        $fecha = self::fecha($get);
         $desde = self::desde($get)->toDateString();
-        $clave = $bodega.'|'.$fecha.'|'.$desde.'|'.($carga->id ?? 0);
+        $facturas = $bodega === null ? new Collection : FacturasParaCargar::de($bodega, $fecha, $carga?->id, $desde);
 
-        $memoria = self::$consultadas;
+        /** @var array<string, array<string, list<Factura>>> $porDia */
+        $porDia = [];
 
-        if ($memoria === null) {
-            /** @var WeakMap<Component, array<string, Collection<int, Factura>>> $memoria */
-            $memoria = new WeakMap;
-            self::$consultadas = $memoria;
+        foreach ($facturas as $factura) {
+            $porDia[$factura->fecha_emision->toDateString()][(string) $factura->pedido->vendedor->name][] = $factura;
         }
 
-        $deEsta = $memoria[$livewire] ?? [];
+        krsort($porDia);
 
-        if (! isset($deEsta[$clave])) {
-            $deEsta[$clave] = FacturasParaCargar::de($bodega, $fecha, $carga?->id, $desde);
-            $memoria[$livewire] = $deEsta;
+        $dias = [];
+        $grupos = [];
+        $mapa = [];
+        $vendedores = [];
+
+        foreach (array_values(array_keys($porDia)) as $d => $dia) {
+            $porVendedor = $porDia[$dia];
+            ksort($porVendedor);
+            $bloques = [];
+            $idsDia = [];
+            $totalDia = 0.0;
+
+            foreach (array_values(array_keys($porVendedor)) as $v => $vendedor) {
+                $filas = [];
+                $ids = [];
+                $total = 0.0;
+
+                foreach ($porVendedor[$vendedor] as $factura) {
+                    $id = (string) $factura->id;
+                    $numero = HojaDeCarga::corto($factura->numero);
+                    $municipio = $factura->pedido->cliente->municipio?->nombre;
+
+                    $filas[] = ['id' => $id, 'numero' => $numero, 'cliente' => $factura->cliente_nombre, 'municipio' => $municipio, 'total' => $factura->total];
+                    $mapa[$id] = [
+                        't' => $factura->total,
+                        'v' => $vendedor,
+                        'b' => Str::lower(Str::ascii(implode(' ', [$numero, $factura->numero, $factura->cliente_nombre, $vendedor, $municipio]))),
+                    ];
+                    $ids[] = $id;
+                    $total += $factura->total;
+                }
+
+                $grupos["d{$d}v{$v}"] = $ids;
+                $vendedores[$vendedor] = ($vendedores[$vendedor] ?? 0) + count($ids);
+                $bloques[] = ['clave' => "d{$d}v{$v}", 'nombre' => $vendedor, 'cuantas' => count($ids), 'total' => round($total, 2), 'facturas' => $filas];
+                $idsDia = [...$idsDia, ...$ids];
+                $totalDia += $total;
+            }
+
+            $grupos["d{$d}"] = $idsDia;
+            $dias[] = [
+                'clave'      => "d{$d}",
+                'titulo'     => mb_ucfirst(Carbon::parse($dia)->translatedFormat('l d/m')),
+                'cuantas'    => count($idsDia),
+                'total'      => round($totalDia, 2),
+                'vendedores' => $bloques,
+            ];
         }
 
-        return $deEsta[$clave];
+        ksort($vendedores);
+        $anteriores = $bodega === null ? ['cuantas' => 0, 'desde' => null, 'ultimo' => null] : FacturasParaCargar::anteriores($bodega, $desde, $carga?->id);
+        // Si cambia la lista, el navegador la arma de nuevo.
+        $clave = md5((string) json_encode([$bodega, $fecha, $desde, array_keys($mapa), $anteriores]));
+
+        return [
+            'bodega'     => $bodega,
+            'desde'      => $desde,
+            'hasta'      => $fecha,
+            'clave'      => $clave,
+            'dias'       => $dias,
+            'grupos'     => $grupos,
+            'mapa'       => $mapa,
+            'vendedores' => $vendedores,
+            'anteriores' => $anteriores,
+        ];
+    }
+
+    /**
+     * La fecha de salida escogida (hoy si está vacía).
+     */
+    private static function fecha(Get $get): string
+    {
+        $fecha = $get('fecha');
+
+        return is_string($fecha) && $fecha !== '' ? Carbon::parse($fecha)->toDateString() : today()->toDateString();
     }
 
     /**
@@ -278,26 +323,7 @@ final class CargaForm
             return Carbon::parse($desde)->startOfDay();
         }
 
-        $fecha = $get('fecha');
-
-        return FacturasParaCargar::desdeDe(is_string($fecha) && $fecha !== '' ? $fecha : null);
-    }
-
-    /**
-     * "12 facturas · sale con L 23,450.00".
-     */
-    private static function lleva(Get $get, ?Carga $carga, Component $livewire): string
-    {
-        $escogidas = array_map(intval(...), array_filter((array) $get('facturas'), is_numeric(...)));
-        $lleva = self::facturas($get, $carga, $livewire)->whereIn('id', $escogidas);
-        $total = (float) $lleva->sum('total');
-        $cuantas = $lleva->count();
-
-        return match ($cuantas) {
-            0       => 'Ninguna factura todavía',
-            1       => '1 factura · sale con '.lempiras($total),
-            default => "{$cuantas} facturas · sale con ".lempiras($total),
-        };
+        return FacturasParaCargar::desdeDe(self::fecha($get));
     }
 
     /**
