@@ -144,19 +144,19 @@ test('las de días atrás salen si se busca desde antes (Impresas desde)', funct
     expect(FacturasParaCargar::anteriores($this->bodega->id, FacturasParaCargar::desdeDe()->toDateString()))
         ->toBe(['cuantas' => 1, 'desde' => $hace12, 'ultimo' => $hace12]);
 
-    // "Cargar camión" de ese día: la lista empieza ese día y la trae marcada.
     $this->actingAs($this->encargado);
-
-    Livewire::withQueryParams(['dia' => $hace12, 'bodega' => $this->bodega->id])
-        ->test(CreateCarga::class)
-        ->assertOk()
-        ->assertFormSet(['desde' => $hace12, 'facturas' => [(string) facturaDe($vieja)->id]]);
 
     // Nueva carga sin día: como en los últimos días no hay, empieza en el último día que quedó sin cargar.
     Livewire::test(CreateCarga::class)
         ->assertOk()
         ->assertFormSet(['desde' => $hace12, 'facturas' => []])
         ->assertSee('Sale con');
+
+    // "Cargar camión" de ese día: la lista empieza ese día y la trae marcada.
+    Livewire::withQueryParams(['dia' => $hace12, 'bodega' => $this->bodega->id])
+        ->test(CreateCarga::class)
+        ->assertOk()
+        ->assertFormSet(['desde' => $hace12, 'facturas' => [(string) facturaDe($vieja)->id]]);
 });
 
 test('la factura que sustituye a una corregida sube a la misma carga y la anulada se queda', function (): void {

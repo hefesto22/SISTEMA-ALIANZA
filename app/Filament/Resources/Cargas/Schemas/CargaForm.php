@@ -213,7 +213,7 @@ final class CargaForm
      *     clave: string,
      *     dias: list<array{clave: string, titulo: string, cuantas: int, total: float, vendedores: list<array{clave: string, nombre: string, cuantas: int, total: float, facturas: list<array{id: string, numero: string, cliente: string, municipio: string|null, total: float}>}>}>,
      *     grupos: array<string, list<string>>,
-     *     mapa: array<string, array{t: float, v: string, b: string}>,
+     *     mapa: array<int, array{t: float, v: string, b: string}>,
      *     vendedores: array<string, int>,
      *     anteriores: array{cuantas: int, desde: string|null, ultimo: string|null}
      * }
@@ -239,14 +239,14 @@ final class CargaForm
         $mapa = [];
         $vendedores = [];
 
-        foreach (array_values(array_keys($porDia)) as $d => $dia) {
+        foreach (array_keys($porDia) as $d => $dia) {
             $porVendedor = $porDia[$dia];
             ksort($porVendedor);
             $bloques = [];
             $idsDia = [];
             $totalDia = 0.0;
 
-            foreach (array_values(array_keys($porVendedor)) as $v => $vendedor) {
+            foreach (array_keys($porVendedor) as $v => $vendedor) {
                 $filas = [];
                 $ids = [];
                 $total = 0.0;
@@ -257,7 +257,7 @@ final class CargaForm
                     $municipio = $factura->pedido->cliente->municipio?->nombre;
 
                     $filas[] = ['id' => $id, 'numero' => $numero, 'cliente' => $factura->cliente_nombre, 'municipio' => $municipio, 'total' => $factura->total];
-                    $mapa[$id] = [
+                    $mapa[$factura->id] = [
                         't' => $factura->total,
                         'v' => $vendedor,
                         'b' => Str::lower(Str::ascii(implode(' ', [$numero, $factura->numero, $factura->cliente_nombre, $vendedor, $municipio]))),
