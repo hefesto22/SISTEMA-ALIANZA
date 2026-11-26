@@ -1,6 +1,6 @@
 {{--
     Arriba de las hojas de una carga (carga, cobro y liquidación) y de la
-    carga en pantalla: quién sale, el camión, cuántas facturas y con cuánto
+    carga en pantalla: quién sale, cuántas facturas y con cuánto
     sale. Trae los estilos que comparten las tres hojas.
     Datos: $d = App\Domain\Cargas\HojaDeCarga::datos(); $pantalla (en el panel, sin firmas).
 --}}
@@ -53,7 +53,7 @@
     <div class="rp-kpi">
         <span>{{ $d['liquidada'] ? 'Salió' : 'Sale' }}</span>
         <strong>{{ $d['sale'] }}</strong>
-        <small>{{ $d['camion'] !== null ? 'Camión '.$d['camion'] : 'Sin camión anotado' }}</small>
+        <small>{{ $d['liquidada'] ? 'llevó la mercadería y trajo el dinero' : 'lleva la mercadería y trae el dinero' }}</small>
     </div>
     <div class="rp-kpi">
         <span>Facturas</span>

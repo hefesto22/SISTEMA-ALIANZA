@@ -110,7 +110,6 @@ class CargaResource extends Resource
                 TextColumn::make('id')
                     ->label('Carga')
                     ->formatStateUsing(fn (Carga $record): string => $record->numero())
-                    ->description(fn (Carga $record): ?string => $record->camion !== null ? 'Camión '.$record->camion : null)
                     ->fontFamily(FontFamily::Mono)
                     ->size(TextSize::Small)
                     ->weight(FontWeight::SemiBold)
@@ -118,8 +117,7 @@ class CargaResource extends Resource
                         $numero = ltrim((string) preg_replace('/\D/', '', $search), '0');
 
                         return $query->where(fn (Builder $q): Builder => $q
-                            ->where('camion', 'ilike', "%{$search}%")
-                            ->orWhereHas('repartidor', fn (Builder $r): Builder => $r->where('name', 'ilike', "%{$search}%"))
+                            ->whereHas('repartidor', fn (Builder $r): Builder => $r->where('name', 'ilike', "%{$search}%"))
                             ->when($numero !== '' && strlen($numero) <= 9, fn (Builder $c): Builder => $c->orWhere('cargas.id', (int) $numero)));
                     }),
                 TextColumn::make('fecha')

@@ -27,7 +27,6 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\EmbeddedTable;
@@ -233,7 +232,7 @@ class ListPedidos extends ListRecords
     /**
      * "Cargar camión" de Impresos, con uno o varios días de una bodega
      * (argumentos dias y bodega): cuántas facturas lleva de cada día (las
-     * que todavía se pueden cargar), quién sale, la fecha y el camión, y
+     * que todavía se pueden cargar), quién sale y la fecha, y
      * Guardar carga, que la arma con todas y abre la carga con lo que lleva.
      * "Escoger una por una" abre Nueva carga con esos días marcados.
      */
@@ -260,16 +259,12 @@ class ListPedidos extends ListRecords
                                 ->options(CargaForm::repartidores($carga['bodega']))
                                 ->searchable()
                                 ->required()
-                                ->helperText('Entrega las facturas y trae el dinero.'),
+                                ->helperText('Lleva la mercadería y regresa con el dinero para la liquidación.'),
                             DatePicker::make('fecha')
                                 ->label('Fecha de salida')
                                 ->minDate($carga['hasta'])
                                 ->maxDate(today()->addDays(2)->toDateString())
                                 ->required(),
-                            TextInput::make('camion')
-                                ->label('Camión o placa')
-                                ->placeholder('Ej. PAB 1234 (opcional)')
-                                ->maxLength(40),
                         ]),
                 ];
             })
@@ -302,7 +297,6 @@ class ListPedidos extends ListRecords
                         'bodega_id'     => (int) $carga['bodega'],
                         'fecha'         => $fecha,
                         'repartidor_id' => (int) ($data['repartidor_id'] ?? 0),
-                        'camion'        => isset($data['camion']) && is_string($data['camion']) ? $data['camion'] : null,
                         'facturas'      => array_map(intval(...), $facturas),
                     ], $usuario);
                 } catch (ReglaNegocioException $e) {

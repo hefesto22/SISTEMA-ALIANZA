@@ -19,9 +19,9 @@ use Illuminate\Support\Carbon;
 /**
  * Lo que sale en un camión un día y su liquidación al regresar.
  *
- * Al salir: la bodega, la fecha, quién sale (el vendedor que entrega; no
- * tiene que ser el que vendió), el camión (opcional) y las facturas impresas
- * que lleva. El total de la carga es lo que debe regresar en dinero, menos
+ * Al salir: la bodega, la fecha, quién sale (lleva la mercadería y regresa
+ * con el dinero; no tiene que ser el que vendió) y las facturas impresas que
+ * lleva. La columna camion ya no se pide (queda vacía). El total de la carga es lo que debe regresar en dinero, menos
  * lo que no se entregó y lo devuelto. Todo es al contado.
  *
  * Al liquidar (App\Domain\Cargas\LiquidarCarga) se guardan las cifras:
@@ -71,7 +71,6 @@ class Carga extends Model
         'bodega_id',
         'fecha',
         'repartidor_id',
-        'camion',
         'estado',
         'total_carga',
         'created_by',

@@ -113,7 +113,7 @@ class Liquidacion extends Page
     {
         $carga = $this->carga();
 
-        return 'Salió '.$carga->fecha->format('d/m/Y').' con '.lempiras($carga->total_carga).' · '.$carga->repartidor->name.($carga->camion !== null ? ' · camión '.$carga->camion : '');
+        return 'Salió '.$carga->fecha->format('d/m/Y').' con '.lempiras($carga->total_carga).' · '.$carga->repartidor->name;
     }
 
     public function getBreadcrumb(): string

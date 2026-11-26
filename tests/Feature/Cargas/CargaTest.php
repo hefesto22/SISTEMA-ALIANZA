@@ -101,7 +101,6 @@ function cargaCon(object $prueba, array $pedidos): Carga
         'bodega_id'     => $prueba->bodega->id,
         'fecha'         => today()->toDateString(),
         'repartidor_id' => $prueba->sale->id,
-        'camion'        => 'pab 1234',
         'facturas'      => array_map(fn (Pedido $pedido): int => facturaDe($pedido)->id, $pedidos),
     ], $prueba->encargado);
 }
@@ -115,7 +114,6 @@ test('armar: lleva facturas impresas, sale con su total y una factura no va en d
     $carga = cargaCon($this, [$uno, $dos]);
 
     expect($carga->estado)->toBe(EstadoCarga::EnRuta)
-        ->and($carga->camion)->toBe('PAB 1234')
         ->and($carga->renglones()->count())->toBe(2)
         ->and($carga->total_carga)->toBe(round(facturaDe($uno)->total + facturaDe($dos)->total, 2))
         ->and(FacturasParaCargar::de($this->bodega->id))->toBeEmpty()
@@ -309,13 +307,13 @@ test('bodega arma la carga desde Impresos, la ve, imprime sus hojas y la liquida
         ->assertOk()
         ->assertSee('Facturas que lleva')
         ->assertFormSet(['facturas' => [(string) facturaDe($uno)->id, (string) facturaDe($dos)->id]])
-        ->fillForm(['repartidor_id' => $this->sale->id, 'camion' => 'pab 1234'])
+        ->fillForm(['repartidor_id' => $this->sale->id])
         ->call('create')
         ->assertHasNoFormErrors();
 
     $carga = Carga::query()->latest('id')->firstOrFail();
 
-    expect([$carga->repartidor_id, $carga->camion, $carga->renglones()->count()])->toBe([$this->sale->id, 'PAB 1234', 2]);
+    expect([$carga->repartidor_id, $carga->renglones()->count()])->toBe([$this->sale->id, 2]);
 
     Livewire::test(ListCargas::class)->assertOk()->assertCanSeeTableRecords([$carga]);
     Livewire::test(ViewCarga::class, ['record' => $carga->getRouteKey()])
@@ -385,14 +383,14 @@ test('en Impresos se escogen varios días y el camión se carga de un solo con l
 
     Livewire::test(ListPedidos::class)
         ->set('activeTab', EstadoPedido::Impreso->value)
-        ->callAction('cargarDias', data: ['repartidor_id' => $this->sale->id, 'camion' => 'pab 9'], arguments: ['dias' => $dias, 'bodega' => $this->bodega->id])
+        ->callAction('cargarDias', data: ['repartidor_id' => $this->sale->id], arguments: ['dias' => $dias, 'bodega' => $this->bodega->id])
         ->assertHasNoActionErrors()
         ->assertRedirect();
 
     $carga = Carga::query()->latest('id')->firstOrFail();
 
     expect($carga->renglones()->pluck('factura_id')->all())->toEqualCanonicalizing([facturaDe($antier)->id, facturaDe($ayer)->id])
-        ->and([$carga->camion, $carga->repartidor_id, $carga->fecha->toDateString()])->toBe(['PAB 9', $this->sale->id, $hoy->toDateString()])
+        ->and([$carga->repartidor_id, $carga->fecha->toDateString()])->toBe([$this->sale->id, $hoy->toDateString()])
         ->and(FacturasParaCargar::de($this->bodega->id)->modelKeys())->toBe([facturaDe($deHoy)->id]);
 
     // Esos días ya no tienen qué cargar.

@@ -19,7 +19,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Arma (o cambia, mientras va en ruta) lo que sale en un camión: la bodega,
- * la fecha, quién sale, el camión y las facturas impresas que lleva.
+ * la fecha, quién sale (lleva la mercadería y regresa con el dinero) y las
+ * facturas impresas que lleva.
  *
  * Cada factura: vigente, de esa bodega, de un pedido impreso y que no va en
  * otra carga ni se entregó ya. Las facturas se bloquean mientras se arma
@@ -32,7 +33,7 @@ use Illuminate\Support\Facades\DB;
 final class ArmarCarga
 {
     /**
-     * @param array{bodega_id: int, fecha: string, repartidor_id: int, camion?: string|null, facturas: list<int>} $datos
+     * @param array{bodega_id: int, fecha: string, repartidor_id: int, facturas: list<int>} $datos
      */
     public function ejecutar(?Carga $carga, array $datos, User $usuario): Carga
     {
@@ -94,7 +95,6 @@ final class ArmarCarga
                 'bodega_id'     => $bodegaId,
                 'fecha'         => Carbon::parse($datos['fecha'])->toDateString(),
                 'repartidor_id' => $datos['repartidor_id'],
-                'camion'        => filled($datos['camion'] ?? null) ? mb_strtoupper(trim((string) $datos['camion'])) : null,
             ])->save();
 
             // Las que se quitaron (las vigentes que van en ruta; la anulada al

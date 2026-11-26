@@ -16,7 +16,6 @@ use App\Models\User;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ViewField;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -27,8 +26,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
- * Armar o cambiar una carga del camión: la salida (bodega, fecha, quién
- * sale, camión) y las facturas que lleva.
+ * Armar o cambiar una carga del camión: la salida (bodega, fecha y quién
+ * sale: lleva la mercadería y regresa con el dinero) y las facturas que lleva.
  *
  * Las facturas se escogen en resources/views/filament/cargas/escoger-facturas.blade.php:
  * agrupadas por día y por vendedor (se marca un grupo entero de un toque),
@@ -45,8 +44,8 @@ final class CargaForm
             ->columns(1)
             ->components([
                 Section::make('La salida')
-                    ->description('Quién sale a entregar y cobrar (no tiene que ser el que vendió) y en qué camión.')
-                    ->columns(['default' => 1, 'md' => 2, 'xl' => 4])
+                    ->description('Quién sale a entregar y cobrar: lleva la mercadería y regresa con el dinero para la liquidación (no tiene que ser el que vendió).')
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
                     ->schema([
                         Select::make('bodega_id')
                             ->label('Bodega')
@@ -70,11 +69,7 @@ final class CargaForm
                             ->options(fn (Get $get): array => self::repartidores(self::bodega($get)))
                             ->searchable()
                             ->required()
-                            ->helperText('Entrega las facturas y trae el dinero.'),
-                        TextInput::make('camion')
-                            ->label('Camión o placa')
-                            ->placeholder('Ej. PAB 1234 (opcional)')
-                            ->maxLength(40),
+                            ->helperText('Lleva la mercadería y regresa con el dinero para la liquidación.'),
                     ]),
 
                 Section::make('Facturas que lleva')
@@ -100,21 +95,19 @@ final class CargaForm
      *
      * @param array<string, mixed> $data
      *
-     * @return array{bodega_id: int, fecha: string, repartidor_id: int, camion: string|null, facturas: list<int>}
+     * @return array{bodega_id: int, fecha: string, repartidor_id: int, facturas: list<int>}
      */
     public static function datos(array $data, User $usuario, ?Carga $carga = null): array
     {
         $bodega = $carga->bodega_id ?? ($usuario->veTodasLasBodegas() ? $data['bodega_id'] ?? null : $usuario->bodega_id);
         $fecha = $data['fecha'] ?? null;
         $repartidor = $data['repartidor_id'] ?? null;
-        $camion = $data['camion'] ?? null;
         $facturas = $data['facturas'] ?? null;
 
         return [
             'bodega_id'     => is_numeric($bodega) ? (int) $bodega : 0,
             'fecha'         => is_string($fecha) && $fecha !== '' ? $fecha : today()->toDateString(),
             'repartidor_id' => is_numeric($repartidor) ? (int) $repartidor : 0,
-            'camion'        => is_string($camion) ? $camion : null,
             'facturas'      => array_values(array_map(intval(...), array_filter(is_array($facturas) ? $facturas : [], is_numeric(...)))),
         ];
     }
@@ -139,7 +132,6 @@ final class CargaForm
             'fecha'         => $carga->fecha->toDateString(),
             'desde'         => $desde->toDateString(),
             'repartidor_id' => $carga->repartidor_id,
-            'camion'        => $carga->camion,
             'facturas'      => $carga->facturas()
                 ->where('facturas.estado', EstadoFactura::Vigente->value)
                 ->orderBy('carga_factura.id')
