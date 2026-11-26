@@ -11,7 +11,7 @@ namespace App\Enums;
  *                 la factura original (se emite si no tiene). Los que ya
  *                 imprimió otra persona se saltan.
  *  Seleccionados→ los marcados: Por imprimir sale original; Impreso, copia.
- *  Copia        → "Imprimir copia" de uno impreso (sale REIMPRESIÓN · COPIA).
+ *  Copia        → "Imprimir copia" de uno impreso (sale igual, sin sello).
  *  NoSalio      → la última hoja no salió (atasco, se canceló): se imprime
  *                 igual que la vez anterior, sin contarla como copia.
  */

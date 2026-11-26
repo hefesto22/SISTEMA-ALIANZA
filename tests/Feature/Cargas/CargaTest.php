@@ -71,12 +71,12 @@ beforeEach(function (): void {
 /**
  * Un pedido de $cantidad UN de jabón, validado e impreso (con su factura).
  */
-function pedidoParaCarga(object $prueba, int $cantidad): Pedido
+function pedidoParaCarga(object $prueba, int $cantidad, ?User $vendedor = null): Pedido
 {
     $pedido = Pedido::query()->create([
         'bodega_id'   => $prueba->bodega->id,
         'cliente_id'  => Cliente::factory()->create(['bodega_id' => $prueba->bodega->id])->id,
-        'vendedor_id' => $prueba->vendedor->id,
+        'vendedor_id' => ($vendedor ?? $prueba->vendedor)->id,
         'fecha'       => now(),
     ]);
     $pedido->items()->create(['producto_id' => $prueba->jabon->id, 'presentacion_id' => $prueba->un->id, 'cantidad' => $cantidad]);
@@ -245,6 +245,42 @@ test('sale en otra carga: no se cobra y queda libre para cargarse otro día', fu
         ->and($pedido->fresh()->estado)->toBe(EstadoPedido::Impreso)
         ->and(FacturasParaCargar::de($this->bodega->id)->modelKeys())->toBe([facturaDe($pedido)->id])
         ->and(cargaCon($this, [$pedido])->renglones()->count())->toBe(1);
+});
+
+test('las de un día que ya salió en su ruta y vendedor no salen para cargar; dos camiones del mismo día sí se la reparten', function (): void {
+    $hoy = today();
+    $hace = fn (int $dias): string => $hoy->copy()->subDays($dias)->toDateString();
+    $otro = User::factory()->create(['bodega_id' => $this->bodega->id]);
+    $otro->assignRole(Rol::Vendedor->value);
+
+    $this->travelTo($hoy->copy()->subDays(3)->setTime(8, 0));
+    $viejo = pedidoParaCarga($this, 1);
+    $deOtro = pedidoParaCarga($this, 1, $otro);
+    $this->travelTo($hoy->copy()->subDays(2)->setTime(8, 0));
+    $uno = pedidoParaCarga($this, 2);
+    $dos = pedidoParaCarga($this, 3);
+    $this->travelBack();
+
+    // Hoy sale un camión con una del día del vendedor: las de días antes de él ya no salen.
+    $carga = cargaCon($this, [$uno]);
+    $ids = fn (array $pedidos): array => array_map(fn (Pedido $pedido): int => facturaDe($pedido)->id, $pedidos);
+
+    expect(FacturasParaCargar::de($this->bodega->id, desde: $hace(5))->modelKeys())->toBe($ids([$deOtro, $dos]))
+        ->and(FacturasParaCargar::anteriores($this->bodega->id, $hace(2)))->toBe(['cuantas' => 1, 'desde' => $hace(3), 'ultimo' => $hace(3)])
+        // Al cambiar la carga, ella no cierra días: salen todas.
+        ->and(FacturasParaCargar::de($this->bodega->id, carga: $carga->id, desde: $hace(5))->modelKeys())->toBe($ids([$viejo, $deOtro, $uno, $dos]))
+        // Mañana, la que quedó de ese día tampoco sale (el camión ya salió).
+        ->and(FacturasParaCargar::de($this->bodega->id, $hoy->copy()->addDay()->toDateString(), desde: $hace(5))->modelKeys())->toBe($ids([$deOtro]));
+
+    // La que la liquidación manda a otra carga sí sale.
+    app(LiquidarCarga::class)->ejecutar($carga, [
+        'entregas'       => [facturaDe($uno)->id => CuentaCarga::OTRA_CARGA],
+        'efectivo'       => 0.0,
+        'cheques'        => [],
+        'transferencias' => [],
+    ], $this->encargado);
+
+    expect(FacturasParaCargar::de($this->bodega->id, $hoy->copy()->addDay()->toDateString(), desde: $hace(5))->modelKeys())->toBe($ids([$deOtro, $uno]));
 });
 
 test('bodega arma la carga desde Impresos, la ve, imprime sus hojas y la liquida en pantalla', function (): void {

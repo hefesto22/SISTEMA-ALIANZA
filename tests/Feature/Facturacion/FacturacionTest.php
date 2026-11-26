@@ -120,7 +120,8 @@ test('al imprimir se emite la factura con el CAI de la bodega; las copias usan e
     $this->get(imprimir($primero, $this->encargados['COP'], ModoImpresion::Copia)->url())
         ->assertOk()
         ->assertSee('000-001-01-00000120')
-        ->assertSee('REIMPRESIÓN');
+        ->assertDontSee('REIMPRESIÓN')
+        ->assertDontSee('SIN VALOR FISCAL');
 
     $this->get(imprimir($segundo, $this->encargados['COP'], ModoImpresion::Originales)->url())
         ->assertOk()

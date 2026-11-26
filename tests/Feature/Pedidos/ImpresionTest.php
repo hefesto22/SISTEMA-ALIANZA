@@ -33,8 +33,9 @@ use Livewire\Livewire;
 
 /**
  * Imprimir: la acción (en el servidor) emite la factura y cuenta la
- * impresión; la hoja (GET) solo muestra. Con enlace firmado sale ORIGINAL;
- * sin firma, COPIA · SIN VALOR FISCAL. "No salió" repite la hoja sin
+ * impresión; la hoja (GET) solo muestra. Con enlace firmado sale sin sello
+ * (el original y la copia salen iguales); sin firma, COPIA · SIN VALOR
+ * FISCAL. "No salió" repite la hoja sin
  * contarla como copia. Corregir un impreso anula su factura y al
  * reimprimir sale una nueva que la sustituye.
  */
@@ -163,12 +164,13 @@ test('Imprimir abre la vista previa con la impresora de la bodega; la factura sa
         ->assertDontSee('VISTA PREVIA')
         ->assertDontSee('REIMPRESIÓN');
 
-    // La vista previa de la copia: la misma factura, con su sello, en el papel de la bodega.
+    // La vista previa de la copia: la misma factura, sin sello, en el papel de la bodega.
     $this->get(route('pedidos.vista-previa', ['pedido' => $pedido->id, 'modo' => 'copia']))
         ->assertOk()
         ->assertSee($factura->numero)
         ->assertSee('size: 8.5in 11in', false)
-        ->assertSeeText('REIMPRESIÓN · COPIA');
+        ->assertDontSee('REIMPRESIÓN')
+        ->assertDontSee('SIN VALOR FISCAL');
 
     // El vendedor no imprime: tampoco ve la vista previa.
     $this->actingAs($this->vendedor);
@@ -176,7 +178,7 @@ test('Imprimir abre la vista previa con la impresora de la bodega; la factura sa
     expect($this->get(route('pedidos.vista-previa', ['pedido' => $pedido->id]))->status())->toBeIn([403, 404]);
 });
 
-test('copia sale como reimpresión; "No salió" repite la hoja igual sin contarla como copia', function (): void {
+test('la copia sale igual que el original, sin sello; "No salió" repite la hoja sin contarla como copia', function (): void {
     $pedido = app(ValidarDespacho::class)->ejecutar(pedidoParaImprimir($this->bodega, $this->vendedor, $this->gravado, $this->exento), [], $this->encargado);
 
     $this->actingAs($this->encargado);
@@ -195,11 +197,11 @@ test('copia sale como reimpresión; "No salió" repite la hoja igual sin contarl
         ->and($factura->reintento_por)->toBe($this->encargado->id);
 
     $copia = imprimir($pedido, $this->encargado, ModoImpresion::Copia);
-    $this->get($copia->url())->assertOk()->assertSeeText('REIMPRESIÓN · COPIA');
+    $this->get($copia->url())->assertOk()->assertDontSee('REIMPRESIÓN')->assertDontSee('SIN VALOR FISCAL');
 
     // Si la copia no salió, sale otra copia (no un original).
     $copiaOtraVez = imprimir($pedido, $this->encargado, ModoImpresion::NoSalio);
-    $this->get($copiaOtraVez->url())->assertOk()->assertSeeText('REIMPRESIÓN · COPIA');
+    $this->get($copiaOtraVez->url())->assertOk()->assertDontSee('REIMPRESIÓN')->assertDontSee('SIN VALOR FISCAL');
 
     expect($factura->fresh()?->impresiones)->toBe(2)
         ->and($factura->fresh()?->reintentos)->toBe(2)
@@ -372,7 +374,7 @@ test('se marcan varias y se imprimen de un solo: las por imprimir salen original
             return is_string($url);
         });
 
-    $this->get((string) $url)->assertOk()->assertSeeText('REIMPRESIÓN · COPIA');
+    $this->get((string) $url)->assertOk()->assertSee('FACTURA')->assertDontSee('SIN VALOR FISCAL');
 
     expect(Factura::query()->where('pedido_id', $impreso->id)->sole()->impresiones)->toBe(2)
         ->and(Factura::query()->where('pedido_id', $porImprimir->id)->sole()->impresiones)->toBe(1)

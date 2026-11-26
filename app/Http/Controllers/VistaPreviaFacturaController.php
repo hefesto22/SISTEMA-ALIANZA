@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\Gate;
  *  - ?modo=original: si todavía no tiene factura, la que se va a emitir,
  *    con el siguiente número del CAI (EmitirFactura::borrador), marcada
  *    VISTA PREVIA porque el número se confirma al imprimir.
- *  - ?modo=copia: la factura que ya tiene, con el sello REIMPRESIÓN · COPIA.
+ *  - ?modo=copia: la factura que ya tiene, sin sello (sale igual que el original).
  *
  * lote(): varios de un solo (Imprimir las N de un día), una por página y
  * con los números seguidos, en el orden en que se emiten.

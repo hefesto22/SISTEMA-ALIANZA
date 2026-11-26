@@ -78,7 +78,7 @@ final class CargaForm
                     ]),
 
                 Section::make('Facturas que lleva')
-                    ->description('Marque las facturas impresas que van en el camión. Las que ya van en otra carga no salen.')
+                    ->description('Marque las facturas impresas que van en el camión. No salen las que ya van en otra carga ni las de un día que ya salió en su ruta.')
                     ->schema([
                         Hidden::make('desde')
                             ->default(fn (): string => FacturasParaCargar::desdeDe()->toDateString())
@@ -306,7 +306,7 @@ final class CargaForm
             $vendedores[$info['etiqueta']] = $cuentas[$grupo] ?? 0;
         }
 
-        $anteriores = $bodega === null ? ['cuantas' => 0, 'desde' => null, 'ultimo' => null] : FacturasParaCargar::anteriores($bodega, $desde, $carga?->id);
+        $anteriores = $bodega === null ? ['cuantas' => 0, 'desde' => null, 'ultimo' => null] : FacturasParaCargar::anteriores($bodega, $desde, $carga?->id, $fecha);
         // Si cambia la lista, el navegador la arma de nuevo.
         $clave = md5((string) json_encode([$bodega, $fecha, $desde, array_keys($mapa), $anteriores]));
 

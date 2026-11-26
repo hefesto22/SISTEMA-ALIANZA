@@ -7,7 +7,8 @@
     $enlaces (la misma hoja en cada papel, para la barra) y $previa (dentro del
     modal de Imprimir: sin barra y a lo ancho del cuadro; una factura todavía
     sin guardar sale marcada VISTA PREVIA). Sin firma, toda factura sale
-    "COPIA · SIN VALOR FISCAL"; firmada y no original, "REIMPRESIÓN · COPIA".
+    "COPIA · SIN VALOR FISCAL"; firmada (el original o la copia que se pidió
+    con Imprimir copia), sin sello: las dos salen iguales.
 
     Diseño de la factura de Distribuciones Alianza en dos papeles (@page):
     - Continuo media carta (8.5 × 5.5 pulgadas) para matriciales como la
@@ -170,7 +171,6 @@
         /** @var \App\Models\Pedido $pedido */
         /** @var \App\Models\DatosFiscales $fiscales */
         $factura = $pedido->factura;
-        $esOriginal = ($firmado ?? false) && in_array($pedido->id, $originales ?? [], true);
         $validado = $pedido->estaValidado();
 
         [$exento, $gravado] = $factura !== null
@@ -225,11 +225,8 @@
                     @if (! $factura->exists)
                         {{-- La que se va a emitir (modal de Imprimir): el número se confirma al imprimir. --}}
                         <span class="sello">VISTA PREVIA</span>
-                    @elseif ($esOriginal)
-                        {{-- Original: sin sello. --}}
-                    @elseif ($firmado ?? false)
-                        <span class="sello"><span class="nw">REIMPRESIÓN ·</span> <span class="nw">COPIA</span></span>
-                    @else
+                    @elseif (! ($firmado ?? false))
+                        {{-- Enlace sin firma (copiado o abierto a mano): no vale como factura. El original y la copia salen sin sello. --}}
                         <span class="sello"><span class="nw">COPIA ·</span> <span class="nw">SIN VALOR FISCAL</span></span>
                     @endif
                 @else
