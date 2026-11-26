@@ -16,7 +16,8 @@ use Illuminate\Support\Facades\DB;
 /**
  * Deja la base local sin operación para generar el historial de
  * demostración: borra pedidos, facturas, devoluciones, compras, kárdex,
- * existencias y cierres de comisiones, y la numeración vuelve a empezar en 1.
+ * existencias, cierres de comisiones y cargas del camión, y la numeración
+ * vuelve a empezar en 1.
  * El catálogo, los precios, los clientes, las rutas, los usuarios y la
  * configuración no se tocan.
  *
@@ -28,6 +29,9 @@ final class LimpiarMovimientos
 {
     /** Todas juntas: TRUNCATE pide en la misma orden las tablas que se apuntan entre sí. */
     public const TABLAS = [
+        'carga_pagos',
+        'carga_factura',
+        'cargas',
         'devolucion_items',
         'devoluciones',
         'comision_facturas',

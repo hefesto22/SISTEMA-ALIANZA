@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Domain\Pedidos;
 
+use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Models\Cai;
+use App\Models\Carga;
+use App\Models\CargaFactura;
 use App\Models\ComisionFactura;
 use App\Models\Devolucion;
 use App\Models\Existencia;
@@ -26,8 +29,9 @@ use Illuminate\Support\Facades\DB;
  *    también se deshace); si alguna emitió nota de crédito de un CAI del
  *    SAR, no se borran (las del CAI de prueba sí).
  *  - Sus facturas se borran solo si son del CAI de prueba y ninguna está en
- *    un periodo de comisiones cerrado. Una factura de un CAI del SAR no se
- *    borra nunca: se anula.
+ *    un periodo de comisiones cerrado. Salen de las cargas del camión (la
+ *    carga que se queda sin facturas se borra). Una factura de un CAI del
+ *    SAR no se borra nunca: se anula.
  *  - Los CAI de prueba (facturas y notas de crédito) vuelven a su primer
  *    número libre y, si ya no queda ningún pedido, la numeración de los
  *    pedidos empieza otra vez en 1.
@@ -122,6 +126,7 @@ final class BorrarPedidos
                 ...Factura::query()->whereIn('pedido_id', $ids)->distinct()->pluck('cai_id')->all(),
                 ...Devolucion::query()->whereIn('pedido_id', $ids)->whereNotNull('cai_id')->distinct()->pluck('cai_id')->all(),
             ])));
+            $this->quitarDeCargas($ids);
             $facturas = (int) Factura::query()->whereIn('pedido_id', $ids)->delete();
             $pedidos = (int) Pedido::query()->whereKey($ids)->delete();
 
@@ -129,6 +134,29 @@ final class BorrarPedidos
 
             return ['pedidos' => $pedidos, 'facturas' => $facturas, 'movimientos' => $movimientos];
         });
+    }
+
+    /**
+     * Sus facturas salen de las cargas del camión; la carga que se queda sin
+     * facturas se borra y a las demás se les vuelve a sacar el total.
+     *
+     * @param list<int> $ids
+     */
+    private function quitarDeCargas(array $ids): void
+    {
+        $facturas = Factura::query()->whereIn('pedido_id', $ids)->select('id');
+        $cargas = CargaFactura::query()->whereIn('factura_id', $facturas)->distinct()->pluck('carga_id')->map(fn (mixed $id): int => (int) $id)->all();
+
+        if ($cargas === []) {
+            return;
+        }
+
+        CargaFactura::query()->whereIn('factura_id', $facturas)->delete();
+        Carga::query()->whereKey($cargas)->whereDoesntHave('renglones')->delete();
+
+        foreach (Carga::query()->whereKey($cargas)->get() as $carga) {
+            ArmarCarga::conTotal($carga);
+        }
     }
 
     /**

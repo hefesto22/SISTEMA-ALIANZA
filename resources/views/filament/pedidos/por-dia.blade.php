@@ -3,7 +3,8 @@
     arriba el cambio de vista (Por día / Uno por uno); por día, un cuadro por día y
     bodega (App\Domain\Facturacion\DiaDeFacturacion), del más reciente al más viejo.
       - Por imprimir: Ver (las tarjetas de ese día) · Imprimir las N (modal con la vista previa).
-      - Impresos: Ver · Resumen del día (la hoja para cuadrar).
+      - Impresos: Ver · Resumen del día (la hoja para cuadrar) · Cargar camión (una
+        carga nueva con las facturas de ese día que no van en otra carga).
     Por día la tabla no se dibuja y con ella no salen los modales de las
     acciones: aquí se ponen (x-filament-actions::modals).
     Datos: ListPedidos::datosPorDia().
@@ -17,6 +18,7 @@
     $veTodo ??= false;
     $imprime ??= false;
     $resumen ??= false;
+    $cargar ??= false;
 @endphp
 
 <style>
@@ -127,6 +129,11 @@
                                 @if ($resumen)
                                     <x-filament::button size="sm" icon="heroicon-o-document-text" wire:click="mountAction('resumenDia', {{ $argumentos }})">
                                         Resumen del día
+                                    </x-filament::button>
+                                @endif
+                                @if ($cargar)
+                                    <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-truck" tag="a" :href="\App\Filament\Resources\Cargas\CargaResource::getUrl('create', ['dia' => $d->dia->format('Y-m-d'), 'bodega' => $d->bodegaId])">
+                                        Cargar camión
                                     </x-filament::button>
                                 @endif
                             @elseif ($imprime)

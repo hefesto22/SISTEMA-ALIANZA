@@ -12,6 +12,7 @@ use App\Enums\EstadoPedido;
 use App\Enums\TipoDevolucion;
 use App\Enums\TipoMovimiento;
 use App\Models\Cai;
+use App\Models\Carga;
 use App\Models\Configuracion;
 use App\Models\Devolucion;
 use App\Models\DevolucionItem;
@@ -72,6 +73,8 @@ final class RegistrarDevolucion
             $devolucion = Devolucion::query()->create([
                 'pedido_id'  => $pedido->id,
                 'factura_id' => $factura?->id,
+                // Si la factura va en un camión, se descuenta en la liquidación de esa carga.
+                'carga_id'   => $factura !== null ? Carga::enRutaDe($factura->id)?->id : null,
                 'bodega_id'  => $pedido->bodega_id,
                 'cliente_id' => $pedido->cliente_id,
                 'user_id'    => $usuario->id,

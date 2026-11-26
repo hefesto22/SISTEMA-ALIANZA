@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Facturacion;
 
+use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Models\Cai;
 use App\Models\DatosFiscales;
@@ -46,7 +47,12 @@ final class EmitirFactura
         $cai->siguiente = $correlativo + 1;
         $cai->save();
 
-        return Factura::query()->create(self::datos($pedido, $cai, $correlativo) + ['emitida_por' => $usuario->id]);
+        $factura = Factura::query()->create(self::datos($pedido, $cai, $correlativo) + ['emitida_por' => $usuario->id]);
+
+        // Si sustituye a una que iba en un camión, sube a la misma carga.
+        ArmarCarga::subirSustituta($factura);
+
+        return $factura;
     }
 
     /**

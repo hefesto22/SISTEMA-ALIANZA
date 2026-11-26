@@ -26,6 +26,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $numero DEV-000001
  * @property int $pedido_id
  * @property int|null $factura_id
+ * @property int|null $carga_id la carga en la que iba la factura al registrarla (se descuenta en su liquidación)
  * @property int $bodega_id
  * @property int $cliente_id
  * @property int|null $user_id
@@ -50,6 +51,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  * @property-read Pedido $pedido
  * @property-read Factura|null $factura
+ * @property-read Carga|null $carga
  * @property-read Bodega $bodega
  * @property-read Cliente $cliente
  * @property-read User|null $usuario
@@ -63,6 +65,7 @@ class Devolucion extends Model
     protected $fillable = [
         'pedido_id',
         'factura_id',
+        'carga_id',
         'bodega_id',
         'cliente_id',
         'user_id',
@@ -110,6 +113,16 @@ class Devolucion extends Model
     public function factura(): BelongsTo
     {
         return $this->belongsTo(Factura::class);
+    }
+
+    /**
+     * La carga en la que iba la factura cuando se registró.
+     *
+     * @return BelongsTo<Carga, $this>
+     */
+    public function carga(): BelongsTo
+    {
+        return $this->belongsTo(Carga::class);
     }
 
     /**

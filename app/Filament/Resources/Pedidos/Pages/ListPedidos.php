@@ -15,6 +15,7 @@ use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
 use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
+use App\Models\Carga;
 use App\Models\Factura;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -301,6 +302,7 @@ class ListPedidos extends ListRecords
             'veTodo'   => Acceso::veTodo(),
             'imprime'  => Acceso::puede('Validar:Pedido'),
             'resumen'  => Gate::allows('viewAny', Factura::class),
+            'cargar'   => $impresos && Gate::allows('create', Carga::class),
         ];
     }
 
