@@ -16,8 +16,9 @@ use Illuminate\Support\Carbon;
 /**
  * Las facturas que se pueden subir a un camión: vigentes, de la bodega, de
  * pedidos impresos, que no van en otra carga ni se entregaron ya, emitidas
- * en los últimos DIAS días antes de la fecha de la carga (las de días atrás
- * ya se entregaron sin carga, cuando todavía no había cargas).
+ * desde un día hasta la fecha de la carga. Si no se dice desde cuándo, los
+ * últimos DIAS días (las de antes casi siempre ya se entregaron); en la
+ * pantalla se puede ir más atrás con "Impresas desde".
  * Las que ya lleva la carga que se está cambiando también salen.
  */
 final class FacturasParaCargar
@@ -27,14 +28,15 @@ final class FacturasParaCargar
     /**
      * @return Collection<int, Factura>
      */
-    public static function de(int $bodegaId, ?string $fecha = null, ?int $carga = null): Collection
+    public static function de(int $bodegaId, ?string $fecha = null, ?int $carga = null, ?string $desde = null): Collection
     {
         $hasta = Carbon::parse($fecha ?? 'today')->endOfDay();
+        $inicio = $desde !== null ? Carbon::parse($desde)->startOfDay() : self::desdeDe($hasta->toDateString());
 
         return Factura::query()
             ->where('facturas.bodega_id', $bodegaId)
             ->where('facturas.estado', EstadoFactura::Vigente)
-            ->where('facturas.fecha_emision', '>=', $hasta->copy()->subDays(self::DIAS)->startOfDay())
+            ->where('facturas.fecha_emision', '>=', $inicio)
             ->where('facturas.fecha_emision', '<=', $hasta)
             ->whereHas('pedido', fn (Builder $q): Builder => $q->where('estado', EstadoPedido::Impreso))
             ->whereNotExists(function (QueryBuilder $q) use ($carga): void {
@@ -51,6 +53,14 @@ final class FacturasParaCargar
             ->orderBy('facturas.fecha_emision')
             ->orderBy('facturas.id')
             ->get();
+    }
+
+    /**
+     * Desde cuándo se buscan si no se dice: DIAS días antes de la fecha de la carga.
+     */
+    public static function desdeDe(?string $fecha = null): Carbon
+    {
+        return Carbon::parse($fecha ?? 'today')->startOfDay()->subDays(self::DIAS);
     }
 
     /**

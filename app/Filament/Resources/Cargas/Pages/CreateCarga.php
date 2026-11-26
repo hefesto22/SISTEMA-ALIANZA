@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Cargas\Pages;
 
+use App\Domain\Cargas\FacturasParaCargar;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Reportes\Periodo;
 use App\Filament\Resources\Cargas\CargaResource;
@@ -19,7 +20,8 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Armar una carga. Desde Pedidos → Impresos ("Cargar camión" de un día)
  * llega con ?dia=2026-11-26&bodega=2: la bodega y las facturas de ese día
- * que todavía no van en otra carga vienen marcadas.
+ * que todavía no van en otra carga vienen marcadas (si el día es de antes,
+ * "Impresas desde" empieza en ese día).
  */
 class CreateCarga extends CreateRecord
 {
@@ -37,12 +39,16 @@ class CreateCarga extends CreateRecord
         $pedida = request()->query('bodega');
         $bodega = $usuario?->veTodasLasBodegas() ? (is_numeric($pedida) ? (int) $pedida : null) : $usuario?->bodega_id;
         $dia = Periodo::dia(request()->query('dia'));
+        // La lista empieza en los últimos días; si el día es de antes, en ese día.
+        $desde = FacturasParaCargar::desdeDe()->toDateString();
+        $desde = $dia !== null && $dia < $desde ? $dia : $desde;
 
         $this->callHook('beforeFill');
 
         $this->form->fill([
             'bodega_id' => $bodega,
             'fecha'     => today()->toDateString(),
+            'desde'     => $desde,
             'facturas'  => $bodega !== null && $dia !== null ? CargaForm::delDia($bodega, $dia) : [],
         ]);
 

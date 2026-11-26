@@ -31,8 +31,9 @@ use WeakMap;
 /**
  * Armar o cambiar una carga del camión: la salida (bodega, fecha, quién
  * sale, camión) y las facturas que lleva, escogidas de una lista que se
- * busca por número, cliente, vendedor o municipio. Arriba de la lista, con
- * cuántas facturas y con cuánto sale. Lo guarda ArmarCarga.
+ * busca por número, cliente, vendedor o municipio. La lista trae las
+ * impresas desde "Impresas desde" (los últimos días si no se cambia).
+ * Arriba de la lista, con cuántas facturas y con cuánto sale. Lo guarda ArmarCarga.
  */
 final class CargaForm
 {
@@ -82,19 +83,30 @@ final class CargaForm
                     ]),
 
                 Section::make('Facturas que lleva')
-                    ->description('Las impresas de los últimos '.FacturasParaCargar::DIAS.' días que no van en otra carga. Busque por número, cliente, vendedor o municipio; "Seleccionar todas" marca las que se ven.')
+                    ->description('Marque las facturas impresas que van en el camión (las que ya van en otra carga no salen). Busque por número, cliente, vendedor o municipio; "Seleccionar todas" marca las que se ven.')
+                    ->columns(['default' => 1, 'md' => 4])
                     ->schema([
+                        DatePicker::make('desde')
+                            ->label('Impresas desde')
+                            ->default(fn (): string => FacturasParaCargar::desdeDe()->toDateString())
+                            ->maxDate(fn (Get $get): ?string => is_string($get('fecha')) && $get('fecha') !== '' ? $get('fecha') : null)
+                            ->required()
+                            ->live()
+                            ->dehydrated(false)
+                            ->helperText('Para ver facturas de días atrás, cambie esta fecha.'),
                         TextEntry::make('lleva')
-                            ->hiddenLabel()
+                            ->label('Lleva')
                             ->state(fn (Get $get, ?Carga $record, Component $livewire): string => self::lleva($get, $record, $livewire))
                             ->size(TextSize::Large)
-                            ->weight(FontWeight::Bold),
+                            ->weight(FontWeight::Bold)
+                            ->columnSpan(['default' => 1, 'md' => 3]),
                         TextEntry::make('sin_facturas')
                             ->hiddenLabel()
                             ->state(fn (Get $get): string => self::bodega($get) === null
                                 ? 'Escoja la bodega para ver sus facturas.'
-                                : 'No hay facturas impresas para cargar: las de los últimos '.FacturasParaCargar::DIAS.' días ya van en una carga o ya se entregaron.')
+                                : 'No hay facturas impresas desde el '.self::desde($get)->format('d/m/Y').' que no vayan ya en una carga. Para ver las de días atrás, cambie "Impresas desde".')
                             ->color('gray')
+                            ->columnSpanFull()
                             ->visible(fn (Get $get, ?Carga $record, Component $livewire): bool => self::facturas($get, $record, $livewire)->isEmpty()),
                         CheckboxList::make('facturas')
                             ->hiddenLabel()
@@ -108,6 +120,7 @@ final class CargaForm
                             ->required()
                             ->validationMessages(['required' => 'Escoja las facturas que lleva el camión.'])
                             ->live()
+                            ->columnSpanFull()
                             ->visible(fn (Get $get, ?Carga $record, Component $livewire): bool => self::facturas($get, $record, $livewire)->isNotEmpty()),
                     ]),
             ]);
@@ -144,9 +157,18 @@ final class CargaForm
      */
     public static function llenar(Carga $carga): array
     {
+        // Desde la más vieja que lleva, para que todas salgan en la lista.
+        $desde = FacturasParaCargar::desdeDe($carga->fecha->toDateString());
+        $primera = $carga->facturas()->where('facturas.estado', EstadoFactura::Vigente->value)->min('facturas.fecha_emision');
+
+        if (is_string($primera) && Carbon::parse($primera)->lt($desde)) {
+            $desde = Carbon::parse($primera)->startOfDay();
+        }
+
         return [
             'bodega_id'     => $carga->bodega_id,
             'fecha'         => $carga->fecha->toDateString(),
+            'desde'         => $desde->toDateString(),
             'repartidor_id' => $carga->repartidor_id,
             'camion'        => $carga->camion,
             'facturas'      => $carga->facturas()
@@ -165,7 +187,7 @@ final class CargaForm
      */
     public static function delDia(int $bodegaId, string $dia): array
     {
-        return array_values(FacturasParaCargar::de($bodegaId)
+        return array_values(FacturasParaCargar::de($bodegaId, desde: $dia)
             ->filter(fn (Factura $factura): bool => $factura->fecha_emision->toDateString() === $dia)
             ->map(fn (Factura $factura): string => (string) $factura->id)
             ->all());
@@ -223,7 +245,8 @@ final class CargaForm
         }
 
         $fecha = is_string($get('fecha')) && $get('fecha') !== '' ? Carbon::parse($get('fecha'))->toDateString() : today()->toDateString();
-        $clave = $bodega.'|'.$fecha.'|'.($carga->id ?? 0);
+        $desde = self::desde($get)->toDateString();
+        $clave = $bodega.'|'.$fecha.'|'.$desde.'|'.($carga->id ?? 0);
 
         $memoria = self::$consultadas;
 
@@ -236,7 +259,7 @@ final class CargaForm
         $deEsta = $memoria[$livewire] ?? [];
 
         if (! isset($deEsta[$clave])) {
-            $deEsta[$clave] = FacturasParaCargar::de($bodega, $fecha, $carga?->id);
+            $deEsta[$clave] = FacturasParaCargar::de($bodega, $fecha, $carga?->id, $desde);
             $memoria[$livewire] = $deEsta;
         }
 
@@ -244,7 +267,24 @@ final class CargaForm
     }
 
     /**
-     * "Lleva 12 facturas · sale con L 23,450.00".
+     * Desde qué día se buscan las facturas ("Impresas desde"; si está vacío,
+     * los últimos días antes de la salida).
+     */
+    private static function desde(Get $get): Carbon
+    {
+        $desde = $get('desde');
+
+        if (is_string($desde) && $desde !== '') {
+            return Carbon::parse($desde)->startOfDay();
+        }
+
+        $fecha = $get('fecha');
+
+        return FacturasParaCargar::desdeDe(is_string($fecha) && $fecha !== '' ? $fecha : null);
+    }
+
+    /**
+     * "12 facturas · sale con L 23,450.00".
      */
     private static function lleva(Get $get, ?Carga $carga, Component $livewire): string
     {
@@ -254,9 +294,9 @@ final class CargaForm
         $cuantas = $lleva->count();
 
         return match ($cuantas) {
-            0       => 'Todavía no lleva facturas',
-            1       => 'Lleva 1 factura · sale con '.lempiras($total),
-            default => "Lleva {$cuantas} facturas · sale con ".lempiras($total),
+            0       => 'Ninguna factura todavía',
+            1       => '1 factura · sale con '.lempiras($total),
+            default => "{$cuantas} facturas · sale con ".lempiras($total),
         };
     }
 

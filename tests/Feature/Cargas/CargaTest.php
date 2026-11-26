@@ -131,6 +131,25 @@ test('armar: lleva facturas impresas, sale con su total y una factura no va en d
     ], $this->encargado))->toThrow(ReglaNegocioException::class, 'usuario activo de la bodega');
 });
 
+test('las de días atrás salen si se busca desde antes (Impresas desde)', function (): void {
+    $this->travelTo(now()->subDays(12));
+    $vieja = pedidoParaCarga($this, 2);
+    $this->travelBack();
+
+    $hace12 = today()->subDays(12)->toDateString();
+
+    expect(FacturasParaCargar::de($this->bodega->id))->toBeEmpty()
+        ->and(FacturasParaCargar::de($this->bodega->id, desde: $hace12)->modelKeys())->toBe([facturaDe($vieja)->id]);
+
+    // "Cargar camión" de ese día: la lista empieza ese día y la trae marcada.
+    $this->actingAs($this->encargado);
+
+    Livewire::withQueryParams(['dia' => $hace12, 'bodega' => $this->bodega->id])
+        ->test(CreateCarga::class)
+        ->assertOk()
+        ->assertFormSet(['desde' => $hace12, 'facturas' => [(string) facturaDe($vieja)->id]]);
+});
+
 test('la factura que sustituye a una corregida sube a la misma carga y la anulada se queda', function (): void {
     $pedido = pedidoParaCarga($this, 10);
     $carga = cargaCon($this, [$pedido]);
