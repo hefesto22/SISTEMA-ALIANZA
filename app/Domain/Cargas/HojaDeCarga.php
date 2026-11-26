@@ -219,7 +219,7 @@ final class HojaDeCarga
      */
     private static function pagos(Carga $carga, string $tipo): array
     {
-        return $carga->pagos
+        return array_values($carga->pagos
             ->filter(fn (CargaPago $pago): bool => $pago->tipo === $tipo)
             ->map(fn (CargaPago $pago): array => [
                 'factura'    => $pago->factura !== null ? self::corto($pago->factura->numero) : null,
@@ -227,8 +227,7 @@ final class HojaDeCarga
                 'referencia' => $pago->referencia,
                 'monto'      => round($pago->monto, 2),
             ])
-            ->values()
-            ->all();
+            ->all());
     }
 
     /**
@@ -236,7 +235,7 @@ final class HojaDeCarga
      */
     private static function devoluciones(Carga $carga): array
     {
-        return $carga->devoluciones
+        return array_values($carga->devoluciones
             ->sortBy('id')
             ->map(fn (Devolucion $devolucion): array => [
                 'numero'  => (string) $devolucion->numero,
@@ -246,8 +245,7 @@ final class HojaDeCarga
                 'credito' => $devolucion->tipo === TipoDevolucion::Credito,
                 'total'   => round($devolucion->total, 2),
             ])
-            ->values()
-            ->all();
+            ->all());
     }
 
     /**

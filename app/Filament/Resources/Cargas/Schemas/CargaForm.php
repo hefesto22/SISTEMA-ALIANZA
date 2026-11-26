@@ -122,7 +122,7 @@ final class CargaForm
      */
     public static function datos(array $data, User $usuario, ?Carga $carga = null): array
     {
-        $bodega = $carga?->bodega_id ?? ($usuario->veTodasLasBodegas() ? $data['bodega_id'] ?? null : $usuario->bodega_id);
+        $bodega = $carga->bodega_id ?? ($usuario->veTodasLasBodegas() ? $data['bodega_id'] ?? null : $usuario->bodega_id);
         $fecha = $data['fecha'] ?? null;
         $repartidor = $data['repartidor_id'] ?? null;
         $camion = $data['camion'] ?? null;
@@ -165,11 +165,10 @@ final class CargaForm
      */
     public static function delDia(int $bodegaId, string $dia): array
     {
-        return FacturasParaCargar::de($bodegaId)
+        return array_values(FacturasParaCargar::de($bodegaId)
             ->filter(fn (Factura $factura): bool => $factura->fecha_emision->toDateString() === $dia)
             ->map(fn (Factura $factura): string => (string) $factura->id)
-            ->values()
-            ->all();
+            ->all());
     }
 
     /**
@@ -217,14 +216,14 @@ final class CargaForm
      */
     private static function facturas(Get $get, ?Carga $carga, Component $livewire): Collection
     {
-        $bodega = $carga?->bodega_id ?? self::bodega($get);
+        $bodega = $carga->bodega_id ?? self::bodega($get);
 
         if ($bodega === null) {
             return new Collection;
         }
 
         $fecha = is_string($get('fecha')) && $get('fecha') !== '' ? Carbon::parse($get('fecha'))->toDateString() : today()->toDateString();
-        $clave = $bodega.'|'.$fecha.'|'.($carga?->id ?? 0);
+        $clave = $bodega.'|'.$fecha.'|'.($carga->id ?? 0);
 
         $memoria = self::$consultadas;
 
