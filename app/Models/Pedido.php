@@ -30,11 +30,15 @@ use Illuminate\Support\Carbon;
  * Fuera de ruta: el vendedor le vendió a un cliente que no es de sus rutas;
  * se permite, pero queda marcado con el motivo.
  *
+ * Ruta (ruta_id): la ruta en que se vendió; queda fija al emitir la primera
+ * factura (EmitirFactura) y sale en la factura y en las cargas.
+ *
  * @property int $id
  * @property string|null $numero
  * @property int $bodega_id
  * @property int $cliente_id
  * @property int $vendedor_id
+ * @property int|null $ruta_id
  * @property EstadoPedido $estado
  * @property Carbon $fecha
  * @property string|null $notas
@@ -56,6 +60,7 @@ use Illuminate\Support\Carbon;
  * @property-read Bodega $bodega
  * @property-read Cliente $cliente
  * @property-read User $vendedor
+ * @property-read Ruta|null $ruta
  * @property-read User|null $validador
  * @property-read User|null $impresor
  * @property-read User|null $corrector
@@ -146,6 +151,14 @@ class Pedido extends Model
     {
         // Aunque el usuario se haya eliminado, sus pedidos siguen siendo suyos.
         return $this->belongsTo(User::class, 'vendedor_id')->withTrashed();
+    }
+
+    /**
+     * @return BelongsTo<Ruta, $this>
+     */
+    public function ruta(): BelongsTo
+    {
+        return $this->belongsTo(Ruta::class);
     }
 
     /**

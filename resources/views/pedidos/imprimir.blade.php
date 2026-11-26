@@ -185,7 +185,8 @@
         $bodega = $pedido->bodega;
         $municipioBodega = $bodega->municipio && ! str_contains(mb_strtoupper($bodega->nombre), mb_strtoupper($bodega->municipio->nombre)) ? $bodega->municipio->etiqueta() : null;
         $establecimiento = collect([$bodega->nombre, $bodega->direccion, $municipioBodega])->filter()->implode(', ');
-        $ruta = \App\Models\Ruta::delPedido($pedido);
+        // La ruta en que se vendió (fija desde la primera factura); el pedido sin facturar, la de hoy.
+        $ruta = $pedido->ruta ?? \App\Models\Ruta::delPedido($pedido);
         $cliente = $pedido->cliente;
         $direccion = collect([$cliente->direccion, $cliente->municipio?->nombre, $cliente->municipio?->departamento?->nombre])->filter()->implode(', ');
         $fecha = $factura ? $factura->fecha_emision->copy()->locale('es')->isoFormat('DD/MM/YYYY hh:mm:ss a') : $pedido->fecha->format('d/m/Y');
@@ -216,9 +217,6 @@
                 </div>
                 <div class="renglon chica">
                     <span><b>Establecimiento:</b> {{ $establecimiento }}</span>
-                    @if ($ruta)
-                        <span><b>Ruta:</b> {{ \Illuminate\Support\Str::limit($ruta->nombre, 34) }}</span>
-                    @endif
                 </div>
             </div>
             <div class="documento">
@@ -265,6 +263,9 @@
                     <div class="fila"><span class="etiqueta">Pedido:</span><span>{{ $pedido->numero }} · {{ $pedido->fecha->format('d/m/Y') }}</span></div>
                 @endif
                 <div class="fila"><span class="etiqueta">Vendedor:</span><span>{{ $pedido->vendedor->name }}</span></div>
+                @if ($ruta)
+                    <div class="fila"><span class="etiqueta">Ruta:</span><span><b>N° {{ $ruta->numero }}</b> · {{ \Illuminate\Support\Str::limit($ruta->nombre, 30) }}</span></div>
+                @endif
                 @if ($pedido->fuera_de_ruta)
                     <div class="fila"><span class="etiqueta">Fuera de ruta:</span><span>{{ $pedido->motivo_fuera_ruta }}</span></div>
                 @endif

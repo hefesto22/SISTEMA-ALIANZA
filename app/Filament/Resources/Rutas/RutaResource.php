@@ -35,8 +35,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rules\Unique;
 
 /**
- * Rutas de cada bodega: municipios que cubre y vendedores que la trabajan.
- * Cada vendedor solo ve y crea clientes de los municipios de sus rutas.
+ * Rutas de cada bodega: su número (sale en la factura), municipios que
+ * cubre y vendedores que la trabajan. Cada vendedor solo ve y crea clientes
+ * de los municipios de sus rutas.
  *
  * Administración arma las de todas las bodegas; el encargado de bodega, las
  * de la suya y solo con sus vendedores (la bodega no se escoge: es la suya).
@@ -74,6 +75,16 @@ class RutaResource extends Resource
                     ->required()
                     ->live()
                     ->visible(fn (): bool => Acceso::veTodo()),
+                TextInput::make('numero')
+                    ->label('Número de ruta')
+                    ->integer()
+                    ->minValue(1)
+                    ->maxValue(9999)
+                    ->required(fn (?Ruta $record): bool => $record !== null)
+                    ->placeholder(fn (Get $get): string => 'Siguiente libre: '.Ruta::siguienteNumero(self::bodegaDe($get('bodega_id'))))
+                    ->helperText('El que sale en la factura (Ruta N° 22). Si lo deja vacío, toma el siguiente libre.')
+                    ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('bodega_id', self::bodegaDe($get('bodega_id'))))
+                    ->validationMessages(['unique' => 'Ese número ya es de otra ruta de la bodega.']),
                 TextInput::make('nombre')
                     ->label('Nombre de la ruta')
                     ->placeholder('Ej. Ruta 1 - Santa Rosa centro')
@@ -82,7 +93,7 @@ class RutaResource extends Resource
                     // Se guarda en mayúsculas: se compara igual para no chocar con "RUTA 1" vs "ruta 1".
                     ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? Texto::mayusculas($state) : $state)
                     ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('bodega_id', self::bodegaDe($get('bodega_id'))))
-                    ->columnSpan(fn (): int => Acceso::veTodo() ? 1 : 2),
+                    ->columnSpan(fn (): int => Acceso::veTodo() ? 2 : 1),
                 Select::make('agregar_departamento')
                     ->label('Agregar un departamento completo')
                     ->options(fn (): array => Departamento::opciones())
@@ -168,6 +179,12 @@ class RutaResource extends Resource
     {
         return $table
             ->columns([
+                TextColumn::make('numero')
+                    ->label('N°')
+                    ->sortable()
+                    ->searchable()
+                    ->weight('bold')
+                    ->alignCenter(),
                 TextColumn::make('nombre')
                     ->label('Ruta')
                     ->searchable()
@@ -194,7 +211,7 @@ class RutaResource extends Resource
                 IconColumn::make('activa')
                     ->boolean(),
             ])
-            ->defaultSort('nombre')
+            ->defaultSort('numero')
             ->filters([
                 SelectFilter::make('bodega_id')
                     ->label('Bodega')

@@ -1,11 +1,13 @@
 {{--
-    Ver pedido, arriba: cliente, estado, quién lo levantó / validó / imprimió
-    y el total. Esquema: App\Filament\Resources\Pedidos\Schemas\PedidoInfolist.
+    Ver pedido, arriba: cliente, estado, quién lo levantó (con su código y la
+    ruta) / validó / imprimió y el total. Esquema: App\Filament\Resources\Pedidos\Schemas\PedidoInfolist.
 --}}
 @php
     /** @var \App\Models\Pedido $pedido */
     $pedido = $getRecord();
-    $pedido->loadMissing(['cliente.municipio.departamento', 'vendedor', 'bodega', 'validador', 'impresor', 'corrector', 'factura']);
+    $pedido->loadMissing(['cliente.municipio.departamento', 'vendedor', 'bodega', 'validador', 'impresor', 'corrector', 'factura', 'ruta']);
+    // La ruta en que se vendió (fija desde la primera factura); sin facturar, la de hoy.
+    $ruta = $pedido->ruta ?? \App\Models\Ruta::delPedido($pedido);
     $cliente = $pedido->cliente;
     $lineas = $pedido->items()->count();
     $porSustituir = $pedido->esReimpresion() ? $pedido->facturaPorSustituir() : null;
@@ -18,7 +20,7 @@
 
     // [etiqueta, valor, detalle, aviso, sin dato]
     $datos = [
-        ['Vendedor', $pedido->vendedor->name, $pedido->vendedor->codigo, null, false],
+        ['Vendedor', $pedido->vendedor->name, collect([$pedido->vendedor->codigo, $ruta !== null ? 'Ruta '.$ruta->numero : null])->filter()->implode(' · '), null, false],
         ['Bodega', $pedido->bodega->nombre, null, null, false],
         ['Validó', $pedido->validador->name ?? 'Sin validar', $pedido->validado_at?->format('d/m/Y H:i'), null, $pedido->validador === null],
     ];

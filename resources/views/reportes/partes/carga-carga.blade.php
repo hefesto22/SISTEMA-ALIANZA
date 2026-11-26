@@ -67,7 +67,7 @@
                     <tr>
                         <th>Factura</th>
                         <th>Cliente</th>
-                        <th>Vendió</th>
+                        <th>Ruta · vendió</th>
                         <th class="n">Total</th>
                     </tr>
                 </thead>
@@ -82,7 +82,7 @@
                                     <small class="aviso">{{ $f['nota'] }}</small>
                                 @endif
                             </td>
-                            <td>{{ $f['vendio'] }}</td>
+                            <td>@if ($f['ruta'] !== null)<b>Ruta {{ $f['ruta'] }}</b> · @endif{{ $f['vendio'] }}</td>
                             <td class="n monto">{{ number_format($f['total'], 2) }}</td>
                         </tr>
                     @endforeach

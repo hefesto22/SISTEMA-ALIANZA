@@ -202,16 +202,17 @@ final class CargaForm
 
     /**
      * Lo que muestra la lista para escoger: las facturas por día (la más
-     * reciente primero) y, dentro, por vendedor; para el navegador, cada una
-     * con su total, su vendedor y el texto en que se busca; y cuántas quedaron
-     * sin cargar de días atrás.
+     * reciente primero) y, dentro, por ruta y vendedor (Ruta 22 · ALVARO; las
+     * de pedidos sin ruta, al final); para el navegador, cada una con su
+     * total, su ruta y vendedor y el texto en que se busca; y cuántas
+     * quedaron sin cargar de días atrás.
      *
      * @return array{
      *     bodega: int|null,
      *     desde: string,
      *     hasta: string,
      *     clave: string,
-     *     dias: list<array{clave: string, titulo: string, cuantas: int, total: float, vendedores: list<array{clave: string, nombre: string, cuantas: int, total: float, facturas: list<array{id: string, numero: string, cliente: string, municipio: string|null, total: float}>}>}>,
+     *     dias: list<array{clave: string, titulo: string, cuantas: int, total: float, vendedores: list<array{clave: string, ruta: string|null, nombre: string, cuantas: int, total: float, facturas: list<array{id: string, numero: string, cliente: string, municipio: string|null, total: float}>}>}>,
      *     grupos: array<string, list<string>>,
      *     mapa: array<int, array{t: float, v: string, b: string}>,
      *     vendedores: array<string, int>,
@@ -228,16 +229,30 @@ final class CargaForm
         /** @var array<string, array<string, list<Factura>>> $porDia */
         $porDia = [];
 
+        /** @var array<string, array{ruta: string|null, nombre: string, etiqueta: string}> $deGrupo */
+        $deGrupo = [];
+
         foreach ($facturas as $factura) {
-            $porDia[$factura->fecha_emision->toDateString()][(string) $factura->pedido->vendedor->name][] = $factura;
+            $ruta = $factura->pedido->ruta?->numero;
+            $vendedor = (string) $factura->pedido->vendedor->name;
+            // Por número de ruta y, dentro, por vendedor; sin ruta, al final.
+            $grupo = sprintf('%05d|%s', $ruta ?? 99999, $vendedor);
+
+            $deGrupo[$grupo] ??= [
+                'ruta'     => $ruta !== null ? 'Ruta '.$ruta : null,
+                'nombre'   => $vendedor,
+                'etiqueta' => ($ruta !== null ? 'Ruta '.$ruta : 'Sin ruta').' · '.$vendedor,
+            ];
+            $porDia[$factura->fecha_emision->toDateString()][$grupo][] = $factura;
         }
 
         krsort($porDia);
+        ksort($deGrupo);
 
         $dias = [];
         $grupos = [];
         $mapa = [];
-        $vendedores = [];
+        $cuentas = [];
 
         foreach (array_keys($porDia) as $d => $dia) {
             $porVendedor = $porDia[$dia];
@@ -246,12 +261,13 @@ final class CargaForm
             $idsDia = [];
             $totalDia = 0.0;
 
-            foreach (array_keys($porVendedor) as $v => $vendedor) {
+            foreach (array_keys($porVendedor) as $v => $grupo) {
+                $info = $deGrupo[$grupo];
                 $filas = [];
                 $ids = [];
                 $total = 0.0;
 
-                foreach ($porVendedor[$vendedor] as $factura) {
+                foreach ($porVendedor[$grupo] as $factura) {
                     $id = (string) $factura->id;
                     $numero = HojaDeCarga::corto($factura->numero);
                     $municipio = $factura->pedido->cliente->municipio?->nombre;
@@ -259,16 +275,16 @@ final class CargaForm
                     $filas[] = ['id' => $id, 'numero' => $numero, 'cliente' => $factura->cliente_nombre, 'municipio' => $municipio, 'total' => $factura->total];
                     $mapa[$factura->id] = [
                         't' => $factura->total,
-                        'v' => $vendedor,
-                        'b' => Str::lower(Str::ascii(implode(' ', [$numero, $factura->numero, $factura->cliente_nombre, $vendedor, $municipio]))),
+                        'v' => $info['etiqueta'],
+                        'b' => Str::lower(Str::ascii(implode(' ', [$numero, $factura->numero, $factura->cliente_nombre, $info['etiqueta'], $municipio]))),
                     ];
                     $ids[] = $id;
                     $total += $factura->total;
                 }
 
                 $grupos["d{$d}v{$v}"] = $ids;
-                $vendedores[$vendedor] = ($vendedores[$vendedor] ?? 0) + count($ids);
-                $bloques[] = ['clave' => "d{$d}v{$v}", 'nombre' => $vendedor, 'cuantas' => count($ids), 'total' => round($total, 2), 'facturas' => $filas];
+                $cuentas[$grupo] = ($cuentas[$grupo] ?? 0) + count($ids);
+                $bloques[] = ['clave' => "d{$d}v{$v}", 'ruta' => $info['ruta'], 'nombre' => $info['nombre'], 'cuantas' => count($ids), 'total' => round($total, 2), 'facturas' => $filas];
                 $idsDia = [...$idsDia, ...$ids];
                 $totalDia += $total;
             }
@@ -283,7 +299,13 @@ final class CargaForm
             ];
         }
 
-        ksort($vendedores);
+        // Para el filtro: "Ruta 22 · ALVARO" => cuántas, en orden de ruta.
+        $vendedores = [];
+
+        foreach ($deGrupo as $grupo => $info) {
+            $vendedores[$info['etiqueta']] = $cuentas[$grupo] ?? 0;
+        }
+
         $anteriores = $bodega === null ? ['cuantas' => 0, 'desde' => null, 'ultimo' => null] : FacturasParaCargar::anteriores($bodega, $desde, $carga?->id);
         // Si cambia la lista, el navegador la arma de nuevo.
         $clave = md5((string) json_encode([$bodega, $fecha, $desde, array_keys($mapa), $anteriores]));

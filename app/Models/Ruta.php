@@ -16,12 +16,15 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Ruta de una bodega: los municipios que cubre y los vendedores que la
- * trabajan. Un vendedor ve los clientes de los municipios de sus rutas
- * activas; para cubrir a otro (vacaciones, suplencia) se le agrega a la ruta.
+ * Ruta de una bodega: su número (la ruta 22, único en la bodega; sale en la
+ * factura), los municipios que cubre y los vendedores que la trabajan. Un
+ * vendedor ve los clientes de los municipios de sus rutas activas; para
+ * cubrir a otro (vacaciones, suplencia) se le agrega a la ruta.
+ * Si se crea sin número, toma el siguiente libre de la bodega.
  *
  * @property int $id
  * @property int $bodega_id
+ * @property int $numero
  * @property string $nombre
  * @property bool $activa
  * @property Carbon|null $created_at
@@ -40,6 +43,7 @@ class Ruta extends Model
     /** @var list<string> */
     protected $fillable = [
         'bodega_id',
+        'numero',
         'nombre',
         'activa',
     ];
@@ -55,8 +59,34 @@ class Ruta extends Model
     protected function casts(): array
     {
         return [
+            'numero' => 'integer',
             'activa' => 'boolean',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (Ruta $ruta): void {
+            if (blank($ruta->getAttribute('numero'))) {
+                $ruta->numero = self::siguienteNumero($ruta->bodega_id);
+            }
+        });
+    }
+
+    /**
+     * El siguiente número libre de la bodega (el más alto más uno).
+     */
+    public static function siguienteNumero(?int $bodegaId): int
+    {
+        return (int) self::query()->when($bodegaId !== null, fn (Builder $q): Builder => $q->where('bodega_id', $bodegaId))->max('numero') + 1;
+    }
+
+    /**
+     * "Ruta 22".
+     */
+    public function etiqueta(): string
+    {
+        return 'Ruta '.$this->numero;
     }
 
     /**

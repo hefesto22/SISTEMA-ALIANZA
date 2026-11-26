@@ -5,11 +5,12 @@
     - Arriba, fija al bajar: cuánto lleva (monto grande, cuántas facturas y de
       qué vendedores), "Quitar todas" y Guardar.
     - Buscador (número, cliente, vendedor o municipio, sin importar tildes),
-      filtro por vendedor, "Impresas desde", "Solo las marcadas" y "Marcar las
+      filtro por ruta y vendedor, "Impresas desde", "Solo las marcadas" y "Marcar las
       N que se ven".
     - Las facturas por día (la más reciente primero) y, dentro, una tarjeta por
-      vendedor. La casilla del día o del vendedor marca o quita todas las que
-      se ven de ese grupo; toda la fila marca la factura.
+      ruta y vendedor ("Ruta 22 · ALVARO"; sin ruta, al final). La casilla del
+      día o de la tarjeta marca o quita todas las que se ven de ese grupo; toda
+      la fila marca la factura.
     - Si no hay facturas desde ese día pero quedaron sin cargar de días atrás,
       lo dice y ofrece verlas.
 
@@ -41,7 +42,7 @@
         .cg-filtro { display: grid; gap: 0.3rem; min-width: 0; }
         .cg-filtro > span { font-size: 0.8rem; font-weight: 500; color: var(--cg-tenue); }
         .cg-filtro-buscar { flex: 1 1 18rem; }
-        .cg-filtro-vendedor { flex: 0 1 16rem; }
+        .cg-filtro-vendedor { flex: 0 1 19rem; }
         .cg-filtro-desde { flex: 0 0 11rem; }
         .cg-solo { display: inline-flex; align-items: center; gap: 0.5rem; height: 2.25rem; font-size: 0.875rem; white-space: nowrap; cursor: pointer; }
 
@@ -53,7 +54,11 @@
         .cg-vendedores { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 25rem), 1fr)); gap: 0.75rem; align-items: start; }
         .cg-vendedor { border: 1px solid var(--cg-borde); border-radius: 0.75rem; overflow: hidden; background: var(--cg-fondo); }
         .cg-vendedor-cab { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.85rem; background: var(--cg-suave); border-bottom: 1px solid var(--cg-borde); cursor: pointer; }
-        .cg-vendedor-nombre { flex: 1; min-width: 0; font-size: 0.85rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cg-vendedor-nombre { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 700; }
+        .cg-vendedor-nombre > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cg-ruta { flex: none; padding: 0.1rem 0.45rem; border-radius: 0.375rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; color: var(--primary-700); background: var(--primary-50); outline: 1px solid var(--primary-200); }
+        .dark .cg-ruta { color: var(--primary-300); background: color-mix(in oklab, var(--primary-500) 15%, transparent); outline-color: color-mix(in oklab, var(--primary-400) 30%, transparent); }
+        .cg-ruta.cg-sin-ruta { color: var(--cg-tenue); background: transparent; outline-color: var(--cg-borde); }
         .cg-vendedor-resumen { font-size: 0.75rem; color: var(--cg-tenue); white-space: nowrap; }
 
         .cg-filas { margin: 0; padding: 0; list-style: none; }
@@ -257,7 +262,7 @@
 
                 @if (count($vendedores) > 1)
                     <label class="cg-filtro cg-filtro-vendedor">
-                        <span>Vendedor</span>
+                        <span>Ruta y vendedor</span>
                         <x-filament::input.wrapper>
                             <x-filament::input.select x-model="vendedor">
                                 <option value="">Todos ({{ count($mapa) }})</option>
@@ -337,7 +342,10 @@
                                             x-effect="$el.indeterminate = grupoParcial('{{ $bloque['clave'] }}')"
                                             x-on:change="alternarGrupo('{{ $bloque['clave'] }}')"
                                         />
-                                        <span class="cg-vendedor-nombre">{{ $bloque['nombre'] }}</span>
+                                        <span class="cg-vendedor-nombre">
+                                            <span @class(['cg-ruta', 'cg-sin-ruta' => $bloque['ruta'] === null])>{{ $bloque['ruta'] ?? 'Sin ruta' }}</span>
+                                            <span>{{ $bloque['nombre'] }}</span>
+                                        </span>
                                         <span class="cg-vendedor-resumen">
                                             <span x-text="marcadasEn('{{ $bloque['clave'] }}') + ' de ' + {{ (int) $bloque['cuantas'] }}">0 de {{ $bloque['cuantas'] }}</span>
                                             · {{ lempiras($bloque['total']) }}
@@ -370,7 +378,7 @@
                 <div class="cg-vacio" x-show="visibles().length === 0" x-cloak>
                     <div>
                         <strong>Ninguna factura coincide</strong>
-                        Cambie la búsqueda o el vendedor.
+                        Cambie la búsqueda o la ruta.
                     </div>
                     <x-filament::button type="button" color="gray" x-on:click="limpiarFiltros()">
                         Quitar filtros

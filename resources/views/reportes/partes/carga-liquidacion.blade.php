@@ -52,7 +52,7 @@
                     <tr>
                         <th>Factura</th>
                         <th>Cliente</th>
-                        <th>Vendió</th>
+                        <th>Ruta · vendió</th>
                         <th class="n">Total</th>
                         <th>Cómo terminó</th>
                     </tr>
@@ -62,7 +62,7 @@
                         <tr @class(['tenue' => $f['estado'] !== \App\Enums\EntregaFactura::Entregada])>
                             <td class="dia">{{ $f['corto'] }}</td>
                             <td class="nombre">{{ $f['cliente'] }}<small>{{ $f['municipio'] !== null ? $f['municipio'].' · ' : '' }}Pedido {{ $f['pedido'] }}</small></td>
-                            <td>{{ $f['vendio'] }}</td>
+                            <td>@if ($f['ruta'] !== null)<b>Ruta {{ $f['ruta'] }}</b> · @endif{{ $f['vendio'] }}</td>
                             <td class="n monto">{{ number_format($f['total'], 2) }}</td>
                             <td>
                                 @if ($f['estado'] === \App\Enums\EntregaFactura::Entregada)

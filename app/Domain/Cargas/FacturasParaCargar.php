@@ -39,7 +39,7 @@ final class FacturasParaCargar
         return self::sinCargar($bodegaId, $carga)
             ->where('facturas.fecha_emision', '>=', $inicio)
             ->where('facturas.fecha_emision', '<=', $hasta)
-            ->with(['pedido.cliente.municipio', 'pedido.vendedor'])
+            ->with(['pedido.cliente.municipio', 'pedido.vendedor', 'pedido.ruta'])
             ->orderBy('facturas.fecha_emision')
             ->orderBy('facturas.id')
             ->get();

@@ -10,6 +10,7 @@ use App\Models\Cai;
 use App\Models\DatosFiscales;
 use App\Models\Factura;
 use App\Models\Pedido;
+use App\Models\Ruta;
 use App\Models\User;
 
 /**
@@ -48,6 +49,11 @@ final class EmitirFactura
         $cai->save();
 
         $factura = Factura::query()->create(self::datos($pedido, $cai, $correlativo) + ['emitida_por' => $usuario->id]);
+
+        // La ruta del pedido queda fija desde su primera factura.
+        if ($pedido->ruta_id === null) {
+            $pedido->forceFill(['ruta_id' => Ruta::delPedido($pedido)?->id])->saveQuietly();
+        }
 
         // Si sustituye a una que iba en un camión, sube a la misma carga.
         ArmarCarga::subirSustituta($factura);

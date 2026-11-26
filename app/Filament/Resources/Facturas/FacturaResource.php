@@ -11,6 +11,7 @@ use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
 use App\Models\Factura;
 use App\Models\Pedido;
+use App\Models\Ruta;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -66,7 +67,8 @@ class FacturaResource extends Resource
     {
         $usuario = Acceso::usuario();
         $query = Factura::query()->with([
-            'pedido:id,numero,estado,bodega_id',
+            'pedido:id,numero,estado,bodega_id,ruta_id',
+            'pedido.ruta:id,numero',
             'bodega:id,nombre',
             'reemplazaA:id,numero',
             'reemplazo:id,reemplaza_a_id,numero',
@@ -110,6 +112,13 @@ class FacturaResource extends Resource
                     ->size(TextSize::Small)
                     ->color('gray')
                     ->visibleFrom('lg'),
+                TextColumn::make('pedido.ruta.numero')
+                    ->label('Ruta')
+                    ->formatStateUsing(fn (?int $state): ?string => $state !== null ? 'N° '.$state : null)
+                    ->placeholder('—')
+                    ->size(TextSize::Small)
+                    ->weight(FontWeight::SemiBold)
+                    ->visibleFrom('md'),
                 TextColumn::make('bodega.nombre')
                     ->label('Bodega')
                     ->size(TextSize::Small)
@@ -146,6 +155,13 @@ class FacturaResource extends Resource
                     ->label('Bodega')
                     ->relationship('bodega', 'nombre')
                     ->visible(fn (): bool => Acceso::veTodo()),
+                SelectFilter::make('ruta')
+                    ->label('Ruta')
+                    ->options(fn (): array => self::rutas())
+                    ->searchable()
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->whereHas('pedido', fn (Builder $pedido): Builder => $pedido->where('ruta_id', (int) $data['value']))
+                        : $query),
                 Filter::make('fecha_emision')
                     ->label('Fecha de emisión')
                     ->schema([
@@ -191,6 +207,23 @@ class FacturaResource extends Resource
         return [
             'index' => ListFacturas::route('/'),
         ];
+    }
+
+    /**
+     * Las rutas para el filtro: "N° 22 · RUTA CENTRO" (bodega: las suyas).
+     *
+     * @return array<int, string>
+     */
+    private static function rutas(): array
+    {
+        $usuario = Acceso::usuario();
+
+        return Ruta::query()
+            ->when($usuario !== null && ! $usuario->veTodasLasBodegas(), fn (Builder $q): Builder => $q->where('bodega_id', $usuario?->bodega_id))
+            ->orderBy('numero')
+            ->get(['id', 'numero', 'nombre'])
+            ->mapWithKeys(fn (Ruta $ruta): array => [$ruta->id => 'N° '.$ruta->numero.' · '.$ruta->nombre])
+            ->all();
     }
 
     /**
