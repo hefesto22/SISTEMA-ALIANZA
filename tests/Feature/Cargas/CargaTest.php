@@ -296,10 +296,11 @@ test('bodega arma la carga desde Impresos, la ve, imprime sus hojas y la liquida
     $dos = pedidoParaCarga($this, 5);
     $this->actingAs($this->encargado);
 
-    // En Impresos, cada día dice cuántas quedan sin cargar y trae "Cargar camión".
+    // En Impresos, cada día dice cuántas van en el camión y cuántas faltan, y trae "Cargar camión".
     Livewire::test(ListPedidos::class)
         ->set('activeTab', EstadoPedido::Impreso->value)
-        ->assertSee('Sin cargar')
+        ->assertSee('En el camión')
+        ->assertSee('Faltan 2 por cargar')
         ->assertSee('Cargar camión');
 
     // "Escoger una por una": Nueva carga con las de esos días marcadas.

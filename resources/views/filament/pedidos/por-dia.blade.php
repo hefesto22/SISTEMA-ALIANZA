@@ -39,13 +39,17 @@
     .pd-icono { width: 1.1rem; height: 1.1rem; }
     .pd-ayuda { margin: 0; font-size: 0.875rem; color: var(--pd-tenue); }
     .pd-cuadros { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
-    .pd-cuadro { min-width: 0; display: grid; align-content: start; gap: 0.85rem; padding: 1.1rem 1.25rem; border-radius: 0.75rem; border: 1px solid var(--pd-borde); background: var(--pd-fondo); }
+    /* El cuadro es una columna: los botones quedan siempre abajo, parejos entre cuadros. */
+    .pd-cuadro { min-width: 0; display: flex; flex-direction: column; gap: 0.9rem; padding: 1.1rem 1.25rem 1.2rem; border-radius: 0.75rem; border: 1px solid var(--pd-borde); background: var(--pd-fondo); transition: border-color 0.15s, box-shadow 0.15s; }
     .pd-cuadro.hoy { border-color: color-mix(in oklab, var(--primary-500) 55%, transparent); }
-    .pd-cabeza { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; min-width: 0; }
-    .pd-dia { font-size: 1.05rem; font-weight: 700; line-height: 1.3; }
-    .pd-fecha { font-size: 0.8rem; color: var(--pd-tenue); font-variant-numeric: tabular-nums; }
-    .pd-bodega { min-width: 0; max-width: 60%; font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 0.375rem; color: var(--primary-600); border: 1px solid color-mix(in oklab, var(--primary-500) 40%, transparent); background: color-mix(in oklab, var(--primary-500) 10%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-cabeza { display: flex; align-items: flex-start; gap: 0.65rem; min-width: 0; }
+    .pd-titulos { display: grid; gap: 0.15rem; min-width: 0; }
+    .pd-bodega { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--primary-600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dark .pd-bodega { color: var(--primary-400); }
+    .pd-dia { font-size: 1.05rem; font-weight: 700; line-height: 1.3; }
+    .pd-fecha { margin-inline-start: 0.35rem; font-size: 0.85rem; font-weight: 500; color: var(--pd-tenue); font-variant-numeric: tabular-nums; }
+    .pd-hoy { margin-inline-start: auto; flex: none; font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 999px; color: var(--primary-600); background: color-mix(in oklab, var(--primary-500) 14%, transparent); }
+    .dark .pd-hoy { color: var(--primary-400); }
     .pd-cifras { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 0.75rem; }
     .pd-cuantas strong { font-size: 1.75rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
     .pd-cuantas span { margin-inline-start: 0.3rem; font-size: 0.85rem; color: var(--pd-tenue); }
@@ -57,16 +61,30 @@
     .pd-datos b.mal { color: var(--danger-600); }
     .dark .pd-datos b.mal { color: var(--danger-400); }
     .pd-botones { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    /* Cuánto del día ya va en el camión. */
+    .pd-avance { display: grid; gap: 0.45rem; padding: 0.7rem 0.8rem; border-radius: 0.6rem; border: 1px solid var(--pd-borde); background: color-mix(in oklab, var(--gray-400) 7%, transparent); }
+    .pd-avance-texto { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; }
+    .pd-avance-texto span { color: var(--pd-tenue); }
+    .pd-avance-texto b { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .pd-avance-barra { height: 0.4rem; border-radius: 999px; overflow: hidden; background: color-mix(in oklab, var(--gray-400) 28%, transparent); }
+    .pd-avance-barra span { display: block; height: 100%; width: var(--avance, 0%); border-radius: inherit; background: var(--primary-500); }
+    .pd-avance.completo .pd-avance-barra span { background: var(--success-500); }
+    .pd-avance small { font-size: 0.75rem; font-weight: 600; color: var(--primary-600); }
+    .pd-avance.completo small { color: var(--success-600); }
+    .dark .pd-avance small { color: var(--primary-400); }
+    .dark .pd-avance.completo small { color: var(--success-400); }
+    /* Abajo: los secundarios en una fila, parejos; el principal a todo lo ancho. */
+    .pd-pie { margin-top: auto; display: grid; gap: 0.5rem; padding-top: 0.9rem; border-top: 1px solid var(--pd-borde); }
+    .pd-secundarios { display: flex; gap: 0.5rem; min-width: 0; }
+    .pd-secundarios > .fi-btn { flex: 1 1 auto; justify-content: center; }
+    .pd-pie > .fi-btn { width: 100%; justify-content: center; }
     .pd-vacio { padding: 3rem 1rem; text-align: center; color: var(--pd-tenue); border: 1px dashed var(--pd-borde); border-radius: 0.75rem; }
     .pd-mas { display: flex; justify-content: center; }
     /* Escoger días para cargar el camión. */
-    .pd-titulo { display: flex; align-items: flex-start; gap: 0.6rem; min-width: 0; cursor: pointer; }
+    .pd-titulo { display: flex; align-items: center; gap: 0.65rem; min-width: 0; cursor: pointer; }
     .pd-titulo:has(.pd-escoger:disabled) { cursor: default; }
-    .pd-titulo .pd-dia, .pd-titulo .pd-fecha { display: block; }
-    .pd-escoger { margin-top: 0.3rem; flex: none; }
-    .pd-cuadro:has(.pd-escoger:checked) { border-color: var(--primary-500); box-shadow: 0 0 0 1px var(--primary-500); }
-    .pd-datos b.pend { color: var(--primary-600); }
-    .dark .pd-datos b.pend { color: var(--primary-400); }
+    .pd-escoger { flex: none; }
+    .pd-cuadro:has(.pd-escoger:checked) { border-color: var(--primary-500); box-shadow: 0 0 0 1px var(--primary-500); background: color-mix(in oklab, var(--primary-500) 5%, var(--pd-fondo)); }
     .pd-barra { position: sticky; bottom: 1rem; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1rem; padding: 0.75rem 1rem; border-radius: 0.75rem; border: 1px solid color-mix(in oklab, var(--primary-500) 50%, transparent); background: var(--pd-fondo); box-shadow: 0 12px 28px -12px rgb(0 0 0 / 0.45); }
     .pd-barra-texto { display: grid; gap: 0.1rem; min-width: 0; }
     .pd-barra-texto b { font-size: 0.95rem; font-weight: 700; }
@@ -161,19 +179,23 @@
                                             x-bind:title="otra({{ $d->bodegaId }}) ? 'Una carga lleva facturas de una sola bodega' : 'Escoger este día para cargar el camión'"
                                         @endif
                                     >
-                                    <span>
-                                        <span class="pd-dia">{{ $d->nombre() }}</span>
-                                        <span class="pd-fecha">{{ $d->dia->format('d/m/Y') }}</span>
+                                    <span class="pd-titulos">
+                                        @if ($veTodo)
+                                            <span class="pd-bodega" title="{{ $d->bodega }}">{{ $d->bodega }}</span>
+                                        @endif
+                                        <span class="pd-dia">{{ $d->nombre() }}<span class="pd-fecha">{{ $d->dia->format('d/m/Y') }}</span></span>
                                     </span>
                                 </label>
                             @else
-                                <div>
-                                    <div class="pd-dia">{{ $d->nombre() }}</div>
-                                    <div class="pd-fecha">{{ $d->dia->format('d/m/Y') }}</div>
+                                <div class="pd-titulos">
+                                    @if ($veTodo)
+                                        <span class="pd-bodega" title="{{ $d->bodega }}">{{ $d->bodega }}</span>
+                                    @endif
+                                    <span class="pd-dia">{{ $d->nombre() }}<span class="pd-fecha">{{ $d->dia->format('d/m/Y') }}</span></span>
                                 </div>
                             @endif
-                            @if ($veTodo)
-                                <span class="pd-bodega" title="{{ $d->bodega }}">{{ $d->bodega }}</span>
+                            @if ($d->dia->isToday())
+                                <span class="pd-hoy">Hoy</span>
                             @endif
                         </header>
 
@@ -190,8 +212,6 @@
                                 <li title="Del {{ $d->desde }} al {{ $d->hasta }}"><span>Números</span><b>{{ $d->numeros() }}</b></li>
                                 <li><span>Anuladas</span><b @class(['mal' => $d->anuladas > 0])>{{ number_format($d->anuladas) }}</b></li>
                                 <li><span>Copias</span><b>{{ number_format($d->copias) }}</b></li>
-                                <li title="Facturas de este día que ya van en una carga, ya se entregaron o su día ya salió en su ruta"><span>Cargadas</span><b>{{ number_format($d->cargadas()) }}</b></li>
-                                <li title="Facturas de este día que todavía no van en una carga"><span>Sin cargar</span><b @class(['pend' => $pendientes > 0])>{{ number_format($pendientes) }}</b></li>
                                 @if ($d->sustituciones > 0)
                                     <li title="Facturas de este día que sustituyen a una anulada (de este día o de antes)"><span>Sustituyen a anuladas</span><b>{{ number_format($d->sustituciones) }}</b></li>
                                 @endif
@@ -203,22 +223,36 @@
                             @endif
                         </ul>
 
-                        <footer class="pd-botones">
-                            <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-eye" wire:click="verDia('{{ $d->dia->format('Y-m-d') }}', {{ $d->bodegaId }})">
-                                Ver
-                            </x-filament::button>
-                            @if ($impresos)
-                                @if ($resumen)
-                                    <x-filament::button size="sm" icon="heroicon-o-document-text" wire:click="mountAction('resumenDia', {{ $argumentos }})">
+                        @if ($impresos)
+                            @php
+                                $avance = $d->cuantas > 0 ? (int) round($d->cargadas() * 100 / $d->cuantas) : 0;
+                            @endphp
+                            <div @class(['pd-avance', 'completo' => $pendientes === 0]) title="Las que ya van en una carga, ya se entregaron o su día ya salió en su ruta">
+                                <div class="pd-avance-texto">
+                                    <span>En el camión</span>
+                                    <b>{{ number_format($d->cargadas()) }} de {{ number_format($d->cuantas) }}</b>
+                                </div>
+                                <div class="pd-avance-barra" style="--avance: {{ $avance }}%"><span></span></div>
+                                <small>{{ $pendientes === 0 ? 'Todas cargadas' : ($pendientes === 1 ? 'Falta 1 por cargar' : 'Faltan '.number_format($pendientes).' por cargar') }}</small>
+                            </div>
+                        @endif
+
+                        <footer class="pd-pie">
+                            <div class="pd-secundarios">
+                                <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-eye" wire:click="verDia('{{ $d->dia->format('Y-m-d') }}', {{ $d->bodegaId }})">
+                                    Ver
+                                </x-filament::button>
+                                @if ($impresos && $resumen)
+                                    <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-document-text" wire:click="mountAction('resumenDia', {{ $argumentos }})">
                                         Resumen del día
                                     </x-filament::button>
                                 @endif
-                                @if ($cargar && $pendientes > 0)
-                                    <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-truck" wire:click="mountAction('cargarDias', {{ \Illuminate\Support\Js::from(['dias' => [$d->dia->format('Y-m-d')], 'bodega' => $d->bodegaId]) }})">
-                                        Cargar camión
-                                    </x-filament::button>
-                                @endif
-                            @elseif ($imprime)
+                            </div>
+                            @if ($cargar && $pendientes > 0)
+                                <x-filament::button size="sm" icon="heroicon-o-truck" wire:click="mountAction('cargarDias', {{ \Illuminate\Support\Js::from(['dias' => [$d->dia->format('Y-m-d')], 'bodega' => $d->bodegaId]) }})">
+                                    Cargar camión
+                                </x-filament::button>
+                            @elseif (! $impresos && $imprime)
                                 <x-filament::button size="sm" icon="heroicon-o-printer" wire:click="mountAction('imprimirDia', {{ $argumentos }})">
                                     {{ $d->cuantas === 1 ? 'Imprimir' : 'Imprimir las '.number_format($d->cuantas) }}
                                 </x-filament::button>
