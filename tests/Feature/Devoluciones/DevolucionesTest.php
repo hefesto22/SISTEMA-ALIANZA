@@ -171,7 +171,10 @@ test('bodega registra la devolución desde el pedido y la ve en Devoluciones; el
 
     $devolucion = Devolucion::query()->sole();
 
-    expect($devolucion->items()->count())->toBe(2)
+    // Con crédito (el campo entrega el enum, no el texto): no queda cambio por entregar.
+    expect($devolucion->tipo)->toBe(TipoDevolucion::Credito)
+        ->and($devolucion->reposicion()->exists())->toBeFalse()
+        ->and($devolucion->items()->count())->toBe(2)
         ->and($devolucion->total)->toBe(23.0)
         ->and($devolucion->user_id)->toBe($this->encargado->id);
 

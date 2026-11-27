@@ -135,7 +135,7 @@ final class DevolucionAction
                     }
                 }
 
-                $tipo = TipoDevolucion::tryFrom(is_string($data['tipo'] ?? null) ? $data['tipo'] : '') ?? TipoDevolucion::Cambio;
+                $tipo = self::tipo($data['tipo'] ?? null);
                 $otro = ($data['entrega'] ?? null) === self::DE_OTRO && is_numeric($data['se_le_debe_a'] ?? null)
                     ? Pedido::query()->find((int) $data['se_le_debe_a'])
                     : null;
@@ -188,6 +188,19 @@ final class DevolucionAction
 
                 return $factura?->pedido;
             });
+    }
+
+    /**
+     * Lo que se escogió en "Qué se le da al cliente": el campo entrega el
+     * enum (TipoDevolucion), no el texto.
+     */
+    private static function tipo(mixed $valor): TipoDevolucion
+    {
+        if ($valor instanceof TipoDevolucion) {
+            return $valor;
+        }
+
+        return TipoDevolucion::tryFrom(is_string($valor) ? $valor : '') ?? TipoDevolucion::Cambio;
     }
 
     /**

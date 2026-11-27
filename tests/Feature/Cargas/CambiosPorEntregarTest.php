@@ -375,6 +375,7 @@ test('la devolución se registra desde la carga, por factura: en Ver carga y en 
             'lineas' => [['id' => $roca->items()->sole()->id, 'buenas' => 1, 'danadas' => 0]],
         ], arguments: ['factura' => $facturaDe($roca)->id])
         ->assertHasNoActionErrors()
+        ->assertNotified()
         ->assertSee('Devoluciones que se descuentan');
 
     $undoRepeaterFake();
