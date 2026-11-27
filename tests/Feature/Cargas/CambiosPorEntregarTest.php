@@ -268,7 +268,7 @@ test('en la ruta, a uno se le cambia con lo del camión y al que al final le fal
     Livewire::test(ViewPedido::class, ['record' => $bendicion->getRouteKey()])
         ->callAction('devolucion', data: [
             'tipo'   => DevolucionAction::DEL_CAMION,
-            'lineas' => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
+            'lineas' => [['id' => $bendicion->items()->sole()->id, 'un' => 1]],
         ])
         ->assertHasNoActionErrors()
         ->assertNotified();
@@ -279,7 +279,7 @@ test('en la ruta, a uno se le cambia con lo del camión y al que al final le fal
             'que'    => DevolucionAction::FALTO,
             'causa'  => DevolucionAction::POR_OTRO,
             'tipo'   => TipoDevolucion::Cambio->value,
-            'lineas' => [['id' => $roca->items()->sole()->id, 'falto' => 1]],
+            'lineas' => [['id' => $roca->items()->sole()->id, 'un' => 1]],
         ])
         ->assertHasNoActionErrors()
         ->assertNotified();
@@ -371,7 +371,7 @@ test('la devolución se registra desde la carga, por factura: en Ver carga y en 
         ->assertActionHidden('devolucion', ['factura' => 999999])
         ->callAction('devolucion', data: [
             'tipo'   => TipoDevolucion::Cambio->value,
-            'lineas' => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
+            'lineas' => [['id' => $bendicion->items()->sole()->id, 'un' => 1]],
         ], arguments: ['factura' => $facturaDe($bendicion)->id])
         ->assertHasNoActionErrors()
         ->assertNotified();
@@ -388,7 +388,7 @@ test('la devolución se registra desde la carga, por factura: en Ver carga y en 
     Livewire::test(Liquidacion::class, ['record' => $carga->getRouteKey()])
         ->callAction('devolucion', data: [
             'tipo'   => TipoDevolucion::Credito->value,
-            'lineas' => [['id' => $roca->items()->sole()->id, 'buenas' => 1, 'danadas' => 0]],
+            'lineas' => [['id' => $roca->items()->sole()->id, 'un' => 1]],
         ], arguments: ['factura' => $facturaDe($roca)->id])
         ->assertHasNoActionErrors()
         ->assertNotified()
@@ -422,7 +422,7 @@ test('en la lista de cargas, Devolución va al lado de Liquidar: se escoge la fa
         ->assertActionMounted('devolucion')
         ->fillForm([
             'tipo'   => TipoDevolucion::Credito->value,
-            'lineas' => [['id' => $roca->items()->sole()->id, 'buenas' => 1, 'danadas' => 0]],
+            'lineas' => [['id' => $roca->items()->sole()->id, 'un' => 1]],
         ])
         ->callMountedAction()
         ->assertHasNoActionErrors()

@@ -159,8 +159,8 @@ test('bodega registra la devolución desde el pedido y la ve en Devoluciones; el
         ->callAction('devolucion', data: [
             'tipo'   => TipoDevolucion::Credito->value,
             'lineas' => [
-                ['id' => $this->lineaUn->id, 'buenas' => 1, 'danadas' => 1],
-                ['id' => $this->pedido->items()->where('presentacion_id', $this->cj12->id)->sole()->id, 'buenas' => 0, 'danadas' => 0],
+                ['id' => $this->lineaUn->id, 'un' => 2],
+                ['id' => $this->pedido->items()->where('presentacion_id', $this->cj12->id)->sole()->id],
             ],
             'motivo' => 'cliente no lo quiso',
         ])
@@ -171,10 +171,10 @@ test('bodega registra la devolución desde el pedido y la ve en Devoluciones; el
 
     $devolucion = Devolucion::query()->sole();
 
-    // Con crédito (el campo entrega el enum, no el texto): no queda cambio por entregar.
+    // Con crédito (el campo entrega el enum, no el texto): no queda cambio por entregar. Lo que regresa es dañado.
     expect($devolucion->tipo)->toBe(TipoDevolucion::Credito)
         ->and($devolucion->reposicion()->exists())->toBeFalse()
-        ->and($devolucion->items()->count())->toBe(2)
+        ->and($devolucion->items->map(fn (DevolucionItem $item): array => [$item->cantidad, $item->danado])->all())->toBe([[2, true]])
         ->and($devolucion->total)->toBe(23.0)
         ->and($devolucion->user_id)->toBe($this->encargado->id);
 
@@ -193,8 +193,8 @@ test('lo que se puede devolver de cada línea, para el modal', function (): void
 
     // En qué salió cada una, cuánto queda (en unidades) y en qué se anota: la caja, además, en sueltas.
     expect(array_column($lineas, 'id'))->toBe([$this->lineaUn->id, $this->pedido->items()->where('presentacion_id', $this->cj12->id)->sole()->id])
-        ->and([$lineas[0]['salio'], $lineas[0]['puede'], $lineas[0]['sigla'], $lineas[0]['caja']])->toBe(['10 UN', 'ya devolvió 3 UN · quedan 7 UN', 'UN', false])
-        ->and([$lineas[1]['salio'], $lineas[1]['puede'], $lineas[1]['sigla'], $lineas[1]['base'], $lineas[1]['caja']])->toBe(['1 CJ12', 'son 12 UN', 'CJ12', 'UN', true]);
+        ->and([$lineas[0]['salio'], $lineas[0]['puede'], $lineas[0]['con_cj'], $lineas[0]['con_un']])->toBe(['10 UN', 'ya devolvió 3 UN · quedan 7 UN', false, true])
+        ->and([$lineas[1]['salio'], $lineas[1]['puede'], $lineas[1]['con_cj'], $lineas[1]['con_un']])->toBe(['1 CJ12', 'son 12 UN', true, true]);
 });
 
 test('de una caja se devuelven unidades sueltas: se abonan y cuestan por unidad y no pasan de lo que traía la caja', function (): void {
@@ -224,10 +224,10 @@ test('el formulario dice en qué salió cada producto y la caja se anota en caja
 
     Livewire::test(ViewPedido::class, ['record' => $this->pedido->getRouteKey()])
         ->mountAction('devolucion')
-        ->assertMountedActionModalSee(['¿Qué pasó?', '¿Qué regresó?', '¿Qué se le da?', 'Lo mismo, en la próxima carga', '10 UN', '1 CJ12', 'son 12 UN'])
+        ->assertMountedActionModalSee(['¿Qué pasó?', 'Regresó producto dañado', '¿Qué regresó dañado?', 'Deje en blanco lo que estaba bien', '¿Qué se le da?', '10 UN', '1 CJ12', 'son 12 UN'])
         ->fillForm([
             'tipo'   => TipoDevolucion::Credito->value,
-            'lineas' => [1 => ['danadas' => 3, 'danadas_en' => DevolucionAction::SUELTAS]],
+            'lineas' => [1 => ['un' => 3]],
         ])
         ->callMountedAction()
         ->assertHasNoActionErrors()

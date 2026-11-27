@@ -269,7 +269,7 @@ final class RegistrarDevolucion
         if ($filas === []) {
             throw new ReglaNegocioException($falto
                 ? 'Escriba cuánto le faltó de al menos un producto.'
-                : 'Escriba cuántas regresan (buenas o dañadas) de al menos un producto.');
+                : 'Escriba cuánto regresó de al menos un producto.');
         }
 
         usort($filas, fn (array $a, array $b): int => [$a[0]->producto_id, $a[1]->id] <=> [$b[0]->producto_id, $b[1]->id]);

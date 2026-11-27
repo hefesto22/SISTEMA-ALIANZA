@@ -26,8 +26,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
-use Filament\Schemas\Components\FusedGroup;
-use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\FontWeight;
@@ -38,12 +36,12 @@ use Illuminate\Contracts\View\View as ViewContract;
 /**
  * "Devolución" en un pedido ya entregado (impreso), en tres pasos:
  *
- *  1. Qué pasó: devolvió producto, o le faltó producto de su factura (y
- *     por qué: se le dio a otro cliente en un cambio, ni regresa ni es
- *     pérdida; se dañó en el camión, pérdida; no se subió, vuelve a la
- *     bodega).
- *  2. Qué regresó (buenas y dañadas) o qué le faltó, producto por producto:
- *     en la presentación de cada línea y, de una caja, en unidades sueltas.
+ *  1. Qué pasó: regresó producto dañado (pérdida), o le faltó producto de
+ *     su factura (y por qué: se le dio a otro cliente en un cambio, ni
+ *     regresa ni es pérdida; se dañó en el camión, pérdida; no se subió,
+ *     vuelve a la bodega). Lo que no se anota estaba bien.
+ *  2. Qué regresó dañado o qué le faltó, producto por producto, en CJ (la
+ *     presentación de la línea) y UN (unidades sueltas), como la factura.
  *  3. Qué se le da: lo mismo en la próxima carga (orden de cambio), ya se le
  *     cambió del camión (solo al devolver: no queda nada pendiente; al
  *     cliente al que al final le faltó se le registra el faltante) o su
@@ -64,11 +62,6 @@ final class DevolucionAction
 
     /** Qué se le da: lo mismo pero ya se le dio en el momento con lo del camión (los otros: TipoDevolucion). */
     public const DEL_CAMION = 'camion';
-
-    /** La cantidad va en unidades sueltas (si no, en la presentación de la línea). */
-    public const SUELTAS = 'un';
-
-    public const CAJAS = 'caja';
 
     public const POR_OTRO = 'otro';
 
@@ -108,11 +101,11 @@ final class DevolucionAction
                 Radio::make('que')
                     ->label('¿Qué pasó?')
                     ->options([
-                        self::DEVOLVIO => 'Devolvió producto',
+                        self::DEVOLVIO => 'Regresó producto dañado',
                         self::FALTO    => 'Le faltó producto',
                     ])
                     ->descriptions([
-                        self::DEVOLVIO => 'Regresó algo que ya había recibido: dañado, vencido o que no quiso.',
+                        self::DEVOLVIO => 'Dañado o vencido: es pérdida para la empresa.',
                         self::FALTO    => 'No recibió todo lo que dice su factura.',
                     ])
                     ->extraAttributes(['class' => 'dev-tarjetas'])
@@ -140,33 +133,26 @@ final class DevolucionAction
                     ->required(fn (Get $get): bool => $get('que') === self::FALTO)
                     ->visible(fn (Get $get): bool => $get('que') === self::FALTO),
 
-                // Lo que regresó o lo que le faltó, producto por producto.
+                // Lo dañado o lo que le faltó, producto por producto, en cajas y en unidades (como en la factura).
                 Repeater::make('lineas')
-                    ->label(fn (Get $get): string => $get('que') === self::FALTO ? '¿Qué le faltó?' : '¿Qué regresó?')
+                    ->label(fn (Get $get): string => $get('que') === self::FALTO ? '¿Qué le faltó?' : '¿Qué regresó dañado?')
                     ->helperText(fn (Get $get): string => $get('que') === self::FALTO
                         ? 'Deje en blanco lo que sí recibió.'
-                        : 'Deje en blanco lo que no regresó.')
-                    ->table(fn (Get $get): array => $get('que') === self::FALTO
-                        ? [
-                            TableColumn::make('Producto'),
-                            TableColumn::make('Salió')->width('130px'),
-                            TableColumn::make('Le faltó')->width('210px'),
-                        ]
-                        : [
-                            TableColumn::make('Producto'),
-                            TableColumn::make('Salió')->width('130px'),
-                            TableColumn::make('Buenas')->width('210px'),
-                            TableColumn::make('Dañadas')->width('210px'),
-                        ])
+                        : 'Deje en blanco lo que estaba bien.')
+                    ->table([
+                        TableColumn::make('Producto'),
+                        TableColumn::make('Salió')->width('140px'),
+                        TableColumn::make('CJ')->width('110px'),
+                        TableColumn::make('UN')->width('110px'),
+                    ])
                     ->schema([
                         Hidden::make('id'),
                         Hidden::make('producto')->dehydrated(false),
                         Hidden::make('codigo')->dehydrated(false),
                         Hidden::make('salio')->dehydrated(false),
                         Hidden::make('puede')->dehydrated(false),
-                        Hidden::make('sigla')->dehydrated(false),
-                        Hidden::make('base')->dehydrated(false),
-                        Hidden::make('caja')->dehydrated(false),
+                        Hidden::make('con_cj')->dehydrated(false),
+                        Hidden::make('con_un')->dehydrated(false),
                         TextEntry::make('ver_producto')
                             ->hiddenLabel()
                             ->state(fn (Get $get): string => (string) $get('producto'))
@@ -176,15 +162,8 @@ final class DevolucionAction
                             ->hiddenLabel()
                             ->state(fn (Get $get): string => (string) $get('salio'))
                             ->helperText(fn (Get $get): string => (string) $get('puede')),
-                        // La tercera columna: buenas o, en un faltante, lo que le faltó (una sola celda).
-                        Group::make([
-                            self::cantidad('buenas')
-                                ->visible(fn (Get $get): bool => $get('../../que') !== self::FALTO),
-                            self::cantidad('falto')
-                                ->visible(fn (Get $get): bool => $get('../../que') === self::FALTO),
-                        ]),
-                        self::cantidad('danadas')
-                            ->visible(fn (Get $get): bool => $get('../../que') !== self::FALTO),
+                        self::cantidad('cj', 'con_cj'),
+                        self::cantidad('un', 'con_un'),
                     ])
                     ->addable(false)
                     ->deletable(false)
@@ -235,22 +214,15 @@ final class DevolucionAction
                         continue;
                     }
 
-                    // Cada cantidad va en la presentación de la línea (CJ12) o en unidades sueltas (UN), según lo escogido a su lado.
-                    $partes = function (string $campo) use ($fila): array {
-                        $cuantas = is_numeric($fila[$campo] ?? null) ? (int) $fila[$campo] : 0;
+                    // CJ: en la presentación de la línea (la caja); UN: unidades sueltas (en una línea en unidades, lo mismo).
+                    $cajas = is_numeric($fila['cj'] ?? null) ? (int) $fila['cj'] : 0;
+                    $unidades = is_numeric($fila['un'] ?? null) ? (int) $fila['un'] : 0;
 
-                        return ($fila[$campo.'_en'] ?? null) === self::SUELTAS ? [0, $cuantas] : [$cuantas, 0];
-                    };
-                    [$buenas, $buenasSueltas] = $partes('buenas');
-                    [$danadas, $danadasSueltas] = $partes('danadas');
-                    [$falta, $faltaSueltas] = $partes('falto');
-
-                    // En un faltante, lo que le faltó va como dañado, como bueno (no salió) o como que se le dio a otro.
+                    // Lo que regresó es dañado (pérdida). Lo que le faltó va como dañado, como bueno (no salió) o como que se le dio a otro.
                     $lineas[(int) $fila['id']] = match (true) {
-                        ! $falto                  => ['buenas' => $buenas, 'danadas' => $danadas, 'buenas_un' => $buenasSueltas, 'danadas_un' => $danadasSueltas],
-                        $causa === self::SE_DANO  => ['danadas' => $falta, 'danadas_un' => $faltaSueltas],
-                        $causa === self::NO_SALIO => ['buenas' => $falta, 'buenas_un' => $faltaSueltas],
-                        default                   => ['faltan' => $falta, 'faltan_un' => $faltaSueltas],
+                        ! $falto, $causa === self::SE_DANO => ['danadas' => $cajas, 'danadas_un' => $unidades],
+                        $causa === self::NO_SALIO          => ['buenas' => $cajas, 'buenas_un' => $unidades],
+                        default                            => ['faltan' => $cajas, 'faltan_un' => $unidades],
                     };
                 }
 
@@ -433,10 +405,10 @@ final class DevolucionAction
      * Las líneas que salieron y todavía se pueden devolver, para el
      * formulario: el producto, en qué salió ("1 CJ12"), cuánto queda por
      * devolver ("son 12 UN"; "ya devolvió 3 UN · quedan 9 UN") y en qué se
-     * anota: la presentación de la línea (sigla) y, de una caja, las
-     * unidades sueltas (base).
+     * anota: CJ si la línea es una caja (en su presentación) y UN si es en
+     * unidades o la caja se puede abrir en sueltas.
      *
-     * @return list<array{id: int, producto: string, codigo: string, salio: string, puede: string, sigla: string, base: string, caja: bool, buenas: null, danadas: null, falto: null, buenas_en: string, danadas_en: string, falto_en: string}>
+     * @return list<array{id: int, producto: string, codigo: string, salio: string, puede: string, con_cj: bool, con_un: bool, cj: null, un: null}>
      */
     public static function lineas(Pedido $pedido): array
     {
@@ -460,20 +432,15 @@ final class DevolucionAction
                 : [$puede, $devuelto, ($sueltas ?? $item->presentacion)->sigla()];
 
             $filas[] = [
-                'id'         => $item->id,
-                'producto'   => $item->producto->descripcion.($item->bonificacion ? ' (regalo)' : ''),
-                'codigo'     => (string) $item->producto->codigo,
-                'salio'      => number_format($item->cantidadFacturable()).' '.$sigla,
-                'puede'      => $ya > 0 ? "ya devolvió {$ya} {$en} · quedan {$cuantas} {$en}" : ($sueltas !== null ? "son {$cuantas} {$en}" : ''),
-                'sigla'      => $sigla,
-                'base'       => $sueltas?->sigla() ?? '',
-                'caja'       => $sueltas !== null,
-                'buenas'     => null,
-                'danadas'    => null,
-                'falto'      => null,
-                'buenas_en'  => self::CAJAS,
-                'danadas_en' => self::CAJAS,
-                'falto_en'   => self::CAJAS,
+                'id'       => $item->id,
+                'producto' => $item->producto->descripcion.($item->bonificacion ? ' (regalo)' : ''),
+                'codigo'   => (string) $item->producto->codigo,
+                'salio'    => number_format($item->cantidadFacturable()).' '.$sigla,
+                'puede'    => $ya > 0 ? "ya devolvió {$ya} {$en} · quedan {$cuantas} {$en}" : ($sueltas !== null ? "son {$cuantas} {$en}" : ''),
+                'con_cj'   => $contenido > 1,
+                'con_un'   => $contenido === 1 || $sueltas !== null,
+                'cj'       => null,
+                'un'       => null,
             ];
         }
 
@@ -481,31 +448,19 @@ final class DevolucionAction
     }
 
     /**
-     * Una cantidad de la línea (buenas, dañadas o lo que le faltó): el número
-     * y, si la línea es una caja, en qué se cuenta (la caja, CJ12, o unidades
-     * sueltas, UN), juntos en la misma celda. En una línea en unidades, solo
-     * el número con su unidad.
+     * La cantidad de la línea en cajas (CJ) o en unidades (UN). Si la línea
+     * no se cuenta así (una en unidades no tiene CJ; una caja que no se abre,
+     * UN), la casilla sale apagada con una raya.
      */
-    private static function cantidad(string $campo): FusedGroup
+    private static function cantidad(string $campo, string $aplica): TextInput
     {
-        return FusedGroup::make([
-            TextInput::make($campo)
-                ->hiddenLabel()
-                ->numeric()
-                ->integer()
-                ->minValue(0)
-                ->extraInputAttributes(['class' => 'dev-numero'])
-                ->suffix(fn (Get $get): ?string => $get('caja') ? null : (string) $get('sigla'))
-                ->columnSpan(fn (Get $get): int => $get('caja') ? 1 : 2),
-            Select::make($campo.'_en')
-                ->hiddenLabel()
-                ->native()
-                ->selectablePlaceholder(false)
-                ->options(fn (Get $get): array => [self::CAJAS => (string) $get('sigla'), self::SUELTAS => (string) $get('base')])
-                ->visible(fn (Get $get): bool => (bool) $get('caja'))
-                ->columnSpan(1),
-        ])
+        return TextInput::make($campo)
             ->hiddenLabel()
-            ->columns(2);
+            ->numeric()
+            ->integer()
+            ->minValue(0)
+            ->extraInputAttributes(['class' => 'dev-numero'])
+            ->disabled(fn (Get $get): bool => ! $get($aplica))
+            ->placeholder(fn (Get $get): ?string => $get($aplica) ? null : '—');
     }
 }
