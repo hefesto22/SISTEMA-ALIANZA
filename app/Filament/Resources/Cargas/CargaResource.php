@@ -12,6 +12,7 @@ use App\Filament\Resources\Cargas\Pages\Liquidacion;
 use App\Filament\Resources\Cargas\Pages\ListCargas;
 use App\Filament\Resources\Cargas\Pages\ViewCarga;
 use App\Filament\Resources\Cargas\Schemas\CargaForm;
+use App\Filament\Resources\Pedidos\Actions\DevolucionAction;
 use App\Filament\Support\Acceso;
 use App\Models\Carga;
 use BackedEnum;
@@ -169,6 +170,7 @@ class CargaResource extends Resource
                     ->visible(fn (): bool => Acceso::veTodo()),
             ])
             ->recordActions([
+                DevolucionAction::enLaLista(),
                 Action::make('liquidar')
                     ->label('Liquidar')
                     ->icon(Heroicon::OutlinedBanknotes)

@@ -22,6 +22,7 @@ use App\Enums\TipoDevolucion;
 use App\Filament\Resources\Cargas\CargaResource;
 use App\Filament\Resources\Cargas\Pages\CreateCarga;
 use App\Filament\Resources\Cargas\Pages\Liquidacion;
+use App\Filament\Resources\Cargas\Pages\ListCargas;
 use App\Filament\Resources\Cargas\Pages\ViewCarga;
 use App\Filament\Resources\Pedidos\Actions\DevolucionAction;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
@@ -31,12 +32,14 @@ use App\Models\Bodega;
 use App\Models\Carga;
 use App\Models\Cliente;
 use App\Models\Configuracion;
+use App\Models\Devolucion;
 use App\Models\Existencia;
 use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\Reposicion;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
@@ -383,4 +386,51 @@ test('la devolución se registra desde la carga, por factura: en Ver carga y en 
 
     expect($credito->total)->toBeGreaterThan(0.0)
         ->and(CuentaCarga::de($carga->fresh() ?? $carga, [], 0.0, [], [])['devuelto'])->toBe($credito->total);
+});
+
+test('en la lista de cargas, Devolución va al lado de Liquidar: se escoge la factura (con una sola, directo) y abre la devolución', function (): void {
+    $bendicion = pedidoDeCambios($this, 4, 'PULPERIA LA BENDICION');
+    $roca = pedidoDeCambios($this, 3, 'PULPERIA LA ROCA');
+    $sola = pedidoDeCambios($this, 2, 'PULPERIA EL SOL');
+    $dos = cargaConCambios($this, [$bendicion, $roca], []);
+    $una = cargaConCambios($this, [$sola], []);
+    $facturaDe = fn (Pedido $pedido): Factura => Factura::query()->where('pedido_id', $pedido->id)->where('estado', EstadoFactura::Vigente)->sole();
+
+    expect(array_keys(DevolucionAction::facturasDe($dos)))->toBe([$facturaDe($bendicion)->id, $facturaDe($roca)->id])
+        ->and(DevolucionAction::facturasDe($una)[$facturaDe($sola)->id])->toStartWith('PULPERIA EL SOL · ');
+
+    $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
+
+    // Con dos facturas se escoge cuál; luego, el mismo formulario de la devolución.
+    Livewire::test(ListCargas::class)
+        ->assertActionVisible(TestAction::make('devolver')->table($dos))
+        ->callAction(TestAction::make('devolver')->table($dos), data: ['factura' => $facturaDe($roca)->id])
+        ->assertActionMounted('devolucion')
+        ->fillForm([
+            'tipo'   => TipoDevolucion::Credito->value,
+            'lineas' => [['id' => $roca->items()->sole()->id, 'buenas' => 1, 'danadas' => 0]],
+        ])
+        ->callMountedAction()
+        ->assertHasNoActionErrors()
+        ->assertNotified();
+
+    $credito = Devolucion::query()->sole();
+
+    expect([$credito->pedido_id, $credito->tipo, $credito->carga_id])->toBe([$roca->id, TipoDevolucion::Credito, $dos->id]);
+
+    // Con una sola factura va directo a la devolución.
+    Livewire::test(ListCargas::class)
+        ->callAction(TestAction::make('devolver')->table($una))
+        ->assertActionMounted('devolucion');
+
+    $undoRepeaterFake();
+
+    // Liquidada, ya no.
+    app(LiquidarCarga::class)->ejecutar($una, ['entregas' => [], 'efectivo' => $una->total_carga, 'cheques' => [], 'transferencias' => []], $this->encargado);
+
+    Livewire::test(ListCargas::class)
+        ->set('activeTab', 'todas')
+        ->assertActionHidden(TestAction::make('devolver')->table($una->fresh()))
+        ->assertActionVisible(TestAction::make('devolver')->table($dos));
 });

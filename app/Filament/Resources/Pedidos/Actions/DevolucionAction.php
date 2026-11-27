@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Actions;
 
+use App\Domain\Cargas\HojaDeCarga;
 use App\Domain\Devoluciones\RegistrarDevolucion;
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Enums\EntregaFactura;
 use App\Enums\EstadoPedido;
 use App\Enums\TipoDevolucion;
+use App\Filament\Resources\Cargas\Pages\ListCargas;
 use App\Filament\Support\Acceso;
 use App\Models\Carga;
+use App\Models\CargaFactura;
 use App\Models\Configuracion;
 use App\Models\Devolucion;
 use App\Models\Pedido;
@@ -35,8 +39,10 @@ use Filament\Support\Icons\Heroicon;
  * (queda Por entregar a su nombre) o ya se le dio con producto del pedido
  * de otro cliente (se escoge ese pedido: a ese otro se le queda debiendo).
  *
- * Sale en Ver pedido y, por cada factura, en Ver carga y en Liquidar
- * (deLaCarga()): lo que el cliente regresó con el que salió en la ruta.
+ * Sale en Ver pedido; por cada factura, en Ver carga y en Liquidar
+ * (deLaCarga()); y en la lista de cargas, al lado de Liquidar (enLaLista():
+ * se escoge la factura y abre esta misma con deUnaCarga()): lo que el
+ * cliente regresó con el que salió en la ruta.
  */
 final class DevolucionAction
 {
@@ -181,13 +187,108 @@ final class DevolucionAction
     public static function deLaCarga(Carga $carga): Action
     {
         return self::make()
-            ->record(function (array $arguments) use ($carga): ?Pedido {
-                $factura = is_numeric($arguments['factura'] ?? null)
-                    ? $carga->renglones()->where('factura_id', (int) $arguments['factura'])->first()?->factura
+            ->record(fn (array $arguments): ?Pedido => self::pedidoDe($carga, $arguments));
+    }
+
+    /**
+     * La misma, desde la lista de cargas (argumentos "carga" y "factura"):
+     * solo de una carga en ruta que el usuario ve y de una factura que lleva.
+     */
+    public static function deUnaCarga(): Action
+    {
+        return self::make()
+            ->record(function (array $arguments): ?Pedido {
+                $usuario = Acceso::usuario();
+                $carga = $usuario !== null && is_numeric($arguments['carga'] ?? null)
+                    ? Carga::query()->visiblesPara($usuario)->whereKey((int) $arguments['carga'])->first()
                     : null;
 
-                return $factura?->pedido;
+                return $carga instanceof Carga && $carga->enRuta() ? self::pedidoDe($carga, $arguments) : null;
             });
+    }
+
+    /**
+     * "Devolución" en la lista de cargas, al lado de Liquidar (solo en ruta):
+     * se escoge la factura del cliente que devolvió (si lleva una sola, va
+     * directo) y se abre el formulario de la devolución de esa factura
+     * ("devolucion" de la página, deUnaCarga()).
+     */
+    public static function enLaLista(): Action
+    {
+        return Action::make('devolver')
+            ->label('Devolución')
+            ->icon(Heroicon::OutlinedArrowUturnLeft)
+            ->color('gray')
+            ->button()
+            ->size('sm')
+            ->visible(fn (Carga $record): bool => $record->enRuta()
+                && (Acceso::usuario()?->can('create', Devolucion::class) ?? false)
+                && self::facturasDe($record) !== [])
+            ->modalHeading(fn (Carga $record): string => 'Devolución · '.$record->numero())
+            ->modalDescription('Escoja la factura del cliente que devolvió.')
+            ->modalWidth(Width::Large)
+            ->modalSubmitActionLabel('Siguiente')
+            ->modalHidden(fn (Carga $record): bool => count(self::facturasDe($record)) === 1)
+            ->fillForm(function (Carga $record): array {
+                $facturas = self::facturasDe($record);
+
+                return ['factura' => count($facturas) === 1 ? array_key_first($facturas) : null];
+            })
+            ->schema([
+                Select::make('factura')
+                    ->label('Factura')
+                    ->options(fn (Carga $record): array => self::facturasDe($record))
+                    ->searchable()
+                    ->required(),
+            ])
+            ->action(function (Carga $record, array $data, ListCargas $livewire): void {
+                $factura = is_numeric($data['factura'] ?? null) ? (int) $data['factura'] : null;
+
+                if ($factura === null || ! array_key_exists($factura, self::facturasDe($record))) {
+                    Notification::make()->title('Esa factura ya no va en la carga.')->warning()->send();
+
+                    return;
+                }
+
+                $livewire->replaceMountedAction('devolucion', ['carga' => $record->id, 'factura' => $factura]);
+            });
+    }
+
+    /**
+     * Las facturas que lleva la carga y se pueden devolver (en ruta, vigentes,
+     * de un pedido impreso): [factura_id => "PULPERIA LA ROCA · Fact. 1234 · L. 500.00"].
+     *
+     * @return array<int, string>
+     */
+    public static function facturasDe(Carga $carga): array
+    {
+        $opciones = [];
+
+        foreach ($carga->renglones()->where('estado', EntregaFactura::EnRuta->value)->with('factura.pedido.cliente')->get() as $renglon) {
+            $factura = $renglon->factura;
+
+            if ($factura->estaAnulada() || $factura->pedido->estado !== EstadoPedido::Impreso) {
+                continue;
+            }
+
+            $opciones[$factura->id] = implode(' · ', [$factura->pedido->cliente->nombre, 'Fact. '.HojaDeCarga::corto($factura->numero), lempiras($factura->total)]);
+        }
+
+        return $opciones;
+    }
+
+    /**
+     * El pedido de la factura (argumento "factura") que lleva la carga.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private static function pedidoDe(Carga $carga, array $arguments): ?Pedido
+    {
+        $renglon = is_numeric($arguments['factura'] ?? null)
+            ? $carga->renglones()->where('factura_id', (int) $arguments['factura'])->with('factura.pedido')->first()
+            : null;
+
+        return $renglon instanceof CargaFactura ? $renglon->factura->pedido : null;
     }
 
     /**

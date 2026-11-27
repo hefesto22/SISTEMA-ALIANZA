@@ -7,7 +7,9 @@ namespace App\Filament\Resources\Cargas\Pages;
 use App\Domain\Devoluciones\OrdenesDeCambio;
 use App\Enums\EstadoCarga;
 use App\Filament\Resources\Cargas\CargaResource;
+use App\Filament\Resources\Pedidos\Actions\DevolucionAction;
 use App\Filament\Support\Acceso;
+use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -74,5 +76,14 @@ class ListCargas extends ListRecords
     public function getDefaultActiveTab(): string
     {
         return CargaResource::getEloquentQuery()->where('estado', EstadoCarga::EnRuta)->exists() ? 'en_ruta' : 'todas';
+    }
+
+    /**
+     * La devolución de una factura de una carga en ruta: la abre "Devolución"
+     * de la fila (DevolucionAction::enLaLista), ya con la factura escogida.
+     */
+    public function devolucionAction(): Action
+    {
+        return DevolucionAction::deUnaCarga();
     }
 }
