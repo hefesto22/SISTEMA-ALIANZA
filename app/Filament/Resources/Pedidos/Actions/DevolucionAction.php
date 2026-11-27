@@ -380,15 +380,6 @@ final class DevolucionAction
     }
 
     /**
-     * La opción de crédito: "Su dinero (nota de crédito)" o, con las notas
-     * apagadas en Configuración, "Su dinero (crédito interno)".
-     */
-    private static function dinero(): string
-    {
-        return Configuracion::actual()->notas_credito ? 'Su dinero (nota de crédito)' : 'Su dinero (crédito interno)';
-    }
-
-    /**
      * Lo que se escogió en "Qué se le da al cliente": el campo entrega el
      * enum (TipoDevolucion), no el texto.
      */
