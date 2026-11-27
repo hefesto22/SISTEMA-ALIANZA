@@ -2,11 +2,13 @@
     Una promoción en la preventa, dentro de un x-for con "pr" (lo arma
     LineasPedido::getPromocionesDeHoy), como una línea de la hoja del
     proveedor: arriba la mecánica en grande ("24+1"), qué compra y el regalo;
-    en medio cada producto con su botón; abajo cuánto queda del tope.
-     - Las del plan del proveedor no se mezclan: cada producto con su botón
-       ("+ 1 CJ24"); en la pregunta, pr ya viene con lo del producto que se
-       tocó (paraProducto) y lleva un solo botón.
-     - Las demás dicen lo que compra y tienen un solo botón.
+    en medio los productos; abajo cuánto queda del tope.
+     - Las del plan del proveedor abren la ventana de cuántas (armarPromo):
+       si no se mezclan, cada producto con su botón y la ventana es solo de
+       ese producto; si se mezclan, un solo botón y la ventana pide cuántas
+       de cada uno. En la pregunta, pr ya viene con el producto que se tocó
+       (paraProducto).
+     - Las demás dicen lo que compra y se agregan de un toque.
     Lo usa resources/views/filament/pedidos/lineas-pedido.blade.php (los
     estilos .pv-promo-* están ahí). Un solo elemento raíz: va en un x-for.
 
@@ -37,23 +39,22 @@
         </template>
 
         @if ($enPregunta)
-            <button type="button" class="pv-promo-agregar" x-show="! agotada(pr)" x-on:click="agregarPromo(pr)">
-                {{ svg('heroicon-m-plus') }}
-                <span x-text="'Agregar la promoción' + (pr.solo ? ' · ' + pr.solo.agrega : '')"></span>
+            <button type="button" class="pv-promo-agregar" x-show="! agotada(pr)" x-on:click="pr.partes.mecanica !== '' ? armarPromo(pr, pr.solo ?? null) : agregarPromo(pr)">
+                {{ svg('heroicon-m-plus') }} Agregar la promoción
             </button>
         @else
             <template x-for="op in pr.opciones" x-bind:key="op.producto_id">
                 <div class="pv-promo-opcion">
                     <span x-text="op.nombre"></span>
-                    <button type="button" class="pv-promo-mas" x-show="! agotada(pr)" x-on:click="agregarPromo(pr, op)" x-bind:aria-label="'Agregar ' + op.agrega + ' de ' + op.nombre">
-                        {{ svg('heroicon-m-plus') }}
-                        <span x-text="op.agrega"></span>
+                    <button type="button" class="pv-promo-mas" x-show="! pr.mezcla && ! agotada(pr)" x-on:click="armarPromo(pr, op)" x-bind:aria-label="'Agregar ' + op.nombre">
+                        {{ svg('heroicon-m-plus') }} Agregar
                     </button>
                 </div>
             </template>
 
-            <button type="button" class="pv-promo-agregar" x-show="pr.opciones.length === 0 && ! agotada(pr)" x-on:click="agregarPromo(pr)">
-                {{ svg('heroicon-m-plus') }} Agregar al pedido
+            <button type="button" class="pv-promo-agregar" x-show="(pr.opciones.length === 0 || pr.mezcla) && ! agotada(pr)" x-on:click="pr.mezcla ? armarPromo(pr) : agregarPromo(pr)">
+                {{ svg('heroicon-m-plus') }}
+                <span x-text="pr.mezcla ? 'Agregar, mezclando' : 'Agregar al pedido'"></span>
             </button>
         @endif
     </div>

@@ -230,8 +230,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      * promoción más el regalo, en su presentación; en las del plan, cada
      * producto con lo suyo en "opciones", porque no se mezclan), qué
      * productos la activan ("compra"), cuál es el regalo y sus partes para
-     * la tarjeta ("partes"); y los datos de esos productos, con lo
-     * disponible.
+     * la tarjeta ("partes"); en las que cuentan unidades, cada cuántas
+     * ("cada"), cuántas regala ("regala") y si se mezclan ("mezcla"), para
+     * escoger cuántas de cada producto; y los datos de esos productos, con
+     * lo disponible.
      *
      * @return array{promos: list<array<string, mixed>>, productos: array<int, array<string, mixed>>}
      */
@@ -300,6 +302,9 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
                 'regalo'   => $promocion->producto_beneficio_id,
                 'lineas'   => array_values($lineas),
                 'opciones' => $opciones,
+                'mezcla'   => $promocion->cuentaUnidades() && $promocion->se_mezclan,
+                'cada'     => $promocion->compra_unidades,
+                'regala'   => $promocion->cantidad_beneficio,
                 // Con tope: cuánto regalo queda de lo autorizado (0 = agotada); null = sin tope.
                 'tope'   => $promocion->tieneTope() ? (int) $promocion->tope_unidades : null,
                 'quedan' => $disponibles[$promocion->id] ?? null,

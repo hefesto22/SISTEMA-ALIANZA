@@ -374,6 +374,8 @@ test('en la preventa la línea del plan dice cuánto regalo queda y agrega la ca
         ->and($hoy['promos'][0]['compra'])->toBe([$this->manzana->id, $this->pera->id])
         ->and($hoy['promos'][0]['lineas'])->toBe([['producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 1]])
         ->and($hoy['promos'][0]['partes']['mecanica'])->toBe('24+1')
+        // Para la ventana de cuántas: cada 24, regala 1, no se mezclan.
+        ->and([$hoy['promos'][0]['cada'], $hoy['promos'][0]['regala'], $hoy['promos'][0]['mezcla']])->toBe([24, 1, false])
         // No se mezclan: cada sabor con su botón, que agrega su caja.
         ->and($hoy['promos'][0]['opciones'])->toBe([
             ['producto_id' => $this->manzana->id, 'nombre' => 'NECTAR MANZANA TETRA 200', 'agrega' => '1 '.caja($this->manzana)->sigla(), 'lineas' => [['producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 1]]],

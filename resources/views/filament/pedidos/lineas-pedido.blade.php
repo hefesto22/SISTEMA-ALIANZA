@@ -188,6 +188,24 @@
         .pv-promo-agregar:hover { background: var(--success-700); }
         .pv-promo-agregar svg { width: 1rem; height: 1rem; }
         .pv-promo-cuerpo > .pv-promo-agregar { margin: 0.1rem 0.85rem 0.75rem; }
+        .pv-promo-agregar:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        /* Cuántas de cada producto (promoción del plan). */
+        .pv-armar { display: grid; gap: 0.7rem; }
+        .pv-armar-filas { display: grid; border-radius: 0.6rem; overflow: hidden; outline: 1px solid rgb(3 7 18 / 0.1); background: #fff; }
+        .dark .pv-armar-filas { outline-color: rgb(255 255 255 / 0.12); background: var(--gray-900); }
+        .pv-armar-fila { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.7rem; }
+        .pv-armar-fila + .pv-armar-fila { border-top: 1px solid rgb(3 7 18 / 0.08); }
+        .dark .pv-armar-fila + .pv-armar-fila { border-top-color: rgb(255 255 255 / 0.08); }
+        .pv-armar-nombre { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.15rem; font-size: 0.84rem; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+        .pv-armar-cajas { font-size: 0.75rem; font-weight: 600; color: var(--gray-500); }
+        .dark .pv-armar-cajas { color: var(--gray-400); }
+        .pv-armar-cajas.pv-armar-mal { color: var(--danger-600); }
+        .dark .pv-armar-cajas.pv-armar-mal { color: var(--danger-400); }
+        .pv-armar-cuenta { padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.88rem; font-weight: 700; color: var(--gray-700); background: color-mix(in oklab, var(--gray-500) 12%, transparent); }
+        .dark .pv-armar-cuenta { color: var(--gray-200); }
+        .pv-armar-cuenta.pv-armar-ok { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 14%, transparent); }
+        .dark .pv-armar-cuenta.pv-armar-ok { color: var(--success-400); }
         .pv-promo-ok { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.82rem; font-weight: 600; color: var(--success-700); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
         .dark .pv-promo-ok { color: var(--success-400); }
         .pv-promo-ok svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; }
@@ -329,6 +347,8 @@
             promosHoy: @js($config['hoy']),
             verPromos: false,
             buscarPromo: '',
+            armar: null,
+            avisoArmar: '',
             pregunta: null,
             avisoPromo: '',
             esperaAvisoPromo: null,
@@ -858,7 +878,7 @@
             paraProducto(pr, id) {
                 const op = (pr.opciones ?? []).find((o) => Number(o.producto_id) === Number(id))
 
-                return op ? { ...pr, lineas: op.lineas, opciones: [], solo: op } : pr
+                return op ? { ...pr, lineas: op.lineas, solo: op } : pr
             },
 
             {{-- Con tope (plan del proveedor): ya se regaló todo lo autorizado. --}}
@@ -939,8 +959,10 @@
                 this.verPromos = false
                 this.abierta = null
                 this.avisoPromo = ''
+                const deCuales = [...new Set(lineas.map((l) => Number(l.producto_id)))]
+
                 this.promoAgregada = promo.partes?.mecanica && lineas.length > 0
-                    ? 'Se agregó la ' + promo.partes.mecanica + ' de ' + this.nombreDe(lineas[0].producto_id)
+                    ? 'Se agregó la ' + promo.partes.mecanica + (deCuales.length === 1 ? ' de ' + this.nombreDe(deCuales[0]) : ' (' + deCuales.length + ' productos)')
                     : 'Se agregó ' + promo.nombre
                 clearTimeout(this.esperaPromoAgregada)
                 this.esperaPromoAgregada = setTimeout(() => this.promoAgregada = '', 3500)
@@ -948,6 +970,143 @@
                 if (lineas.length > 0) {
                     this.resaltar(Number(lineas[0].producto_id))
                 }
+            },
+
+            {{-- Las del plan: abre la ventana para escoger cuántas. Si se mezclan, de cada producto (el que se tocó empieza con N); si no, solo de ese producto (empieza con N). --}}
+            armarPromo(pr, op = null) {
+                const n = Math.max(1, Number(pr.cada ?? 1))
+                const opciones = pr.opciones ?? []
+                const escogida = op ?? opciones[0] ?? null
+                const filas = pr.mezcla
+                    ? opciones.map((o) => ({ producto_id: Number(o.producto_id), nombre: o.nombre, cantidad: op && Number(o.producto_id) === Number(op.producto_id) ? n : 0 }))
+                    : (escogida ? [{ producto_id: Number(escogida.producto_id), nombre: escogida.nombre, cantidad: n }] : [])
+
+                this.pregunta = null
+                this.avisoPromo = ''
+                this.avisoArmar = ''
+                this.armar = { pr: pr, mezcla: !! pr.mezcla, n: n, filas: filas }
+            },
+
+            {{-- − / +: de 1 en 1 si se mezclan; si no, de N en N (cada vez que se cumple). --}}
+            pasoArmar(f, signo) {
+                const paso = this.armar?.mezcla ? 1 : (this.armar?.n ?? 1)
+
+                f.cantidad = Math.max(0, (Math.floor(Number(f.cantidad)) || 0) + signo * paso)
+                this.avisoArmar = ''
+            },
+
+            unidadesArmar(f) {
+                return Math.max(0, Math.floor(Number(f.cantidad)) || 0)
+            },
+
+            totalArmar() {
+                return (this.armar?.filas ?? []).reduce((t, f) => t + this.unidadesArmar(f), 0)
+            },
+
+            {{-- Lo que le toca de regalo con lo escogido (hasta lo que queda del tope). --}}
+            regalosArmar() {
+                if (! this.armar) {
+                    return 0
+                }
+
+                const n = this.armar.n
+                const m = Math.max(1, Number(this.armar.pr.regala ?? 1))
+                const ganadas = this.armar.mezcla
+                    ? Math.floor(this.totalArmar() / n) * m
+                    : this.armar.filas.reduce((t, f) => t + Math.floor(this.unidadesArmar(f) / n) * m, 0)
+                const quedan = this.armar.pr.quedan
+
+                return quedan === null || quedan === undefined ? ganadas : Math.min(ganadas, Math.max(0, Number(quedan)))
+            },
+
+            {{-- "Lleva 18 UN · le faltan 6 para otro regalo", "Lleva 24 UN · regalo: 2" … --}}
+            cuentaArmar() {
+                if (! this.armar) {
+                    return ''
+                }
+
+                const n = this.armar.n
+                const total = this.totalArmar()
+                const regalos = this.regalosArmar()
+                const sigla = this.armar.pr.sigla ?? 'UN'
+
+                if (total === 0) {
+                    return this.armar.mezcla ? 'Ponga cuántas de cada uno: con ' + n + ' juntas lleva el regalo.' : 'Ponga cuántas lleva: cada ' + n + ' llevan regalo.'
+                }
+
+                const resto = this.armar.mezcla ? total % n : this.armar.filas.reduce((t, f) => t + this.unidadesArmar(f) % n, 0)
+                let texto = 'Lleva ' + total + ' · regalo: ' + regalos + ' ' + sigla
+
+                if (regalos === 0) {
+                    texto = 'Lleva ' + total + ' · le faltan ' + (n - (total % n)) + ' para el regalo'
+                } else if (resto > 0 && this.armar.mezcla) {
+                    texto += ' · le faltan ' + (n - resto) + ' para otro'
+                }
+
+                const ganadas = this.armar.mezcla ? Math.floor(total / n) : this.armar.filas.reduce((t, f) => t + Math.floor(this.unidadesArmar(f) / n), 0)
+                const quedan = this.armar.pr.quedan
+
+                if (quedan !== null && quedan !== undefined && ganadas * Math.max(1, Number(this.armar.pr.regala ?? 1)) > Number(quedan)) {
+                    texto += ' (solo quedan ' + quedan + ' de regalo)'
+                }
+
+                return texto
+            },
+
+            {{-- Unidades en las presentaciones que se venden, la más grande primero: 30 en cajas de 12 = 2 CJ12 + 6 UN. --}}
+            enLineas(id, unidades) {
+                let queda = Math.max(0, Math.floor(Number(unidades)) || 0)
+                const lineas = []
+
+                for (const pr of this.presentacionesDe(id)) {
+                    const contenido = Math.max(1, Number(pr.contenido) || 1)
+                    const cuantas = Math.floor(queda / contenido)
+
+                    if (cuantas > 0) {
+                        lineas.push({ producto_id: Number(id), presentacion_id: pr.id, cantidad: cuantas })
+                        queda -= cuantas * contenido
+                    }
+                }
+
+                return { lineas: lineas, sobra: queda }
+            },
+
+            {{-- "= 2 CJ12 + 6 UN" de una fila (o que no se vende suelto). --}}
+            textoArmar(f) {
+                const { lineas, sobra } = this.enLineas(f.producto_id, this.unidadesArmar(f))
+
+                if (sobra > 0) {
+                    const chica = Math.max(1, Number(this.porDefecto(this.productos[f.producto_id])?.contenido ?? 1))
+
+                    return 'No se vende suelto: de ' + chica + ' en ' + chica
+                }
+
+                return lineas.length === 0 ? '' : '= ' + lineas.map((l) => l.cantidad + ' ' + (this.presentacion(l.producto_id, l.presentacion_id)?.sigla ?? '')).join(' + ')
+            },
+
+            puedeArmar() {
+                return this.totalArmar() > 0 && (this.armar?.filas ?? []).every((f) => this.enLineas(f.producto_id, this.unidadesArmar(f)).sobra === 0)
+            },
+
+            {{-- Agrega lo escogido (si alcanza en la bodega) y cierra todo. --}}
+            agregarArmado() {
+                if (! this.armar || ! this.puedeArmar()) {
+                    return
+                }
+
+                const lineas = this.armar.filas.flatMap((f) => this.enLineas(f.producto_id, this.unidadesArmar(f)).lineas)
+                const falta = this.noAlcanzaPara(lineas)
+
+                if (falta !== '') {
+                    this.avisoArmar = 'No alcanza ' + falta + ' en la bodega.'
+
+                    return
+                }
+
+                const pr = this.armar.pr
+
+                this.armar = null
+                this.agregarPromo(pr, { lineas: lineas })
             },
 
             async pedirPromos() {
@@ -1207,6 +1366,56 @@
                 </template>
 
                 <button type="button" class="pv-pregunta-no" x-on:click="soloProducto()">No, solo el producto</button>
+            </div>
+        </div>
+
+        {{-- Promoción del plan: cuántas de cada producto (si se mezclan) o del producto escogido. Va encima de la hoja de promociones. --}}
+        <div class="pv-pregunta-fondo" x-show="armar" x-cloak x-transition.opacity x-on:click.self="armar = null" x-on:keydown.escape.window="armar = null">
+            <div class="pv-pregunta" role="dialog" aria-modal="true" aria-labelledby="pv-armar-titulo">
+                <template x-if="armar">
+                    <div class="pv-armar">
+                        <div class="pv-promo-arriba">
+                            <span class="pv-promo-mecanica" x-text="armar.pr.partes.mecanica"></span>
+                            <span class="pv-promo-titulo" id="pv-armar-titulo" x-text="armar.mezcla ? '¿Cuántas de cada uno? Se pueden mezclar' : '¿Cuántas lleva?'"></span>
+                        </div>
+                        <div class="pv-promo-lleva">
+                            {{ svg('heroicon-m-gift') }}
+                            <span x-text="armar.pr.partes.lleva"></span>
+                        </div>
+
+                        <div class="pv-armar-filas">
+                            <template x-for="f in armar.filas" x-bind:key="f.producto_id">
+                                <div class="pv-armar-fila">
+                                    <div class="pv-armar-nombre">
+                                        <span x-text="f.nombre"></span>
+                                        <span class="pv-armar-cajas" x-bind:class="{ 'pv-armar-mal': enLineas(f.producto_id, unidadesArmar(f)).sobra > 0 }" x-text="textoArmar(f)"></span>
+                                    </div>
+                                    <div class="pv-stepper">
+                                        <button type="button" class="pv-paso" x-on:click="pasoArmar(f, -1)" x-bind:aria-label="'Menos de ' + f.nombre">
+                                            {{ svg('heroicon-m-minus') }}
+                                        </button>
+                                        <input type="number" inputmode="numeric" min="0" x-model.number="f.cantidad" x-on:input="avisoArmar = ''" x-bind:aria-label="'Unidades de ' + f.nombre">
+                                        <button type="button" class="pv-paso" x-on:click="pasoArmar(f, 1)" x-bind:aria-label="'Más de ' + f.nombre">
+                                            {{ svg('heroicon-m-plus') }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div class="pv-armar-cuenta" x-bind:class="{ 'pv-armar-ok': regalosArmar() > 0 }" x-text="cuentaArmar()"></div>
+
+                        <div class="pv-aviso-sin" x-show="avisoArmar !== ''">
+                            {{ svg('heroicon-m-no-symbol') }}
+                            <span x-text="avisoArmar"></span>
+                        </div>
+
+                        <button type="button" class="pv-promo-agregar" x-bind:disabled="! puedeArmar()" x-on:click="agregarArmado()">
+                            {{ svg('heroicon-m-plus') }} Agregar al pedido
+                        </button>
+                        <button type="button" class="pv-pregunta-no" x-on:click="armar = null">Cancelar</button>
+                    </div>
+                </template>
             </div>
         </div>
 
