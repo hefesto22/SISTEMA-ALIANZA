@@ -29,6 +29,7 @@ use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\Ruta;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
 
@@ -361,6 +362,33 @@ test('los datos fiscales se guardan desde la pantalla de CAI', function (): void
         ->and($fiscales->rtn)->toBe('05019000999999')
         ->and($fiscales->correo)->toBe('facturas@alianza.hn')
         ->and($fiscales->estanCompletos())->toBeTrue();
+});
+
+test('la pantalla de CAI muestra los datos fiscales, con qué CAI emite cada bodega y los avisos; el CAI ya usado no se borra', function (): void {
+    $propio = Cai::factory()->para($this->cop)->create(['punto_emision' => '001']);
+    $prueba = Cai::factory()->create(['cai' => Cai::PRUEBA, 'punto_emision' => '999']);
+    $prueba->update(['siguiente' => $prueba->rango_desde + 3]);
+
+    $this->actingAs($this->admin);
+
+    Livewire::test(ManageCais::class)
+        ->assertOk()
+        ->assertSee('ALIANZA HOZANA')
+        ->assertSee('0501-9000-123456')
+        ->assertSee('Se está facturando con un CAI de prueba')
+        ->assertDontSee('no pueden imprimir facturas')
+        ->assertSee('2 bodegas no pueden emitir notas de crédito')
+        ->assertSee('000-001-01')
+        ->assertSee('000-999-01-00000004')
+        ->assertActionVisible(TestAction::make('delete')->table($propio))
+        ->assertActionHidden(TestAction::make('delete')->table($prueba));
+
+    $propio->update(['activo' => false]);
+    $prueba->update(['activo' => false]);
+
+    Livewire::test(ManageCais::class)
+        ->assertSee('2 bodegas no pueden imprimir facturas')
+        ->assertDontSee('Se está facturando con un CAI de prueba');
 });
 
 test('dos bodegas imprimiendo con el mismo CAI global sacan números seguidos, sin repetir ni saltar', function (): void {
