@@ -12,6 +12,7 @@ use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -29,7 +30,9 @@ use stdClass;
  *    imprimió (lleva esa fecha y el número que seguía), aunque la anulada
  *    sea de un día antes. Dice cuántas quedan sin cargar en un camión y,
  *    para las pestañas Impreso y Cargado, solo trae los días que tienen
- *    facturas sin cargar ($cargadas = false) o ya cargadas (true).
+ *    facturas sin cargar ($cargadas = false) o ya cargadas (true). Las de
+ *    ventas en bodega que el cliente se llevó no cuentan: no pasan por el
+ *    camión.
  *  - idsPorImprimir() e idsPendientes(): los pedidos de un cuadro, para
  *    imprimirlos o validarlos de un solo.
  */
@@ -95,8 +98,10 @@ final class DiasDeFacturacion
         $vigente = EstadoFactura::Vigente->value;
 
         // Las que quedan para cargar se juntan una sola vez (no dependen de cada fila).
+        // Las de ventas en bodega que el cliente se llevó no pasan por el camión: no cuentan.
         $dias = Factura::query()
             ->visiblesPara($usuario)
+            ->whereDoesntHave('pedido', fn (Builder $pedido): Builder => $pedido->where('se_lo_lleva', true))
             ->toBase()
             ->leftJoinSub(FacturasParaCargar::paraCargar()->select('facturas.id AS id'), 'por_cargar', 'por_cargar.id', '=', 'facturas.id')
             ->selectRaw(

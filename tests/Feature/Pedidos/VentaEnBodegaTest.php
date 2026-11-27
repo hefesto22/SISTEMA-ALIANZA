@@ -7,6 +7,8 @@ use App\Domain\Cargas\FacturasParaCargar;
 use App\Domain\Comisiones\ComisionesDelPeriodo;
 use App\Domain\Comisiones\PeriodoComision;
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Facturacion\DiaDeFacturacion;
+use App\Domain\Facturacion\DiasDeFacturacion;
 use App\Domain\Inventario\RegistrarCompra;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
@@ -17,6 +19,7 @@ use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
 use App\Enums\Rol;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
+use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Users\Pages\EditUser;
 use App\Models\Bodega;
 use App\Models\Cliente;
@@ -174,7 +177,10 @@ test('bodega la vende desde Nueva preventa: queda validada al guardar, si se lo 
     imprimir($pedido, $this->encargado);
     $factura = Factura::query()->where('pedido_id', $pedido->id)->where('estado', EstadoFactura::Vigente)->sole();
 
-    // No va en camión.
+    // No va en camión: no sale en Impreso ni en Cargado (sí en Todos, con "Se lo llevó").
+    expect([ListPedidos::impresos(Pedido::query(), cargados: false)->count(), ListPedidos::impresos(Pedido::query(), cargados: true)->count()])->toBe([0, 0])
+        ->and(DiasDeFacturacion::impresas($this->encargado, 12)['dias'])->toBe([]);
+
     expect(FacturasParaCargar::de($this->bodega->id))->toBeEmpty()
         ->and(fn () => app(ArmarCarga::class)->ejecutar(null, [
             'bodega_id'     => $this->bodega->id,
@@ -187,6 +193,10 @@ test('bodega la vende desde Nueva preventa: queda validada al guardar, si se lo 
     $ruta = pedidoEnBodega($this, $this->vendedor, [[$this->un->id, 1]], 0);
     app(ValidarDespacho::class)->ejecutar($ruta, [], $this->encargado);
     imprimir($ruta->fresh(), $this->encargado);
+
+    // La de ruta sí: impresa, queda en Impreso para cargarla.
+    expect(ListPedidos::impresos(Pedido::query(), cargados: false)->pluck('pedidos.id')->all())->toBe([$ruta->id])
+        ->and(array_map(fn (DiaDeFacturacion $dia): int => $dia->cuantas, DiasDeFacturacion::impresas($this->encargado, 12, false)['dias']))->toBe([1]);
 
     expect(array_column((new ComisionesDelPeriodo(PeriodoComision::actual()))->detalle()['ventas'], 'vendedor_id'))->toBe([$this->vendedor->id]);
 

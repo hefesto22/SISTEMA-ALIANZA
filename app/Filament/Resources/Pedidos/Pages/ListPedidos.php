@@ -436,7 +436,9 @@ class ListPedidos extends ListRecords
     /**
      * Los impresos que faltan de cargar en el camión (Impreso) o los que ya
      * van en una carga, ya se entregaron o su día ya salió en su ruta
-     * (Cargado), con la misma regla de la carga (FacturasParaCargar).
+     * (Cargado), con la misma regla de la carga (FacturasParaCargar). Las
+     * ventas en bodega que el cliente se llevó no van en ninguna de las dos:
+     * no pasan por el camión (se ven en Todos, con "Se lo llevó").
      *
      * @param Builder<Pedido> $query
      *
@@ -448,6 +450,7 @@ class ListPedidos extends ListRecords
 
         return $query
             ->where('pedidos.estado', EstadoPedido::Impreso)
+            ->where('pedidos.se_lo_lleva', false)
             ->when(
                 $cargados,
                 fn (Builder $q): Builder => $q->whereNotIn('pedidos.id', $paraCargar),
