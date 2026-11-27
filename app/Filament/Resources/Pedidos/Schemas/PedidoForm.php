@@ -307,7 +307,7 @@ class PedidoForm
      */
     private static function topeDe(Get $get): float
     {
-        return self::vendedorEnBodega($get)?->descuento_maximo ?? 0.0;
+        return self::vendedorEnBodega($get)->descuento_maximo ?? 0.0;
     }
 
     /**

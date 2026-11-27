@@ -28,6 +28,7 @@ use App\Models\PedidoItem;
 use App\Models\Producto;
 use App\Models\Promocion;
 use App\Models\User;
+use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
@@ -205,7 +206,10 @@ test('va en camión: queda en Impreso para cargarlo; sueltas que no alcanzan abr
 });
 
 test('el tope se pone en Usuarios, solo a los usuarios de bodega', function (): void {
-    $this->actingAs($this->admin);
+    // Edita usuarios de cualquier rama.
+    $superAdmin = User::factory()->create();
+    $superAdmin->assignRole(Utils::getSuperAdminName());
+    $this->actingAs($superAdmin);
 
     Livewire::test(EditUser::class, ['record' => $this->encargado->getRouteKey()])
         ->assertSee('Venta en bodega (mayoreo)')
