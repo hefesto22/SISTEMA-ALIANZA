@@ -23,6 +23,9 @@ use stdClass;
  *  - Cambio por cambio: lo que regresó y se le repuso al cliente con lo
  *    mismo. Lo bueno vuelve a la bodega; lo dañado, además, es pérdida.
  *  - Con crédito: se le devolvió lo que pagó (con nota de crédito).
+ *  - Faltantes: lo que no recibió (le faltó de su factura). Lo que se le
+ *    dio a otro cliente en un cambio (`faltante`) ni regresa ni es pérdida;
+ *    lo que se dañó en el camión es pérdida; lo que no salió regresó.
  *
  * Las cantidades van en la presentación en que regresaron (2 CJ12, 5 UN) y
  * los montos a costo, salvo el crédito, que es lo que se le devolvió (con ISV).
@@ -128,7 +131,7 @@ final class DevolucionesDelPeriodo
             .' COUNT(DISTINCT CASE WHEN r.tipo = ? THEN r.devolucion_id END) AS creditos,'
             .' COALESCE(SUM(CASE WHEN r.danado THEN r.cantidad * r.costo ELSE 0 END), 0) AS perdida,'
             .' COUNT(DISTINCT CASE WHEN r.danado THEN r.producto_id END) AS productos_perdidos,'
-            .' COALESCE(SUM(CASE WHEN r.danado THEN 0 ELSE r.cantidad * r.costo END), 0) AS regreso,'
+            .' COALESCE(SUM(CASE WHEN r.danado OR r.faltante THEN 0 ELSE r.cantidad * r.costo END), 0) AS regreso,'
             .' COALESCE(SUM(CASE WHEN r.tipo = ? THEN r.cantidad * r.costo ELSE 0 END), 0) AS repuesto,'
             .' COALESCE(SUM(CASE WHEN r.tipo = ? THEN r.total ELSE 0 END), 0) AS credito'
             .' FROM renglones r',
@@ -213,7 +216,7 @@ final class DevolucionesDelPeriodo
     {
         $filas = $this->consultar(
             'SELECT p.codigo, p.descripcion AS producto, '.self::PROVEEDOR.' AS proveedor, '.self::PRESENTACION.' AS presentacion,'
-            .' SUM(CASE WHEN r.danado THEN 0 ELSE r.cantidad END) AS buenas, SUM(CASE WHEN r.danado THEN r.cantidad ELSE 0 END) AS danadas,'
+            .' SUM(CASE WHEN r.danado OR r.faltante THEN 0 ELSE r.cantidad END) AS buenas, SUM(CASE WHEN r.danado THEN r.cantidad ELSE 0 END) AS danadas,'
             .' SUM(r.cantidad) AS repuestas, SUM(r.cantidad * r.costo) AS costo'
             .' FROM renglones r JOIN productos p ON p.id = r.producto_id JOIN proveedores pv ON pv.id = p.proveedor_id'
             .' JOIN presentaciones pz ON pz.id = r.presentacion_id JOIN unidades_medida um ON um.id = pz.unidad_medida_id'
@@ -240,18 +243,18 @@ final class DevolucionesDelPeriodo
      * factura, si fue cambio o crédito, lo que volvió a la bodega y lo que se
      * perdió (a costo) y lo que se le devolvió en crédito.
      *
-     * @return list<array{numero: string, fecha: string, cliente: string, factura: string|null, carga: string|null, registro: string|null, motivo: string|null, tipo: TipoDevolucion, regreso: float, perdida: float, credito: float|null}>
+     * @return list<array{numero: string, fecha: string, cliente: string, factura: string|null, carga: string|null, registro: string|null, motivo: string|null, tipo: TipoDevolucion, falto: bool, regreso: float, perdida: float, credito: float|null}>
      */
     public function devoluciones(): array
     {
         $filas = $this->consultar(
-            'SELECT r.devolucion_id, r.numero, r.fecha, r.tipo, r.carga_id, r.motivo, COALESCE(r.cliente_nombre, c.nombre) AS cliente, f.numero AS factura, u.name AS registro,'
-            .' SUM(CASE WHEN r.danado THEN 0 ELSE r.cantidad * r.costo END) AS regreso,'
+            'SELECT r.devolucion_id, r.numero, r.fecha, r.tipo, r.falto, r.carga_id, r.motivo, COALESCE(r.cliente_nombre, c.nombre) AS cliente, f.numero AS factura, u.name AS registro,'
+            .' SUM(CASE WHEN r.danado OR r.faltante THEN 0 ELSE r.cantidad * r.costo END) AS regreso,'
             .' SUM(CASE WHEN r.danado THEN r.cantidad * r.costo ELSE 0 END) AS perdida,'
             .' SUM(r.total) AS total'
             .' FROM renglones r JOIN clientes c ON c.id = r.cliente_id'
             .' LEFT JOIN facturas f ON f.id = r.factura_id LEFT JOIN users u ON u.id = r.user_id'
-            .' GROUP BY r.devolucion_id, r.numero, r.fecha, r.tipo, r.carga_id, r.motivo, r.cliente_nombre, c.nombre, f.numero, u.name'
+            .' GROUP BY r.devolucion_id, r.numero, r.fecha, r.tipo, r.falto, r.carga_id, r.motivo, r.cliente_nombre, c.nombre, f.numero, u.name'
             .' ORDER BY r.fecha, r.devolucion_id',
         );
 
@@ -269,6 +272,7 @@ final class DevolucionesDelPeriodo
                 'registro' => self::textoONulo($f->registro),
                 'motivo'   => self::textoONulo($f->motivo),
                 'tipo'     => $tipo,
+                'falto'    => (bool) $f->falto,
                 'regreso'  => round(self::numero($f->regreso), 2),
                 'perdida'  => round(self::numero($f->perdida), 2),
                 'credito'  => $tipo === TipoDevolucion::Credito ? round(self::numero($f->total), 2) : null,
@@ -417,9 +421,9 @@ final class DevolucionesDelPeriodo
 
         $cte = <<<SQL
             WITH renglones AS (
-                SELECT d.id AS devolucion_id, d.numero, d.fecha, d.tipo, d.bodega_id, d.cliente_id, d.cliente_nombre,
+                SELECT d.id AS devolucion_id, d.numero, d.fecha, d.tipo, d.falto, d.bodega_id, d.cliente_id, d.cliente_nombre,
                     d.factura_id, d.carga_id, d.user_id, d.motivo,
-                    i.producto_id, i.presentacion_id, i.cantidad, i.danado, i.costo, i.total
+                    i.producto_id, i.presentacion_id, i.cantidad, i.danado, i.faltante, i.costo, i.total
                 FROM devolucion_items i
                 JOIN devoluciones d ON d.id = i.devolucion_id
                 JOIN productos pr ON pr.id = i.producto_id

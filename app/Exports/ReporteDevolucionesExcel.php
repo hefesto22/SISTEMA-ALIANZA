@@ -186,7 +186,7 @@ final class ReporteDevolucionesExcel implements Export, WithMultipleSheets
             $f['cliente'],
             $f['factura'],
             $f['carga'],
-            $f['tipo']->getLabel(),
+            ($f['falto'] ? 'Le faltó · ' : '').$f['tipo']->getLabel(),
             $f['registro'],
             $f['motivo'],
             $f['regreso'],

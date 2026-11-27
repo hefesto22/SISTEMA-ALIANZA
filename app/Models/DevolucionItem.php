@@ -11,6 +11,8 @@ use Illuminate\Support\Carbon;
 /**
  * Lo que regresa de una línea del pedido, en su presentación: buenas (vuelven
  * a la bodega) o dañadas (`danado`: no vuelven, quedan para los reportes).
+ * En un faltante, lo que no recibió porque se le dio a otro cliente en un
+ * cambio (`faltante`): no regresa a la bodega ni es pérdida.
  * `precio` es lo que se cobró por una, neto y sin ISV (lo de un regalo, 0);
  * `costo` es lo que costaba una al devolverla.
  *
@@ -21,6 +23,7 @@ use Illuminate\Support\Carbon;
  * @property int $presentacion_id
  * @property int $cantidad
  * @property bool $danado
+ * @property bool $faltante
  * @property float $precio
  * @property bool $gravado
  * @property float $subtotal
@@ -45,6 +48,7 @@ class DevolucionItem extends Model
         'presentacion_id',
         'cantidad',
         'danado',
+        'faltante',
         'precio',
         'gravado',
         'subtotal',
@@ -61,6 +65,7 @@ class DevolucionItem extends Model
         return [
             'cantidad' => 'integer',
             'danado'   => 'boolean',
+            'faltante' => 'boolean',
             'precio'   => 'float',
             'gravado'  => 'boolean',
             'subtotal' => 'float',

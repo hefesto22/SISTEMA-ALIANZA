@@ -17,6 +17,7 @@ use App\Models\CargaFactura;
 use App\Models\Configuracion;
 use App\Models\Devolucion;
 use App\Models\Pedido;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
@@ -33,25 +34,49 @@ use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 
 /**
- * "Devolución" en un pedido ya entregado (impreso): de cada producto,
- * cuántas regresan buenas (vuelven a la bodega) y cuántas dañadas (quedan
- * marcadas), y si se le cambia por lo mismo o se le da crédito (con nota de
- * crédito si está encendida en Configuración). Lo hace RegistrarDevolucion.
+ * "Devolución" en un pedido ya entregado (impreso). Primero, qué pasó:
  *
- * En un cambio se dice cómo se le entrega: se le lleva en la próxima carga
- * (queda Por entregar a su nombre) o ya se le dio con producto del pedido
- * de otro cliente (se escoge ese pedido: a ese otro se le queda debiendo).
+ *  - Devolvió producto: de cada producto, cuántas regresan buenas (vuelven
+ *    a la bodega) y cuántas dañadas (pérdida). En un cambio se dice cómo se
+ *    le entrega: se le lleva en la próxima carga (orden de cambio) o ya se
+ *    le dio en el momento con lo que llevaba el camión (no queda nada por
+ *    entregarle; al cliente al que al final le falte se le registra el
+ *    faltante).
+ *  - Le faltó producto: no recibió todo lo de su factura. Por qué: se le dio
+ *    a otro cliente en un cambio (ni regresa ni es pérdida), se dañó en el
+ *    camión (pérdida) o no se subió (vuelve a contar en la bodega).
+ *
+ * Y qué se le da: lo mismo (cambio) o crédito (con nota de crédito si está
+ * encendida en Configuración). Se anota en la presentación de cada línea y,
+ * de una caja, también en unidades sueltas. Lo hace RegistrarDevolucion.
  *
  * Sale en Ver pedido; por cada factura, en Ver carga y en Liquidar
  * (deLaCarga()); y en la lista de cargas, al lado de Liquidar (enLaLista():
  * se escoge la factura y abre esta misma con deUnaCarga()): lo que el
- * cliente regresó con el que salió en la ruta.
+ * cliente regresó o lo que le faltó con el que salió en la ruta.
  */
 final class DevolucionAction
 {
+    public const DEVOLVIO = 'devolvio';
+
+    public const FALTO = 'falto';
+
     public const PROXIMA_CARGA = 'proxima';
 
-    public const DE_OTRO = 'otro';
+    public const DEL_CAMION = 'camion';
+
+    public const POR_OTRO = 'otro';
+
+    public const SE_DANO = 'danado';
+
+    public const NO_SALIO = 'bodega';
+
+    /** Por qué le faltó, en palabras (también es el motivo si no se escribe otro). */
+    public const CAUSAS = [
+        self::POR_OTRO => 'Se le dio a otro cliente en un cambio',
+        self::SE_DANO  => 'Se dañó en el camión',
+        self::NO_SALIO => 'No se subió al camión',
+    ];
 
     public static function make(): Action
     {
@@ -60,12 +85,51 @@ final class DevolucionAction
             ->icon(Heroicon::OutlinedArrowUturnLeft)
             ->color('gray')
             ->visible(fn (mixed $record): bool => $record instanceof Pedido && $record->estado === EstadoPedido::Impreso && (Acceso::usuario()?->can('create', Devolucion::class) ?? false))
-            ->modalHeading(fn (Pedido $record): string => "Devolución · {$record->numero} · {$record->cliente->nombre}")
-            ->modalDescription('Anote lo que regresó de cada producto: en cajas (CJ) o en unidades sueltas (UN). Lo bueno regresa a la bodega; lo dañado no regresa: es pérdida y sale en el reporte de producto dañado.')
+            ->modalHeading(fn (Pedido $record): string => "Devolución o faltante · {$record->numero} · {$record->cliente->nombre}")
+            ->modalDescription('Si el cliente regresó producto, «Devolvió producto». Si no recibió todo lo de su factura, «Le faltó producto». Se anota en cajas (CJ) o en unidades sueltas (UN).')
             ->modalWidth(Width::FiveExtraLarge)
-            ->modalSubmitActionLabel('Registrar devolución')
-            ->fillForm(fn (Pedido $record): array => ['tipo' => TipoDevolucion::Cambio->value, 'entrega' => self::PROXIMA_CARGA, 'lineas' => self::lineas($record)])
+            ->modalSubmitActionLabel('Registrar')
+            ->fillForm(fn (Pedido $record): array => [
+                'que'     => self::DEVOLVIO,
+                'causa'   => self::POR_OTRO,
+                'tipo'    => TipoDevolucion::Cambio->value,
+                'entrega' => self::PROXIMA_CARGA,
+                'lineas'  => self::lineas($record),
+            ])
             ->schema([
+                ToggleButtons::make('que')
+                    ->label('Qué pasó')
+                    ->options([
+                        self::DEVOLVIO => 'Devolvió producto',
+                        self::FALTO    => 'Le faltó producto',
+                    ])
+                    ->icons([
+                        self::DEVOLVIO => Heroicon::OutlinedArrowUturnLeft,
+                        self::FALTO    => Heroicon::OutlinedExclamationTriangle,
+                    ])
+                    ->inline()
+                    ->required()
+                    ->live()
+                    ->helperText(fn (Get $get): string => $get('que') === self::FALTO
+                        ? 'No recibió todo lo que dice su factura.'
+                        : 'Regresó producto que ya se le había entregado.'),
+                ToggleButtons::make('causa')
+                    ->label('Por qué le faltó')
+                    ->options(self::CAUSAS)
+                    ->icons([
+                        self::POR_OTRO => Heroicon::OutlinedUserGroup,
+                        self::SE_DANO  => Heroicon::OutlinedExclamationCircle,
+                        self::NO_SALIO => Heroicon::OutlinedHomeModern,
+                    ])
+                    ->inline()
+                    ->required(fn (Get $get): bool => $get('que') === self::FALTO)
+                    ->visible(fn (Get $get): bool => $get('que') === self::FALTO)
+                    ->live()
+                    ->helperText(fn (Get $get): string => match ($get('causa')) {
+                        self::SE_DANO  => 'Es pérdida: sale en el reporte de producto dañado y en el acta de baja. El que salió trae lo dañado de regreso.',
+                        self::NO_SALIO => 'Nunca salió de la bodega: vuelve a contar en la existencia.',
+                        default        => 'Lo que era de él se le dio a otro cliente en un cambio en la ruta: no regresa a la bodega ni es pérdida (eso ya quedó en el cambio del otro).',
+                    }),
                 ToggleButtons::make('tipo')
                     ->label('Qué se le da al cliente')
                     ->options(TipoDevolucion::class)
@@ -76,41 +140,42 @@ final class DevolucionAction
                     ->inline()
                     ->required()
                     ->live()
-                    ->helperText(fn (): string => Configuracion::actual()->notas_credito
-                        ? 'Con crédito se emite la nota de crédito (CAI tipo 07) con los datos de la factura.'
-                        : 'Con crédito queda como crédito interno: la nota de crédito se hace a mano (se enciende en Configuración).'),
+                    ->helperText(fn (Get $get): string => match (true) {
+                        $get('que') === self::FALTO && self::esCambio($get) => 'Se le lleva lo que le faltó: sale su orden de cambio (CAM) en Pedidos → Por imprimir; impresa, se sube a la próxima carga. La factura no cambia.',
+                        Configuracion::actual()->notas_credito              => 'Con crédito se emite la nota de crédito (CAI tipo 07) con los datos de la factura.',
+                        default                                             => 'Con crédito queda como crédito interno: la nota de crédito se hace a mano (se enciende en Configuración).',
+                    }),
                 ToggleButtons::make('entrega')
                     ->label('Cómo se le entrega el cambio')
                     ->options([
                         self::PROXIMA_CARGA => 'Se le lleva en la próxima carga',
-                        self::DE_OTRO       => 'Ya se le dio con producto de otro cliente',
+                        self::DEL_CAMION    => 'Se le dio en el momento, del camión',
                     ])
                     ->icons([
                         self::PROXIMA_CARGA => Heroicon::OutlinedTruck,
-                        self::DE_OTRO       => Heroicon::OutlinedUserGroup,
+                        self::DEL_CAMION    => Heroicon::OutlinedCheckCircle,
                     ])
                     ->inline()
-                    ->required(fn (Get $get): bool => self::esCambio($get))
-                    ->visible(fn (Get $get): bool => self::esCambio($get))
+                    ->required(fn (Get $get): bool => self::esCambio($get) && $get('que') !== self::FALTO)
+                    ->visible(fn (Get $get): bool => self::esCambio($get) && $get('que') !== self::FALTO)
                     ->live()
-                    ->helperText(fn (Get $get): string => $get('entrega') === self::DE_OTRO
-                        ? 'Lo que se le dio era del pedido de otro cliente: a ese otro se le queda debiendo; la orden de cambio (CAM) sale a su nombre y se le lleva en la próxima carga.'
+                    ->helperText(fn (Get $get): string => $get('entrega') === self::DEL_CAMION
+                        ? 'Ya se le dio con lo que llevaba el camión: no queda nada por entregarle. Al cliente al que al final le falte, regístrelo en su factura con «Le faltó producto» (se le dio a otro cliente).'
                         : 'Se crea su orden de cambio (CAM): sale en Pedidos → Por imprimir; impresa, se sube a la próxima carga y sale de la bodega en ese momento.'),
-                Select::make('se_le_debe_a')
-                    ->label('Pedido del cliente al que se le quedó debiendo')
-                    ->options(fn (Pedido $record): array => self::paraDeberle($record))
-                    ->searchable()
-                    ->required(fn (Get $get): bool => self::esCambio($get) && $get('entrega') === self::DE_OTRO)
-                    ->visible(fn (Get $get): bool => self::esCambio($get) && $get('entrega') === self::DE_OTRO)
-                    ->helperText('Los pedidos entregados de la bodega de los últimos '.RegistrarDevolucion::DIAS_PARA_DEBERLE.' días.'),
                 Repeater::make('lineas')
-                    ->label('Lo que regresa')
-                    ->table([
-                        TableColumn::make('Producto'),
-                        TableColumn::make('Salió')->width('150px'),
-                        TableColumn::make('Buenas (regresan a la bodega)')->width('230px'),
-                        TableColumn::make('Dañadas (pérdida)')->width('230px'),
-                    ])
+                    ->label(fn (Get $get): string => $get('que') === self::FALTO ? 'Lo que le faltó' : 'Lo que regresa')
+                    ->table(fn (Get $get): array => $get('que') === self::FALTO
+                        ? [
+                            TableColumn::make('Producto'),
+                            TableColumn::make('Salió')->width('150px'),
+                            TableColumn::make('Le faltó')->width('230px'),
+                        ]
+                        : [
+                            TableColumn::make('Producto'),
+                            TableColumn::make('Salió')->width('150px'),
+                            TableColumn::make('Buenas (regresan a la bodega)')->width('230px'),
+                            TableColumn::make('Dañadas (pérdida)')->width('230px'),
+                        ])
                     ->schema([
                         Hidden::make('id'),
                         Hidden::make('producto')->dehydrated(false),
@@ -129,15 +194,24 @@ final class DevolucionAction
                             ->hiddenLabel()
                             ->state(fn (Get $get): string => (string) $get('salio'))
                             ->helperText(fn (Get $get): string => (string) $get('puede')),
-                        self::cantidades('buenas'),
-                        self::cantidades('danadas'),
+                        // La tercera columna: buenas o, en un faltante, lo que le faltó.
+                        FusedGroup::make([
+                            ...self::cantidades('buenas', fn (Get $get): bool => $get('../../que') !== self::FALTO),
+                            ...self::cantidades('falto', fn (Get $get): bool => $get('../../que') === self::FALTO),
+                        ])
+                            ->hiddenLabel()
+                            ->columns(fn (Get $get): int => $get('caja') ? 2 : 1),
+                        FusedGroup::make(self::cantidades('danadas', fn (): bool => true))
+                            ->hiddenLabel()
+                            ->columns(fn (Get $get): int => $get('caja') ? 2 : 1)
+                            ->visible(fn (Get $get): bool => $get('../../que') !== self::FALTO),
                     ])
                     ->addable(false)
                     ->deletable(false)
                     ->reorderable(false),
                 TextInput::make('motivo')
                     ->label('Motivo')
-                    ->placeholder('Ej. venían golpeados')
+                    ->placeholder(fn (Get $get): string => $get('que') === self::FALTO ? 'Si no escribe nada, queda el porqué de arriba' : 'Ej. venían golpeados')
                     ->maxLength(200),
             ])
             ->action(function (array $data, Pedido $record): void {
@@ -147,32 +221,40 @@ final class DevolucionAction
                     return;
                 }
 
+                $falto = ($data['que'] ?? null) === self::FALTO;
+                $causa = is_string($data['causa'] ?? null) && array_key_exists($data['causa'], self::CAUSAS) ? $data['causa'] : self::POR_OTRO;
                 $lineas = [];
 
                 foreach ((array) ($data['lineas'] ?? []) as $fila) {
-                    if (is_array($fila) && is_numeric($fila['id'] ?? null)) {
-                        $lineas[(int) $fila['id']] = [
-                            'buenas'     => is_numeric($fila['buenas'] ?? null) ? (int) $fila['buenas'] : 0,
-                            'danadas'    => is_numeric($fila['danadas'] ?? null) ? (int) $fila['danadas'] : 0,
-                            'buenas_un'  => is_numeric($fila['buenas_un'] ?? null) ? (int) $fila['buenas_un'] : 0,
-                            'danadas_un' => is_numeric($fila['danadas_un'] ?? null) ? (int) $fila['danadas_un'] : 0,
-                        ];
+                    if (! is_array($fila) || ! is_numeric($fila['id'] ?? null)) {
+                        continue;
                     }
+
+                    $cuantas = fn (string $campo): int => is_numeric($fila[$campo] ?? null) ? (int) $fila[$campo] : 0;
+
+                    // En un faltante, lo que le faltó va como dañado, como bueno (no salió) o como que se le dio a otro.
+                    $lineas[(int) $fila['id']] = match (true) {
+                        ! $falto                  => ['buenas' => $cuantas('buenas'), 'danadas' => $cuantas('danadas'), 'buenas_un' => $cuantas('buenas_un'), 'danadas_un' => $cuantas('danadas_un')],
+                        $causa === self::SE_DANO  => ['danadas' => $cuantas('falto'), 'danadas_un' => $cuantas('falto_un')],
+                        $causa === self::NO_SALIO => ['buenas' => $cuantas('falto'), 'buenas_un' => $cuantas('falto_un')],
+                        default                   => ['faltan' => $cuantas('falto'), 'faltan_un' => $cuantas('falto_un')],
+                    };
                 }
 
                 $tipo = self::tipo($data['tipo'] ?? null);
-                $otro = ($data['entrega'] ?? null) === self::DE_OTRO && is_numeric($data['se_le_debe_a'] ?? null)
-                    ? Pedido::query()->find((int) $data['se_le_debe_a'])
-                    : null;
-
-                if ($tipo === TipoDevolucion::Cambio && ($data['entrega'] ?? null) === self::DE_OTRO && $otro === null) {
-                    Notification::make()->title('Escoja el pedido del cliente al que se le quedó debiendo.')->danger()->send();
-
-                    return;
-                }
+                $delCamion = ! $falto && $tipo === TipoDevolucion::Cambio && ($data['entrega'] ?? null) === self::DEL_CAMION;
+                $motivo = trim(is_string($data['motivo'] ?? null) ? $data['motivo'] : '');
 
                 try {
-                    $devolucion = app(RegistrarDevolucion::class)->ejecutar($record, $tipo, $lineas, $usuario, is_string($data['motivo'] ?? null) ? $data['motivo'] : null, $otro);
+                    $devolucion = app(RegistrarDevolucion::class)->ejecutar(
+                        $record,
+                        $tipo,
+                        $lineas,
+                        $usuario,
+                        $motivo !== '' ? $motivo : ($falto ? 'Le faltó: '.self::CAUSAS[$causa] : null),
+                        falto: $falto,
+                        delCamion: $delCamion,
+                    );
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
 
@@ -180,11 +262,12 @@ final class DevolucionAction
                 }
 
                 Notification::make()
-                    ->title("Devolución {$devolucion->numero} registrada")
+                    ->title(($falto ? 'Faltante ' : 'Devolución ').$devolucion->numero.' registrada')
                     ->body(match (true) {
                         $devolucion->conNota()                        => "Nota de crédito N° {$devolucion->nota_numero} por ".lempiras($devolucion->total).'.',
                         $devolucion->tipo === TipoDevolucion::Credito => 'Crédito interno por '.lempiras($devolucion->total).'.',
-                        $otro !== null                                => "Orden de cambio {$devolucion->reposicion?->numero} a nombre de {$otro->cliente->nombre} (se le quedó debiendo): imprímala en Pedidos → Por imprimir y súbala a la próxima carga.",
+                        $delCamion                                    => 'Ya se le dio del camión. Al cliente al que al final le falte, regístrelo en su factura con «Le faltó producto».',
+                        $falto                                        => "Orden de cambio {$devolucion->reposicion?->numero} con lo que le faltó: imprímala en Pedidos → Por imprimir; impresa, se sube a la próxima carga.",
                         default                                       => "Orden de cambio {$devolucion->reposicion?->numero}: imprímala en Pedidos → Por imprimir; impresa, se sube a la próxima carga.",
                     })
                     ->success()
@@ -334,30 +417,13 @@ final class DevolucionAction
     }
 
     /**
-     * Los pedidos a cuyo cliente se le puede quedar debiendo el cambio:
-     * [id => "PULPERIA LA BENDICION · PED-000120 · CO22 · 18/11"].
-     *
-     * @return array<int, string>
-     */
-    private static function paraDeberle(Pedido $pedido): array
-    {
-        $opciones = [];
-
-        foreach (RegistrarDevolucion::paraDeberle($pedido)->with(['cliente', 'ruta'])->limit(300)->get() as $otro) {
-            $opciones[$otro->id] = implode(' · ', array_filter([$otro->cliente->nombre, $otro->numero, $otro->ruta?->codigo(), $otro->fecha->format('d/m')]));
-        }
-
-        return $opciones;
-    }
-
-    /**
      * Las líneas que salieron y todavía se pueden devolver, para el
      * formulario: el producto, en qué salió ("1 CJ12"), cuánto queda por
      * devolver ("son 12 UN"; "ya devolvió 3 UN · quedan 9 UN") y en qué se
      * anota: la presentación de la línea (sigla) y, de una caja, las
      * unidades sueltas (base).
      *
-     * @return list<array{id: int, producto: string, codigo: string, salio: string, puede: string, sigla: string, base: string, caja: bool, buenas: null, danadas: null, buenas_un: null, danadas_un: null}>
+     * @return list<array{id: int, producto: string, codigo: string, salio: string, puede: string, sigla: string, base: string, caja: bool, buenas: null, danadas: null, falto: null, buenas_un: null, danadas_un: null, falto_un: null}>
      */
     public static function lineas(Pedido $pedido): array
     {
@@ -391,8 +457,10 @@ final class DevolucionAction
                 'caja'       => $sueltas !== null,
                 'buenas'     => null,
                 'danadas'    => null,
+                'falto'      => null,
                 'buenas_un'  => null,
                 'danadas_un' => null,
+                'falto_un'   => null,
             ];
         }
 
@@ -400,19 +468,25 @@ final class DevolucionAction
     }
 
     /**
-     * Buenas o dañadas de una línea: en su presentación (CJ12, UN…) y, si es
-     * una caja, también unidades sueltas (UN), juntas en la misma celda.
+     * Buenas, dañadas o lo que le faltó de una línea: en su presentación
+     * (CJ12, UN…) y, si es una caja, también unidades sueltas (UN); van
+     * juntas en la misma celda (FusedGroup).
+     *
+     * @param Closure(Get): bool $visible
+     *
+     * @return list<TextInput>
      */
-    private static function cantidades(string $campo): FusedGroup
+    private static function cantidades(string $campo, Closure $visible): array
     {
-        return FusedGroup::make([
+        return [
             TextInput::make($campo)
                 ->hiddenLabel()
                 ->numeric()
                 ->integer()
                 ->minValue(0)
                 ->placeholder('0')
-                ->suffix(fn (Get $get): string => (string) $get('sigla')),
+                ->suffix(fn (Get $get): string => (string) $get('sigla'))
+                ->visible($visible),
             TextInput::make($campo.'_un')
                 ->hiddenLabel()
                 ->numeric()
@@ -420,9 +494,7 @@ final class DevolucionAction
                 ->minValue(0)
                 ->placeholder('0')
                 ->suffix(fn (Get $get): string => (string) $get('base'))
-                ->visible(fn (Get $get): bool => (bool) $get('caja')),
-        ])
-            ->hiddenLabel()
-            ->columns(fn (Get $get): int => $get('caja') ? 2 : 1);
+                ->visible(fn (Get $get): bool => (bool) $get('caja') && $visible($get)),
+        ];
     }
 }

@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Cargas\Pages;
 use App\Domain\Cargas\CuentaCarga;
 use App\Domain\Cargas\HojaDeCarga;
 use App\Domain\Cargas\LiquidarCarga;
+use App\Domain\Devoluciones\CambiosDelCamion;
 use App\Domain\Devoluciones\Reposiciones;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\EntregaFactura;
@@ -136,7 +137,7 @@ class Liquidacion extends Page
             ->components([
                 Group::make([
                     Section::make('Cada factura')
-                        ->description('Todas vienen como entregadas: cambie solo las que no se entregaron. Anular: la factura se anula y lo que llevaba regresa a la bodega. Otra carga: sale otro día. Si un cliente devolvió algo, regístrelo con el botón de devolución de su fila: lo de crédito se descuenta del cuadre.')
+                        ->description('Todas vienen como entregadas: cambie solo las que no se entregaron. Anular: la factura se anula y lo que llevaba regresa a la bodega. Otra carga: sale otro día. Si un cliente devolvió algo o le faltó producto, regístrelo con el botón de devolución de su fila: lo de crédito se descuenta del cuadre.')
                         ->icon(Heroicon::OutlinedDocumentText)
                         ->compact()
                         ->schema([
@@ -200,6 +201,9 @@ class Liquidacion extends Page
                                         ->required()
                                         ->live(),
                                 ]),
+                            // Lo que se dio del camión en cambios tiene que haberle faltado a otro cliente.
+                            View::make('filament.cargas.cambios-del-camion')
+                                ->viewData(fn (): array => ['filas' => CambiosDelCamion::sinCuadrar($this->carga())]),
                         ]),
 
                     Section::make('Cambios que llevaba')
@@ -475,6 +479,10 @@ class Liquidacion extends Page
         if ($entregados + $sinEntregar > 0) {
             $partes[] = ($entregados === 1 ? '1 cambio entregado' : "{$entregados} cambios entregados")
                 .($sinEntregar === 0 ? '.' : ($sinEntregar === 1 ? '; 1 no se entregó: regresa a la bodega y espera otra carga.' : "; {$sinEntregar} no se entregaron: regresan a la bodega y esperan otra carga."));
+        }
+
+        if (CambiosDelCamion::sinCuadrar($this->carga()) !== []) {
+            $partes[] = 'Ojo: lo que se dio del camión en cambios no cuadra con lo que se anotó que les faltó a otros clientes (vea el aviso debajo de las facturas).';
         }
 
         $partes[] = 'Después ya no se puede cambiar.';

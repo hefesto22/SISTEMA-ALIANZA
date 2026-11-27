@@ -88,17 +88,18 @@ class DevolucionResource extends Resource
                     ->color('gray')
                     ->visibleFrom('lg'),
                 TextColumn::make('productos')
-                    ->label('Qué regresó')
+                    ->label('Qué regresó o faltó')
                     ->state(fn (Devolucion $record): string => self::productos($record))
                     ->size(TextSize::ExtraSmall)
                     ->wrap()
                     ->visibleFrom('md'),
                 TextColumn::make('tipo')
-                    ->badge(),
+                    ->badge()
+                    ->description(fn (Devolucion $record): ?string => $record->falto ? 'Le faltó' : null),
                 TextColumn::make('reposicion.estado')
                     ->label('El cambio')
                     ->badge()
-                    ->placeholder('—')
+                    ->placeholder(fn (Devolucion $record): string => $record->del_camion ? 'Se le dio del camión' : '—')
                     ->description(fn (Devolucion $record): ?string => $record->reposicion === null
                         ? null
                         : $record->reposicion->numero.($record->reposicion->cliente_id !== $record->cliente_id ? ' · para '.$record->reposicion->cliente->nombre : ''))
@@ -150,12 +151,16 @@ class DevolucionResource extends Resource
     }
 
     /**
-     * "2 UN JABON (dañadas) · 1 CJ12 ACEITE".
+     * "2 UN JABON (dañado) · 1 CJ12 ACEITE · 1 UN AZUCAR (se le dio a otro)".
      */
     public static function productos(Devolucion $devolucion): string
     {
         return $devolucion->items
-            ->map(fn (DevolucionItem $item): string => "{$item->cantidad} {$item->presentacion->sigla()} {$item->producto->descripcion}".($item->danado ? ' (dañado)' : ''))
+            ->map(fn (DevolucionItem $item): string => "{$item->cantidad} {$item->presentacion->sigla()} {$item->producto->descripcion}".match (true) {
+                $item->danado   => ' (dañado)',
+                $item->faltante => ' (se le dio a otro)',
+                default         => '',
+            })
             ->implode(' · ');
     }
 

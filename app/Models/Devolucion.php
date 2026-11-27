@@ -33,6 +33,8 @@ use Illuminate\Support\Carbon;
  * @property int|null $user_id
  * @property Carbon $fecha
  * @property TipoDevolucion $tipo
+ * @property bool $falto no devolvió: le faltó producto de su factura (se le da crédito o se le lleva después)
+ * @property bool $del_camion cambio que se le dio en el momento con lo que llevaba el camión
  * @property string|null $motivo
  * @property float $subtotal
  * @property float $importe_exento
@@ -73,6 +75,8 @@ class Devolucion extends Model
         'user_id',
         'fecha',
         'tipo',
+        'falto',
+        'del_camion',
         'motivo',
     ];
 
@@ -84,6 +88,8 @@ class Devolucion extends Model
         return [
             'fecha'           => 'date',
             'tipo'            => TipoDevolucion::class,
+            'falto'           => 'boolean',
+            'del_camion'      => 'boolean',
             'subtotal'        => 'float',
             'importe_exento'  => 'float',
             'importe_gravado' => 'float',

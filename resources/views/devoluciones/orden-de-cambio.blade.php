@@ -6,8 +6,9 @@
     entrega (lo mismo que devolvió, en la presentación en que regresó) y
     lleva las firmas de quien entrega y de quien recibe conforme. Si es para
     otro cliente (se le quedó debiendo porque su producto se le dio al que
-    devolvió), dice su pedido y de quién fue el cambio. La factura no cambia
-    de valor. De la segunda impresión en adelante dice COPIA.
+    devolvió), dice su pedido y de quién fue el cambio; si es lo que le faltó
+    de su factura, lo dice. La factura no cambia de valor. De la segunda
+    impresión en adelante dice COPIA.
     Datos: $ordenes (Reposicion con sus relaciones) y $fiscales (DatosFiscales).
 --}}
 @php
@@ -103,7 +104,7 @@
                     <div><b>Su pedido:</b> {{ $orden->pedido?->numero }}</div>
                     <div><b>Cambio de:</b> {{ $devolucion->cliente->nombre }} · {{ $devolucion->numero }}</div>
                 @else
-                    <div><b>Devolución:</b> {{ $devolucion->numero }} del {{ $devolucion->fecha->format('d/m/Y') }}</div>
+                    <div><b>{{ $devolucion->falto ? 'Faltante' : 'Devolución' }}:</b> {{ $devolucion->numero }} del {{ $devolucion->fecha->format('d/m/Y') }}</div>
                     <div><b>Factura:</b> {{ $factura?->numero ?? '—' }}</div>
                 @endif
                 <div style="grid-column: 1 / -1"><b>Motivo:</b> {{ $devolucion->motivo ?? 'Cambio de producto' }}</div>
@@ -139,6 +140,8 @@
             <div class="texto">
                 @if ($deOtro)
                     Se le entrega lo que se le quedó debiendo de su pedido {{ $orden->pedido?->numero }}: su producto se le dio a otro cliente en el cambio {{ $devolucion->numero }}. Su factura no cambia de valor.
+                @elseif ($devolucion->falto)
+                    Se le entrega lo que le faltó en la entrega de su factura{{ $factura ? ' '.$factura->numero : '' }} ({{ $devolucion->numero }}). La factura no cambia de valor.
                 @else
                     Cambio por cambio: se le entrega lo mismo que devolvió en la devolución {{ $devolucion->numero }}{{ $factura ? ' (factura '.$factura->numero.')' : '' }}. La factura no cambia de valor.
                 @endif

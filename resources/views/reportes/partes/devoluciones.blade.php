@@ -205,7 +205,7 @@
                                             <small>{{ $f['motivo'] }}</small>
                                         @endif
                                     </td>
-                                    <td><span class="tipo">{{ $f['tipo']->getLabel() }}</span></td>
+                                    <td><span class="tipo">{{ ($f['falto'] ?? false) ? 'Le faltó · ' : '' }}{{ $f['tipo']->getLabel() }}</span></td>
                                     <td class="n">{{ lempiras($f['regreso']) }}</td>
                                     <td @class(['n', 'perdida' => $f['perdida'] > 0])>{{ $f['perdida'] > 0 ? lempiras($f['perdida']) : '—' }}</td>
                                     <td class="n">{{ $f['credito'] === null ? '—' : lempiras($f['credito']) }}</td>

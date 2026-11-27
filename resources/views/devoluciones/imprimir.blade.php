@@ -4,14 +4,15 @@
     26): datos del emisor, CAI, número, rango y fecha límite, cliente y RTN,
     la factura que modifica (número, CAI y fecha), el motivo, las unidades,
     el desglose de importes, el total en letras y quién la recibe. Sin nota
-    sale como CONSTANCIA DE DEVOLUCIÓN, sin valor fiscal.
+    sale como CONSTANCIA DE DEVOLUCIÓN (o DE FALTANTE, si no devolvió: le
+    faltó producto de su factura), sin valor fiscal.
     Datos: $devolucion (con sus relaciones) y $fiscales (DatosFiscales).
 --}}
 @php
     /** @var \App\Models\Devolucion $devolucion */
     /** @var \App\Models\DatosFiscales $fiscales */
     $nota = $devolucion->conNota();
-    $titulo = $nota ? "Nota de crédito {$devolucion->nota_numero}" : "Devolución {$devolucion->numero}";
+    $titulo = $nota ? "Nota de crédito {$devolucion->nota_numero}" : ($devolucion->falto ? 'Faltante ' : 'Devolución ').$devolucion->numero;
     $factura = $devolucion->factura;
 @endphp
 <!DOCTYPE html>
@@ -81,7 +82,7 @@
                     <div>Rango autorizado: {{ $devolucion->rango_desde }} al {{ $devolucion->rango_hasta }}</div>
                     <div>Fecha límite de emisión: {{ $devolucion->fecha_limite?->format('d/m/Y') }}</div>
                 @else
-                    <div class="tipo">CONSTANCIA DE DEVOLUCIÓN</div>
+                    <div class="tipo">{{ $devolucion->falto ? 'CONSTANCIA DE FALTANTE' : 'CONSTANCIA DE DEVOLUCIÓN' }}</div>
                     <div class="num">{{ $devolucion->numero }}</div>
                     <div class="aviso">SIN VALOR FISCAL</div>
                 @endif
@@ -93,12 +94,16 @@
             <div><b>Cliente:</b> {{ $devolucion->cliente_nombre ?? $devolucion->cliente->nombre }}</div>
             <div><b>RTN:</b> {{ ($devolucion->cliente_rtn ?? $devolucion->cliente->rtn) ?: 'Consumidor final' }}</div>
             <div><b>Pedido:</b> {{ $devolucion->pedido->numero }} · {{ $devolucion->numero }}</div>
-            <div><b>Tipo:</b> {{ $devolucion->tipo->getLabel() }}{{ $devolucion->tipo === \App\Enums\TipoDevolucion::Cambio ? ' (se repone lo mismo)' : '' }}</div>
+            <div><b>Tipo:</b> {{ $devolucion->falto ? 'Le faltó · ' : '' }}{{ $devolucion->tipo->getLabel() }}{{ match (true) {
+                $devolucion->del_camion                               => ' (se le dio en el momento, del camión)',
+                $devolucion->tipo === \App\Enums\TipoDevolucion::Cambio => ' (se le lleva en la próxima carga)',
+                default                                               => '',
+            } }}</div>
             @if ($factura)
                 <div><b>Factura que modifica:</b> {{ $factura->numero }}</div>
                 <div><b>CAI de la factura:</b> {{ $factura->cai }} · {{ $factura->fecha_emision->format('d/m/Y') }}</div>
             @endif
-            <div style="grid-column: 1 / -1"><b>Motivo:</b> {{ $devolucion->motivo ?? 'Devolución de producto' }}</div>
+            <div style="grid-column: 1 / -1"><b>Motivo:</b> {{ $devolucion->motivo ?? ($devolucion->falto ? 'Faltó en la entrega' : 'Devolución de producto') }}</div>
         </div>
 
         <table>
@@ -118,7 +123,11 @@
                         <td class="num-c">{{ $item->cantidad }}</td>
                         <td>{{ $item->presentacion->sigla() }}</td>
                         <td>{{ $item->producto->descripcion }}<br><span class="muted">{{ $item->producto->codigo }}{{ $item->gravado ? '' : ' · exento' }}</span></td>
-                        <td @class(['danado' => $item->danado])>{{ $item->danado ? 'Dañado' : 'Bueno' }}</td>
+                        <td @class(['danado' => $item->danado])>{{ match (true) {
+                            $item->danado   => $devolucion->falto ? 'Se dañó' : 'Dañado',
+                            $item->faltante => 'Se le dio a otro',
+                            default         => $devolucion->falto ? 'No salió' : 'Bueno',
+                        } }}</td>
                         <td class="num-c">{{ lempiras($item->precio) }}</td>
                         <td class="num-c">{{ lempiras($item->subtotal) }}</td>
                     </tr>
@@ -130,7 +139,7 @@
             <div><span>Importe exento</span><span>{{ lempiras($devolucion->importe_exento) }}</span></div>
             <div><span>Importe gravado 15%</span><span>{{ lempiras($devolucion->importe_gravado) }}</span></div>
             <div><span>ISV 15%</span><span>{{ lempiras($devolucion->isv) }}</span></div>
-            <div class="total"><span>{{ $devolucion->tipo === \App\Enums\TipoDevolucion::Credito ? 'Total del crédito' : 'Valor de lo repuesto' }}</span><span>{{ lempiras($devolucion->total) }}</span></div>
+            <div class="total"><span>{{ $devolucion->tipo === \App\Enums\TipoDevolucion::Credito ? 'Total del crédito' : ($devolucion->falto ? 'Valor de lo que se le lleva' : 'Valor de lo repuesto') }}</span><span>{{ lempiras($devolucion->total) }}</span></div>
         </div>
         <div class="letras">SON: {{ \App\Support\NumeroALetras::lempiras($devolucion->total) }}</div>
 

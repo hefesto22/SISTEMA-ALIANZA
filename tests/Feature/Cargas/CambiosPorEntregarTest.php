@@ -6,6 +6,7 @@ use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Cargas\CuentaCarga;
 use App\Domain\Cargas\HojaDeCarga;
 use App\Domain\Cargas\LiquidarCarga;
+use App\Domain\Devoluciones\CambiosDelCamion;
 use App\Domain\Devoluciones\OrdenesDeCambio;
 use App\Domain\Devoluciones\RegistrarDevolucion;
 use App\Domain\Devoluciones\Reposiciones;
@@ -257,26 +258,40 @@ test('liquidar: el entregado queda entregado y el que no se entregó regresa a l
         ->and($dos->fresh()?->estado)->toBe(EstadoReposicion::EnRuta);
 });
 
-test('bodega registra el cambio para otro cliente, sale marcado al cargar el camión, va en la hoja y se liquida en pantalla', function (): void {
+test('en la ruta, a uno se le cambia con lo del camión y al que al final le faltó se le lleva en la próxima carga: sale marcado al cargar, va en la hoja y se liquida en pantalla', function (): void {
     $bendicion = pedidoDeCambios($this, 4, 'PULPERIA LA BENDICION');
     $roca = pedidoDeCambios($this, 3, 'PULPERIA LA ROCA');
     $this->actingAs($this->encargado);
     $undoRepeaterFake = Repeater::fake();
 
+    // A la Bendición se le cambió 1 dañada con lo del camión: no queda nada por entregarle.
     Livewire::test(ViewPedido::class, ['record' => $bendicion->getRouteKey()])
         ->callAction('devolucion', data: [
-            'tipo'         => TipoDevolucion::Cambio->value,
-            'entrega'      => DevolucionAction::DE_OTRO,
-            'se_le_debe_a' => $roca->id,
-            'lineas'       => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
+            'tipo'    => TipoDevolucion::Cambio->value,
+            'entrega' => DevolucionAction::DEL_CAMION,
+            'lineas'  => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
+        ])
+        ->assertHasNoActionErrors()
+        ->assertNotified();
+
+    // A la Roca, al final, le faltó 1 (se le dio a la Bendición): se le lleva en la próxima carga.
+    Livewire::test(ViewPedido::class, ['record' => $roca->getRouteKey()])
+        ->callAction('devolucion', data: [
+            'que'    => DevolucionAction::FALTO,
+            'causa'  => DevolucionAction::POR_OTRO,
+            'tipo'   => TipoDevolucion::Cambio->value,
+            'lineas' => [['id' => $roca->items()->sole()->id, 'falto' => 1]],
         ])
         ->assertHasNoActionErrors()
         ->assertNotified();
 
     $undoRepeaterFake();
     $cambio = Reposicion::query()->sole();
+    $faltante = Devolucion::query()->where('pedido_id', $roca->id)->sole();
 
-    expect($cambio->cliente_id)->toBe($roca->cliente_id);
+    expect([$cambio->cliente_id, $cambio->nota, $faltante->falto, $faltante->items->sole()->faltante])->toBe([$roca->cliente_id, "LE FALTÓ EN LA ENTREGA ({$faltante->numero})", true, true])
+        ->and($faltante->motivo)->toBe('LE FALTÓ: SE LE DIO A OTRO CLIENTE EN UN CAMBIO')
+        ->and(Devolucion::query()->where('pedido_id', $bendicion->id)->sole()->del_camion)->toBeTrue();
 
     // La orden de cambio sale en Pedidos → Por imprimir; al imprimirla pasa a Impreso (por cargar).
     Livewire::test(ListPedidos::class)
@@ -327,7 +342,7 @@ test('bodega registra el cambio para otro cliente, sale marcado al cargar el cam
     Livewire::test(ViewCarga::class, ['record' => $carga->getRouteKey()])
         ->assertOk()
         ->assertSee('Cambios que lleva')
-        ->assertSee('SE LE QUEDÓ DEBIENDO');
+        ->assertSee('LE FALTÓ EN LA ENTREGA');
 
     Livewire::test(Liquidacion::class, ['record' => $carga->getRouteKey()])
         ->assertOk()
@@ -433,4 +448,47 @@ test('en la lista de cargas, Devolución va al lado de Liquidar: se escoge la fa
         ->set('activeTab', 'todas')
         ->assertActionHidden(TestAction::make('devolver')->table($una->fresh()))
         ->assertActionVisible(TestAction::make('devolver')->table($dos));
+});
+
+test('del camión y faltante: lo que se dio del camión le faltó a otro; el faltante no regresa a la bodega ni es pérdida y al liquidar se revisa que cuadre', function (): void {
+    $bendicion = pedidoDeCambios($this, 4, 'PULPERIA LA BENDICION');
+    $roca = pedidoDeCambios($this, 3, 'PULPERIA LA ROCA');
+    $carga = cargaConCambios($this, [$bendicion, $roca], []);
+    $registrar = app(RegistrarDevolucion::class);
+    $antes = Existencia::de($this->bodega->id, $this->un->id);
+
+    // A la Bendición le llegaron 2 dañadas y se le cambiaron con lo que llevaba el camión.
+    $delCamion = $registrar->ejecutar($bendicion, TipoDevolucion::Cambio, [$bendicion->items()->sole()->id => ['danadas' => 2]], $this->encargado, delCamion: true);
+
+    expect([$delCamion->del_camion, $delCamion->carga_id, $delCamion->reposicion()->exists()])->toBe([true, $carga->id, false])
+        ->and(CambiosDelCamion::sinCuadrar($carga))->toBe([['producto' => 'JABON BEST 250G', 'dado' => 2, 'falto' => 0]]);
+
+    $this->actingAs($this->encargado);
+
+    Livewire::test(Liquidacion::class, ['record' => $carga->getRouteKey()])
+        ->assertSee('Lo que se dio del camión en cambios no cuadra')
+        ->assertSee('del camión se dieron 2 unidades en cambios y no se anotó a quién le faltó');
+
+    // A la Roca, la última, le faltaron esas 2: se le da crédito.
+    $falto = $registrar->ejecutar($roca, TipoDevolucion::Credito, [$roca->items()->sole()->id => ['faltan' => 2]], $this->encargado, falto: true);
+
+    expect([$falto->falto, $falto->items->sole()->faltante, $falto->items->sole()->danado])->toBe([true, true, false])
+        ->and(CambiosDelCamion::sinCuadrar($carga))->toBe([])
+        // Ni lo dañado ni lo que le faltó regresan a la bodega.
+        ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe($antes)
+        ->and(CuentaCarga::de($carga->fresh() ?? $carga, [], 0.0, [], [])['devuelto'])->toBe($falto->total);
+
+    Livewire::test(Liquidacion::class, ['record' => $carga->getRouteKey()])
+        ->assertDontSee('Lo que se dio del camión en cambios no cuadra');
+
+    $this->get(route('devoluciones.imprimir', $falto))
+        ->assertOk()
+        ->assertSee('CONSTANCIA DE FALTANTE')
+        ->assertSee('Se le dio a otro');
+
+    // Lo que se le dio a otro solo va en un faltante; un faltante no se da del camión.
+    expect(fn () => $registrar->ejecutar($roca, TipoDevolucion::Credito, [$roca->items()->sole()->id => ['faltan' => 1]], $this->encargado))
+        ->toThrow(ReglaNegocioException::class, 'como faltante')
+        ->and(fn () => $registrar->ejecutar($roca, TipoDevolucion::Cambio, [$roca->items()->sole()->id => ['faltan' => 1]], $this->encargado, falto: true, delCamion: true))
+        ->toThrow(ReglaNegocioException::class, 'crédito o se le lleva');
 });

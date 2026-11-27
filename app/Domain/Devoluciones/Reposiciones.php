@@ -50,6 +50,7 @@ final class Reposiciones
     /**
      * Lo que se le debe por el cambio $devolucion del pedido $pedido: a ese
      * cliente o al del pedido $seLeDebeA (su producto se le dio al primero).
+     * En un faltante, lo que le faltó de su factura.
      */
     public function crear(Devolucion $devolucion, Pedido $pedido, ?Pedido $seLeDebeA = null): Reposicion
     {
@@ -61,7 +62,11 @@ final class Reposiciones
             'cliente_id'    => $para->cliente_id,
             'pedido_id'     => $para->id,
             'estado'        => EstadoReposicion::PorEntregar,
-            'nota'          => $seLeDebeA === null ? null : mb_strtoupper("Se le quedó debiendo: lo de su pedido se le dio a {$pedido->cliente->nombre} ({$devolucion->numero})"),
+            'nota'          => match (true) {
+                $seLeDebeA !== null => mb_strtoupper("Se le quedó debiendo: lo de su pedido se le dio a {$pedido->cliente->nombre} ({$devolucion->numero})"),
+                $devolucion->falto  => mb_strtoupper("Le faltó en la entrega ({$devolucion->numero})"),
+                default             => null,
+            },
         ]);
     }
 
