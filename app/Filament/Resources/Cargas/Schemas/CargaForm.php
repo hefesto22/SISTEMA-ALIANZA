@@ -7,12 +7,16 @@ namespace App\Filament\Resources\Cargas\Schemas;
 use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Cargas\FacturasParaCargar;
 use App\Domain\Cargas\HojaDeCarga;
+use App\Domain\Devoluciones\Reposiciones;
+use App\Enums\EntregaFactura;
 use App\Enums\EstadoFactura;
 use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Carga;
 use App\Models\Factura;
+use App\Models\Reposicion;
 use App\Models\User;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
@@ -27,7 +31,8 @@ use Illuminate\Support\Str;
 
 /**
  * Armar o cambiar una carga del camión: la salida (bodega, fecha y quién
- * sale: lleva la mercadería y regresa con el dinero) y las facturas que lleva.
+ * sale: lleva la mercadería y regresa con el dinero), los cambios por
+ * entregar que lleva (si hay) y las facturas.
  *
  * Las facturas se escogen en resources/views/filament/cargas/escoger-facturas.blade.php:
  * agrupadas por día y por vendedor (se marca un grupo entero de un toque),
@@ -56,6 +61,7 @@ final class CargaForm
                             ->live()
                             ->afterStateUpdated(function (Set $set): void {
                                 $set('repartidor_id', null);
+                                $set('cambios', []);
                                 $set('facturas', []);
                             }),
                         DatePicker::make('fecha')
@@ -72,6 +78,23 @@ final class CargaForm
                             ->helperText('Lleva la mercadería y regresa con el dinero para la liquidación.'),
                     ]),
 
+                Section::make('Cambios por entregar')
+                    ->description('Lo que se le debe a un cliente por un cambio por cambio. Marque los que lleva el camión: salen de la bodega al guardar la carga y van en la hoja de carga.')
+                    ->visible(fn (Get $get, ?Carga $record): bool => self::cambiosParaEscoger($get, $record)->isNotEmpty())
+                    ->schema([
+                        CheckboxList::make('cambios')
+                            ->hiddenLabel()
+                            ->options(fn (Get $get, ?Carga $record): array => self::cambiosParaEscoger($get, $record)
+                                ->mapWithKeys(fn (Reposicion $cambio): array => [$cambio->id => $cambio->etiqueta()])
+                                ->all())
+                            ->descriptions(fn (Get $get, ?Carga $record): array => self::cambiosParaEscoger($get, $record)
+                                ->filter(fn (Reposicion $cambio): bool => $cambio->nota !== null)
+                                ->mapWithKeys(fn (Reposicion $cambio): array => [$cambio->id => (string) $cambio->nota])
+                                ->all())
+                            ->bulkToggleable()
+                            ->default([]),
+                    ]),
+
                 Section::make('Facturas que lleva')
                     ->description('Marque las facturas impresas que van en el camión. No salen las que ya van en otra carga ni las de un día que ya salió en su ruta.')
                     ->schema([
@@ -83,7 +106,7 @@ final class CargaForm
                             ->view('filament.cargas.escoger-facturas')
                             ->viewData(fn (Get $get, ?Carga $record): array => self::paraEscoger($get, $record))
                             ->default([])
-                            ->required()
+                            ->required(fn (Get $get): bool => ! filled($get('cambios')))
                             ->rule('array')
                             ->validationMessages(['required' => 'Marque las facturas que lleva el camión.']),
                     ]),
@@ -95,21 +118,31 @@ final class CargaForm
      *
      * @param array<string, mixed> $data
      *
-     * @return array{bodega_id: int, fecha: string, repartidor_id: int, facturas: list<int>}
+     * @return array{bodega_id: int, fecha: string, repartidor_id: int, facturas: list<int>, cambios: list<int>}
      */
     public static function datos(array $data, User $usuario, ?Carga $carga = null): array
     {
         $bodega = $carga->bodega_id ?? ($usuario->veTodasLasBodegas() ? $data['bodega_id'] ?? null : $usuario->bodega_id);
         $fecha = $data['fecha'] ?? null;
         $repartidor = $data['repartidor_id'] ?? null;
-        $facturas = $data['facturas'] ?? null;
 
         return [
             'bodega_id'     => is_numeric($bodega) ? (int) $bodega : 0,
             'fecha'         => is_string($fecha) && $fecha !== '' ? $fecha : today()->toDateString(),
             'repartidor_id' => is_numeric($repartidor) ? (int) $repartidor : 0,
-            'facturas'      => array_values(array_map(intval(...), array_filter(is_array($facturas) ? $facturas : [], is_numeric(...)))),
+            'facturas'      => self::ids($data['facturas'] ?? null),
+            'cambios'       => self::ids($data['cambios'] ?? null),
         ];
+    }
+
+    /**
+     * Los números de una lista marcada (los que no son números se ignoran).
+     *
+     * @return list<int>
+     */
+    public static function ids(mixed $lista): array
+    {
+        return array_values(array_map(intval(...), array_filter(is_array($lista) ? $lista : [], is_numeric(...))));
     }
 
     /**
@@ -132,7 +165,12 @@ final class CargaForm
             'fecha'         => $carga->fecha->toDateString(),
             'desde'         => $desde->toDateString(),
             'repartidor_id' => $carga->repartidor_id,
-            'facturas'      => $carga->facturas()
+            'cambios'       => $carga->cambios()
+                ->where('estado', EntregaFactura::EnRuta->value)
+                ->pluck('reposicion_id')
+                ->map(fn (mixed $id): string => (string) $id)
+                ->all(),
+            'facturas' => $carga->facturas()
                 ->where('facturas.estado', EstadoFactura::Vigente->value)
                 ->orderBy('carga_factura.id')
                 ->pluck('facturas.id')
@@ -159,6 +197,42 @@ final class CargaForm
         return FacturasParaCargar::de($bodegaId, $fecha, desde: min($dias))
             ->filter(fn (Factura $factura): bool => in_array($factura->fecha_emision->toDateString(), $dias, true))
             ->values();
+    }
+
+    /**
+     * Los cambios por entregar que puede llevar la carga (y, al cambiarla,
+     * los que ya lleva).
+     *
+     * @return Collection<int, Reposicion>
+     */
+    public static function cambiosParaEscoger(Get $get, ?Carga $carga): Collection
+    {
+        $bodega = $carga->bodega_id ?? self::bodega($get);
+
+        return $bodega === null ? new Collection : Reposiciones::paraCarga($bodega, $carga?->id);
+    }
+
+    /**
+     * De los cambios por entregar, los de las rutas (o, sin ruta, de los
+     * vendedores) de esas facturas: los que se marcan solos al cargar el
+     * camión con días de Impresos.
+     *
+     * @param Collection<int, Factura> $facturas con su pedido
+     *
+     * @return Collection<int, Reposicion>
+     */
+    public static function cambiosDeLasRutas(int $bodegaId, Collection $facturas): Collection
+    {
+        $rutas = $facturas->map(fn (Factura $factura): string => self::claveDeRuta($factura->pedido->ruta_id, $factura->pedido->vendedor_id))->unique()->all();
+
+        return Reposiciones::paraCarga($bodegaId)
+            ->filter(fn (Reposicion $cambio): bool => $cambio->pedido !== null && in_array(self::claveDeRuta($cambio->pedido->ruta_id, $cambio->pedido->vendedor_id), $rutas, true))
+            ->values();
+    }
+
+    private static function claveDeRuta(?int $rutaId, int $vendedorId): string
+    {
+        return $rutaId !== null ? "r{$rutaId}" : "v{$vendedorId}";
     }
 
     /**

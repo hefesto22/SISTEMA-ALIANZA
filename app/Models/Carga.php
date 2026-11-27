@@ -57,6 +57,7 @@ use Illuminate\Support\Carbon;
  * @property-read Collection<int, CargaFactura> $renglones
  * @property-read Collection<int, Factura> $facturas
  * @property-read Collection<int, CargaPago> $pagos
+ * @property-read Collection<int, CargaReposicion> $cambios
  * @property-read Collection<int, Devolucion> $devoluciones
  */
 class Carga extends Model
@@ -158,6 +159,16 @@ class Carga extends Model
     public function pagos(): HasMany
     {
         return $this->hasMany(CargaPago::class)->orderBy('id');
+    }
+
+    /**
+     * Los cambios por entregar que lleva (a quién y cómo terminó cada uno).
+     *
+     * @return HasMany<CargaReposicion, $this>
+     */
+    public function cambios(): HasMany
+    {
+        return $this->hasMany(CargaReposicion::class)->orderBy('id');
     }
 
     /**

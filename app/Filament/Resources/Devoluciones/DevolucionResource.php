@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Devoluciones;
 
+use App\Enums\EstadoReposicion;
 use App\Enums\TipoDevolucion;
 use App\Filament\Resources\Devoluciones\Pages\ListDevoluciones;
 use App\Filament\Resources\Pedidos\PedidoResource;
@@ -54,7 +55,7 @@ class DevolucionResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $usuario = Acceso::usuario();
-        $query = Devolucion::query()->with(['pedido:id,numero', 'cliente:id,nombre', 'bodega:id,nombre', 'items.producto:id,descripcion', 'items.presentacion.unidadMedida']);
+        $query = Devolucion::query()->with(['pedido:id,numero', 'cliente:id,nombre', 'bodega:id,nombre', 'items.producto:id,descripcion', 'items.presentacion.unidadMedida', 'reposicion.cliente:id,nombre']);
 
         return $usuario === null ? $query->whereRaw('1 = 0') : $query->visiblesPara($usuario);
     }
@@ -94,6 +95,14 @@ class DevolucionResource extends Resource
                     ->visibleFrom('md'),
                 TextColumn::make('tipo')
                     ->badge(),
+                TextColumn::make('reposicion.estado')
+                    ->label('El cambio')
+                    ->badge()
+                    ->placeholder('—')
+                    ->description(fn (Devolucion $record): ?string => $record->reposicion !== null && $record->reposicion->cliente_id !== $record->cliente_id
+                        ? 'para '.$record->reposicion->cliente->nombre
+                        : null)
+                    ->tooltip('Lo que se le debe por el cambio: por entregar (espera carga), en ruta o entregado.'),
                 TextColumn::make('nota_numero')
                     ->label('Nota de crédito')
                     ->placeholder(fn (Devolucion $record): string => $record->tipo === TipoDevolucion::Credito ? 'Interno' : '—')
@@ -118,6 +127,12 @@ class DevolucionResource extends Resource
             ->filters([
                 SelectFilter::make('tipo')
                     ->options(TipoDevolucion::class),
+                SelectFilter::make('cambio')
+                    ->label('El cambio')
+                    ->options(EstadoReposicion::class)
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->whereHas('reposicion', fn (Builder $q): Builder => $q->where('estado', $data['value']))
+                        : $query),
                 SelectFilter::make('bodega_id')
                     ->label('Bodega')
                     ->relationship('bodega', 'nombre')

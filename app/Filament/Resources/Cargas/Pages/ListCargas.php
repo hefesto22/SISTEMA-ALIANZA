@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Cargas\Pages;
 
 use App\Enums\EstadoCarga;
+use App\Enums\EstadoReposicion;
 use App\Filament\Resources\Cargas\CargaResource;
+use App\Filament\Support\Acceso;
+use App\Models\Reposicion;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -22,9 +25,24 @@ class ListCargas extends ListRecords
         ];
     }
 
+    /**
+     * Y, si hay, cuántos cambios esperan carga (de la bodega del usuario).
+     */
     public function getSubheading(): string
     {
-        return 'Lo que sale en cada camión y, al regresar, cuánto debía traer y cuánto trajo.';
+        $texto = 'Lo que sale en cada camión y, al regresar, cuánto debía traer y cuánto trajo.';
+        $usuario = Acceso::usuario();
+
+        $porEntregar = Reposicion::query()
+            ->where('estado', EstadoReposicion::PorEntregar->value)
+            ->when($usuario !== null && ! $usuario->veTodasLasBodegas(), fn (Builder $q): Builder => $q->where('bodega_id', $usuario?->bodega_id ?? 0))
+            ->count();
+
+        if ($porEntregar === 0) {
+            return $texto;
+        }
+
+        return $texto.' '.($porEntregar === 1 ? 'Hay 1 cambio por entregar' : "Hay {$porEntregar} cambios por entregar").': se escogen al armar la carga.';
     }
 
     /**

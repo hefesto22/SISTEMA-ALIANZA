@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace App\Domain\Cargas;
 
+use App\Domain\Devoluciones\Reposiciones;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\EntregaFactura;
 use App\Enums\EstadoCarga;
 use App\Enums\EstadoFactura;
 use App\Enums\EstadoPedido;
+use App\Enums\EstadoReposicion;
 use App\Models\Carga;
 use App\Models\CargaFactura;
+use App\Models\CargaReposicion;
 use App\Models\Factura;
+use App\Models\Reposicion;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -19,29 +23,38 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Arma (o cambia, mientras va en ruta) lo que sale en un camión: la bodega,
- * la fecha, quién sale (lleva la mercadería y regresa con el dinero) y las
- * facturas impresas que lleva.
+ * la fecha, quién sale (lleva la mercadería y regresa con el dinero), las
+ * facturas impresas que lleva y los cambios por entregar (Reposiciones).
  *
  * Cada factura: vigente, de esa bodega, de un pedido impreso y que no va en
  * otra carga ni se entregó ya. Las facturas se bloquean mientras se arma
  * para que dos cargas no se lleven la misma. El total de la carga es la
  * suma de lo que lleva: lo que debe regresar en dinero.
  *
+ * Cada cambio: de esa bodega y por entregar (o ya en esta carga). Al subirlo
+ * sale de la bodega; si se quita, regresa. Una carga puede llevar solo
+ * cambios.
+ *
  * Quién sale es cualquier usuario activo de la bodega (el que entrega no
  * tiene que ser el que vendió). El encargado solo arma cargas de su bodega.
  */
 final class ArmarCarga
 {
+    public function __construct(
+        private readonly Reposiciones $reposiciones,
+    ) {}
+
     /**
-     * @param array{bodega_id: int, fecha: string, repartidor_id: int, facturas: list<int>} $datos
+     * @param array{bodega_id: int, fecha: string, repartidor_id: int, facturas: list<int>, cambios?: list<int>} $datos
      */
     public function ejecutar(?Carga $carga, array $datos, User $usuario): Carga
     {
         $bodegaId = $usuario->veTodasLasBodegas() ? $datos['bodega_id'] : ($usuario->bodega_id ?? throw new ReglaNegocioException('Para armar una carga necesita tener una bodega asignada.'));
         $ids = array_values(array_unique($datos['facturas']));
+        $cambios = array_values(array_unique(array_map(intval(...), $datos['cambios'] ?? [])));
 
-        if ($ids === []) {
-            throw new ReglaNegocioException('Escoja las facturas que lleva el camión.');
+        if ($ids === [] && $cambios === []) {
+            throw new ReglaNegocioException('Escoja las facturas (o los cambios por entregar) que lleva el camión.');
         }
 
         $repartidor = User::query()->whereKey($datos['repartidor_id'])->where('is_active', true)->first();
@@ -50,7 +63,7 @@ final class ArmarCarga
             throw new ReglaNegocioException('Quien sale en el camión tiene que ser un usuario activo de la bodega.');
         }
 
-        return DB::transaction(function () use ($carga, $datos, $usuario, $bodegaId, $ids): Carga {
+        return DB::transaction(function () use ($carga, $datos, $usuario, $bodegaId, $ids, $cambios): Carga {
             if ($carga !== null) {
                 $carga = Carga::query()->lockForUpdate()->findOrFail($carga->id);
 
@@ -110,8 +123,75 @@ final class ArmarCarga
                 $carga->renglones()->create(['factura_id' => $id, 'estado' => EntregaFactura::EnRuta]);
             }
 
+            $this->cambios($carga, $cambios, $usuario);
+
             return self::conTotal($carga);
         });
+    }
+
+    /**
+     * Borra la carga en ruta: sus facturas quedan libres para otra carga y
+     * sus cambios regresan a la bodega (vuelven a estar por entregar).
+     */
+    public function borrar(Carga $carga, User $usuario): void
+    {
+        DB::transaction(function () use ($carga, $usuario): void {
+            $carga = Carga::query()->lockForUpdate()->findOrFail($carga->id);
+
+            if (! $carga->enRuta()) {
+                throw new ReglaNegocioException("La carga {$carga->numero()} ya se liquidó: ya no se borra.");
+            }
+
+            foreach ($carga->cambios()->with(['carga', 'reposicion'])->get() as $renglon) {
+                $this->reposiciones->bajar($renglon, $usuario);
+            }
+
+            $carga->delete();
+        });
+    }
+
+    /**
+     * Los cambios que lleva: los que se quitaron regresan a la bodega y los
+     * nuevos salen (deben estar por entregar y ser de la bodega).
+     *
+     * @param list<int> $ids
+     */
+    private function cambios(Carga $carga, array $ids, User $usuario): void
+    {
+        $lleva = $carga->cambios()->where('estado', EntregaFactura::EnRuta->value)->with(['carga', 'reposicion'])->get();
+
+        foreach ($lleva as $renglon) {
+            if (! in_array((int) $renglon->reposicion_id, $ids, true)) {
+                $this->reposiciones->bajar($renglon, $usuario);
+            }
+        }
+
+        $ya = $lleva->pluck('reposicion_id')->map(fn (mixed $id): int => (int) $id)->all();
+        $nuevos = array_values(array_diff($ids, $ya));
+
+        if ($nuevos === []) {
+            return;
+        }
+
+        $reposiciones = Reposicion::query()->whereKey($nuevos)->with(['cliente', 'devolucion'])->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+
+        foreach ($nuevos as $id) {
+            $reposicion = $reposiciones->get($id);
+
+            if (! $reposicion instanceof Reposicion || $reposicion->bodega_id !== $carga->bodega_id) {
+                throw new ReglaNegocioException('Uno de los cambios no es de esta bodega.');
+            }
+
+            if ($reposicion->estado !== EstadoReposicion::PorEntregar) {
+                $otra = CargaReposicion::query()->where('reposicion_id', $id)->where('estado', EntregaFactura::EnRuta->value)->with('carga')->first();
+
+                throw new ReglaNegocioException($otra instanceof CargaReposicion
+                    ? "El cambio de {$reposicion->cliente->nombre} ({$reposicion->devolucion->numero}) ya va en la carga {$otra->carga->numero()}."
+                    : "El cambio de {$reposicion->cliente->nombre} ({$reposicion->devolucion->numero}) ya se entregó.");
+            }
+
+            $this->reposiciones->subir($carga, $reposicion, $usuario);
+        }
     }
 
     /**

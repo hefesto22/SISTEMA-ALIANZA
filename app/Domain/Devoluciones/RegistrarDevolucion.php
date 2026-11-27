@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Domain\Devoluciones;
 
 use App\Domain\Exceptions\ReglaNegocioException;
-use App\Domain\Inventario\AbrirSiFaltan;
 use App\Domain\Inventario\MoverExistencia;
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Enums\EstadoPedido;
@@ -16,10 +15,10 @@ use App\Models\Carga;
 use App\Models\Configuracion;
 use App\Models\Devolucion;
 use App\Models\DevolucionItem;
-use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -30,8 +29,10 @@ use Illuminate\Support\Facades\DB;
  *  - Las buenas regresan a la bodega del pedido (kárdex "Devolución").
  *  - Las dañadas no regresan: quedan marcadas en la devolución, con su
  *    costo, para el reporte de producto dañado (y reclamarlas al proveedor).
- *  - Cambio: se le repone lo mismo (kárdex "Reposición"); lo que pagó no
- *    cambia. Si las sueltas no alcanzan, se abre sola una caja (AbrirSiFaltan).
+ *  - Cambio: se le debe lo mismo (buenas y dañadas); lo que pagó no cambia.
+ *    Queda Por entregar (Reposiciones) y sale de la bodega cuando se sube a
+ *    una carga. Si al cliente ya se le dio en ruta con producto del pedido de
+ *    otro cliente ($seLeDebeA), lo que queda por entregar es para ese otro.
  *  - Crédito: se le abona lo que pagó por eso (precio neto de la línea, con
  *    su descuento, más ISV si es gravado; lo de un regalo vale 0). Con
  *    "Notas de crédito" encendido en Configuración se emite la nota con el
@@ -43,22 +44,28 @@ use Illuminate\Support\Facades\DB;
  */
 final class RegistrarDevolucion
 {
+    /** Hasta cuántos días atrás se busca el pedido del otro cliente al que se le queda debiendo. */
+    public const DIAS_PARA_DEBERLE = 15;
+
     public function __construct(
         private readonly MoverExistencia $mover,
-        private readonly AbrirSiFaltan $abrirSiFaltan,
+        private readonly Reposiciones $reposiciones,
     ) {}
 
     /**
      * @param array<int, array{buenas?: int|string|null, danadas?: int|string|null}> $lineas [id de la línea del pedido => cuántas regresan buenas y dañadas]
+     * @param Pedido|null $seLeDebeA en un cambio: el pedido de otro cliente con cuyo producto ya se le dio el cambio (a ese otro se le queda debiendo)
      */
-    public function ejecutar(Pedido $pedido, TipoDevolucion $tipo, array $lineas, User $usuario, ?string $motivo = null): Devolucion
+    public function ejecutar(Pedido $pedido, TipoDevolucion $tipo, array $lineas, User $usuario, ?string $motivo = null, ?Pedido $seLeDebeA = null): Devolucion
     {
-        return DB::transaction(function () use ($pedido, $tipo, $lineas, $usuario, $motivo): Devolucion {
+        return DB::transaction(function () use ($pedido, $tipo, $lineas, $usuario, $motivo, $seLeDebeA): Devolucion {
             $pedido = Pedido::query()->with('cliente')->lockForUpdate()->findOrFail($pedido->id);
 
             if ($pedido->estado !== EstadoPedido::Impreso) {
                 throw new ReglaNegocioException("El pedido {$pedido->numero} está {$pedido->estado->getLabel()}: solo se recibe devolución de un pedido ya entregado (impreso). Antes de imprimir, se corrige.");
             }
+
+            $seLeDebeA = $this->seLeDebeA($pedido, $tipo, $seLeDebeA);
 
             $filas = $this->filas($pedido, $lineas);
             $factura = $pedido->factura()->first();
@@ -84,7 +91,11 @@ final class RegistrarDevolucion
             ]);
 
             $this->renglones($devolucion, $filas);
-            $this->bodega($devolucion, $pedido, $tipo, $filas, $usuario);
+            $this->bodega($devolucion, $pedido, $filas, $usuario);
+
+            if ($tipo === TipoDevolucion::Cambio) {
+                $this->reposiciones->crear($devolucion, $pedido, $seLeDebeA);
+            }
 
             if ($conNota) {
                 $this->nota($devolucion, $pedido);
@@ -92,6 +103,24 @@ final class RegistrarDevolucion
 
             return $devolucion->load('items');
         });
+    }
+
+    /**
+     * Pedidos a cuyo cliente se le puede quedar debiendo el cambio de
+     * $pedido: los entregados (impresos) de la misma bodega de los últimos
+     * días, sin el mismo pedido, del más nuevo al más viejo.
+     *
+     * @return Builder<Pedido>
+     */
+    public static function paraDeberle(Pedido $pedido): Builder
+    {
+        return Pedido::query()
+            ->where('bodega_id', $pedido->bodega_id)
+            ->where('estado', EstadoPedido::Impreso)
+            ->whereKeyNot($pedido->id)
+            ->whereDate('fecha', '>=', today()->subDays(self::DIAS_PARA_DEBERLE))
+            ->orderByDesc('fecha')
+            ->orderByDesc('id');
     }
 
     /**
@@ -224,11 +253,35 @@ final class RegistrarDevolucion
     }
 
     /**
-     * Lo bueno entra a la bodega; en un cambio sale lo que se repone.
+     * El pedido a cuyo cliente se le queda debiendo el cambio, revisado:
+     * solo en un cambio, de la misma bodega, entregado y que no sea el mismo.
+     */
+    private function seLeDebeA(Pedido $pedido, TipoDevolucion $tipo, ?Pedido $seLeDebeA): ?Pedido
+    {
+        if ($seLeDebeA === null || $tipo !== TipoDevolucion::Cambio) {
+            return null;
+        }
+
+        $otro = Pedido::query()->with('cliente')->find($seLeDebeA->id);
+
+        if ($otro === null || $otro->id === $pedido->id) {
+            throw new ReglaNegocioException('Escoja el pedido del otro cliente: al que se le quedó debiendo lo que se le dio en el cambio.');
+        }
+
+        if ($otro->bodega_id !== $pedido->bodega_id || $otro->estado !== EstadoPedido::Impreso) {
+            throw new ReglaNegocioException("El pedido {$otro->numero} no sirve: debe ser de la misma bodega y ya entregado (impreso).");
+        }
+
+        return $otro;
+    }
+
+    /**
+     * Lo bueno entra a la bodega. Lo de un cambio sale cuando se sube a una
+     * carga (Reposiciones).
      *
      * @param list<array{0: PedidoItem, 1: int, 2: int}> $filas
      */
-    private function bodega(Devolucion $devolucion, Pedido $pedido, TipoDevolucion $tipo, array $filas, User $usuario): void
+    private function bodega(Devolucion $devolucion, Pedido $pedido, array $filas, User $usuario): void
     {
         $nota = "DEVOLUCIÓN {$devolucion->numero} · PEDIDO {$pedido->numero}";
 
@@ -236,21 +289,6 @@ final class RegistrarDevolucion
             if ($buenas > 0) {
                 $this->mover->ejecutar($pedido->bodega_id, $item->presentacion, $buenas, TipoMovimiento::Devolucion, $usuario, pedidoId: $pedido->id, nota: $nota);
             }
-        }
-
-        if ($tipo !== TipoDevolucion::Cambio) {
-            return;
-        }
-
-        foreach ($filas as [$item, $buenas, $danadas]) {
-            $repone = $buenas + $danadas;
-
-            if ($item->presentacion->es_base) {
-                $falta = $repone - Existencia::de($pedido->bodega_id, $item->presentacion_id);
-                $this->abrirSiFaltan->ejecutar($pedido->bodega_id, $item->producto_id, $falta, $usuario, $pedido->id, "{$devolucion->numero} (CAMBIO)");
-            }
-
-            $this->mover->ejecutar($pedido->bodega_id, $item->presentacion->refresh(), -$repone, TipoMovimiento::Reposicion, $usuario, pedidoId: $pedido->id, nota: "{$nota} (CAMBIO)");
         }
     }
 

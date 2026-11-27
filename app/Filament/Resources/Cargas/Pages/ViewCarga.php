@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Cargas\Pages;
 
+use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Facturacion\ResumenDelDia;
 use App\Filament\Resources\Cargas\CargaResource;
+use App\Filament\Support\Acceso;
 use App\Filament\Support\VistaImpresion;
 use App\Http\Controllers\ImprimirCargaController;
 use App\Models\Carga;
@@ -54,7 +56,12 @@ class ViewCarga extends ViewRecord
                 ->button(),
             EditAction::make()->label('Cambiar'),
             DeleteAction::make()
-                ->modalDescription('La carga se borra y sus facturas quedan libres para otra carga. Las facturas no se anulan.'),
+                ->modalDescription('La carga se borra: sus facturas quedan libres para otra carga (no se anulan) y los cambios que llevaba regresan a la bodega, por entregar.')
+                ->using(function (Carga $record): bool {
+                    app(ArmarCarga::class)->borrar($record, Acceso::usuario() ?? abort(403));
+
+                    return true;
+                }),
         ];
     }
 

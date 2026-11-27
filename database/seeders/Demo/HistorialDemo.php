@@ -9,6 +9,7 @@ use App\Domain\Comisiones\GuardarEscalaBodega;
 use App\Domain\Comisiones\GuardarMetaComision;
 use App\Domain\Comisiones\PeriodoComision;
 use App\Domain\Devoluciones\RegistrarDevolucion;
+use App\Domain\Devoluciones\Reposiciones;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Facturacion\ImprimirFacturas;
 use App\Domain\Inventario\AjustarExistencia;
@@ -85,6 +86,9 @@ final class HistorialDemo
     public const NOTA_INICIAL = 'INVENTARIO INICIAL';
 
     public const PROMOCION = 'PROMOCIÓN DE DEMOSTRACIÓN';
+
+    /** Los cambios de estos últimos días quedan por entregar (para la próxima carga). */
+    private const DIAS_POR_ENTREGAR = 2;
 
     /** Cuánto vende la empresa cada mes contra el primero. */
     private const CRECIMIENTO = [1.0, 1.06, 1.10];
@@ -260,6 +264,7 @@ final class HistorialDemo
         private readonly CerrarPeriodoComision $cerrar,
         private readonly GuardarMetaComision $guardarMeta,
         private readonly GuardarEscalaBodega $guardarEscala,
+        private readonly Reposiciones $reposiciones,
     ) {
         $this->azar = new Randomizer(new Mt19937(2026));
         $this->desde = $this->hasta = $this->ahora = CarbonImmutable::today();
@@ -1011,7 +1016,9 @@ final class HistorialDemo
 
     /**
      * Las devoluciones que tocan hoy: cambio (casi siempre por dañado) o
-     * crédito. Sin existencia para reponer, el cambio se vuelve crédito.
+     * crédito. Sin existencia para reponer, el cambio se vuelve crédito. Lo
+     * del cambio se le entrega (sin carga), salvo los de los últimos días:
+     * esos quedan por entregar para la próxima carga.
      */
     private function devolver(CarbonImmutable $dia): void
     {
@@ -1042,14 +1049,22 @@ final class HistorialDemo
 
             $this->viajar($dia->setTime(9, 0)->addMinutes($n * 4));
 
+            $usuario = $this->encargados[$pedido->bodega_id] ?? $this->admin();
+
             try {
-                $this->devolucion->ejecutar(
+                $devolucion = $this->devolucion->ejecutar(
                     $pedido,
                     $tipo,
                     [$linea->id => ['buenas' => $danadas ? 0 : $cuantas, 'danadas' => $danadas ? $cuantas : 0]],
-                    $this->encargados[$pedido->bodega_id] ?? $this->admin(),
+                    $usuario,
                     $this->uno($danadas ? self::MOTIVOS_DANADO : self::MOTIVOS_BUENO),
                 );
+
+                $reposicion = $devolucion->reposicion()->first();
+
+                if ($reposicion !== null && $dia->lt($this->hasta->subDays(self::DIAS_POR_ENTREGAR))) {
+                    $this->reposiciones->entregarSinCarga($reposicion, $usuario);
+                }
             } catch (ReglaNegocioException) {
                 continue;
             }

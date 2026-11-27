@@ -7,12 +7,15 @@ namespace App\Filament\Resources\Cargas\Pages;
 use App\Domain\Cargas\CuentaCarga;
 use App\Domain\Cargas\HojaDeCarga;
 use App\Domain\Cargas\LiquidarCarga;
+use App\Domain\Devoluciones\Reposiciones;
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Enums\EntregaFactura;
 use App\Enums\TipoDevolucion;
 use App\Filament\Resources\Cargas\CargaResource;
 use App\Filament\Support\Acceso;
 use App\Models\Carga;
 use App\Models\CargaFactura;
+use App\Models\CargaReposicion;
 use App\Models\Devolucion;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
@@ -45,6 +48,8 @@ use Illuminate\Support\Facades\Gate;
  *  - Cada factura viene como entregada; se cambian solo las que no se
  *    entregaron: Anular (la factura se anula y lo que llevaba regresa a la
  *    bodega) u Otra carga (sale otro día).
+ *  - Cada cambio que llevaba viene como entregado; el que no se entregó
+ *    regresa a la bodega y espera otra carga.
  *  - Lo que trajo: el efectivo, y los cheques y las transferencias uno por
  *    uno (de qué factura, banco, número o referencia, monto).
  *  - Al lado, el cuadre en vivo (CuentaCarga): debía traer, trajo y la
@@ -85,6 +90,7 @@ class Liquidacion extends Page
 
         $this->form->fill([
             'facturas'       => $this->filas(),
+            'cambios'        => $this->filasDeCambios(),
             'efectivo'       => null,
             'cheques'        => [],
             'transferencias' => [],
@@ -177,6 +183,50 @@ class Liquidacion extends Page
                                         ->grouped()
                                         ->required()
                                         ->live(),
+                                ]),
+                        ]),
+
+                    Section::make('Cambios que llevaba')
+                        ->description('Lo que se le debía a cada cliente por un cambio por cambio. Todos vienen como entregados: cambie solo los que no se entregaron (regresan a la bodega y esperan otra carga).')
+                        ->icon(Heroicon::OutlinedArrowsRightLeft)
+                        ->compact()
+                        ->visible(fn (): bool => $this->carga()->cambios()->where('estado', EntregaFactura::EnRuta->value)->exists())
+                        ->schema([
+                            Repeater::make('cambios')
+                                ->hiddenLabel()
+                                ->addable(false)
+                                ->deletable(false)
+                                ->reorderable(false)
+                                ->table([
+                                    TableColumn::make('Cliente'),
+                                    TableColumn::make('Qué se le llevaba'),
+                                    TableColumn::make('Qué pasó'),
+                                ])
+                                ->schema([
+                                    Hidden::make('id'),
+                                    Hidden::make('cliente'),
+                                    Hidden::make('detalle'),
+                                    Hidden::make('lleva'),
+                                    TextEntry::make('ver_cliente')
+                                        ->hiddenLabel()
+                                        ->state(fn (Get $get): string => (string) $get('cliente'))
+                                        ->helperText(fn (Get $get): string => (string) $get('detalle'))
+                                        ->weight(FontWeight::SemiBold),
+                                    TextEntry::make('ver_lleva')
+                                        ->hiddenLabel()
+                                        ->state(fn (Get $get): string => (string) $get('lleva')),
+                                    ToggleButtons::make('entrega')
+                                        ->hiddenLabel()
+                                        ->options([
+                                            CuentaCarga::ENTREGADA  => 'Entregado',
+                                            CuentaCarga::OTRA_CARGA => 'No se entregó',
+                                        ])
+                                        ->colors([
+                                            CuentaCarga::ENTREGADA  => 'success',
+                                            CuentaCarga::OTRA_CARGA => 'warning',
+                                        ])
+                                        ->grouped()
+                                        ->required(),
                                 ]),
                         ]),
 
@@ -298,28 +348,41 @@ class Liquidacion extends Page
     /**
      * Lo del formulario, como lo pide LiquidarCarga.
      *
-     * @return array{entregas: array<int, string>, efectivo: float, cheques: list<array{factura_id: int|null, banco: string|null, referencia: string|null, monto: float}>, transferencias: list<array{factura_id: int|null, banco: string|null, referencia: string|null, monto: float}>, nota: string|null}
+     * @return array{entregas: array<int, string>, cambios: array<int, string>, efectivo: float, cheques: list<array{factura_id: int|null, banco: string|null, referencia: string|null, monto: float}>, transferencias: list<array{factura_id: int|null, banco: string|null, referencia: string|null, monto: float}>, nota: string|null}
      */
     private function datos(): array
     {
-        $entregas = [];
-
-        foreach ((array) ($this->data['facturas'] ?? []) as $fila) {
-            if (is_array($fila) && is_numeric($fila['id'] ?? null)) {
-                $entregas[(int) $fila['id']] = is_string($fila['entrega'] ?? null) ? $fila['entrega'] : CuentaCarga::ENTREGADA;
-            }
-        }
+        $entregas = self::decisiones($this->data['facturas'] ?? []);
 
         $efectivo = $this->data['efectivo'] ?? null;
         $nota = $this->data['nota'] ?? null;
 
         return [
             'entregas'       => $entregas,
+            'cambios'        => self::decisiones($this->data['cambios'] ?? []),
             'efectivo'       => is_numeric($efectivo) ? (float) $efectivo : 0.0,
             'cheques'        => self::listaDePagos($this->data['cheques'] ?? []),
             'transferencias' => self::listaDePagos($this->data['transferencias'] ?? []),
             'nota'           => is_string($nota) ? $nota : null,
         ];
+    }
+
+    /**
+     * Qué pasó con cada factura o cambio: [id => entregada | anular | otra_carga].
+     *
+     * @return array<int, string>
+     */
+    private static function decisiones(mixed $filas): array
+    {
+        $decisiones = [];
+
+        foreach (is_array($filas) ? $filas : [] as $fila) {
+            if (is_array($fila) && is_numeric($fila['id'] ?? null)) {
+                $decisiones[(int) $fila['id']] = is_string($fila['entrega'] ?? null) ? $fila['entrega'] : CuentaCarga::ENTREGADA;
+            }
+        }
+
+        return $decisiones;
     }
 
     /**
@@ -367,6 +430,15 @@ class Liquidacion extends Page
 
         if ($otra > 0) {
             $partes[] = ($otra === 1 ? '1 factura sale en otra carga.' : "{$otra} facturas salen en otra carga.");
+        }
+
+        $cambios = array_count_values($this->datos()['cambios']);
+        $sinEntregar = $cambios[CuentaCarga::OTRA_CARGA] ?? 0;
+        $entregados = $cambios[CuentaCarga::ENTREGADA] ?? 0;
+
+        if ($entregados + $sinEntregar > 0) {
+            $partes[] = ($entregados === 1 ? '1 cambio entregado' : "{$entregados} cambios entregados")
+                .($sinEntregar === 0 ? '.' : ($sinEntregar === 1 ? '; 1 no se entregó: regresa a la bodega y espera otra carga.' : "; {$sinEntregar} no se entregaron: regresan a la bodega y esperan otra carga."));
         }
 
         $partes[] = 'Después ya no se puede cambiar.';
@@ -483,6 +555,32 @@ class Liquidacion extends Page
                 'cliente' => $factura->cliente_nombre,
                 'detalle' => ($ruta !== null ? $ruta.' · ' : '').($municipio !== null ? $municipio.' · ' : '').'vendió '.$factura->pedido->vendedor->name,
                 'monto'   => $factura->total,
+                'entrega' => CuentaCarga::ENTREGADA,
+            ];
+        }
+
+        return $filas;
+    }
+
+    /**
+     * Una fila por cada cambio que lleva en ruta.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function filasDeCambios(): array
+    {
+        $filas = [];
+
+        /** @var CargaReposicion $renglon */
+        foreach ($this->carga()->cambios()->where('estado', EntregaFactura::EnRuta->value)->with(array_map(fn (string $relacion): string => 'reposicion.'.$relacion, Reposiciones::DATOS))->get() as $renglon) {
+            $cambio = $renglon->reposicion;
+            $municipio = $cambio->cliente->municipio?->nombre;
+
+            $filas[] = [
+                'id'      => $cambio->id,
+                'cliente' => $cambio->cliente->nombre,
+                'detalle' => implode(' · ', array_filter([$cambio->deRuta(), $municipio, $cambio->devolucion->numero])),
+                'lleva'   => $cambio->texto(),
                 'entrega' => CuentaCarga::ENTREGADA,
             ];
         }

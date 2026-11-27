@@ -1,9 +1,11 @@
 {{--
     Hoja de carga: lo que se sube al camión, un renglón por producto con
     cuántas cajas (CJ) y cuántas unidades (UN), como en la factura (con los
-    regalos de las promociones sumados), y las facturas que lleva. En papel,
-    una casilla para ir marcando lo que se subió y las firmas de bodega y de
-    quien sale. En pantalla (la carga en ruta) va sin casillas ni firmas.
+    regalos de las promociones y lo de los cambios sumados), los cambios que
+    lleva (a quién se le da cada uno) y las facturas. En papel, una casilla
+    para ir marcando lo que se subió, la firma de cada cliente que recibe un
+    cambio y las firmas de bodega y de quien sale. En pantalla (la carga en
+    ruta) va sin casillas ni firmas.
     Hoja: App\Http\Controllers\ImprimirCargaController (?hoja=carga).
     Datos: $d = App\Domain\Cargas\HojaDeCarga::datos(); $pantalla.
 --}}
@@ -14,6 +16,7 @@
     $cajas = array_sum(array_map(fn (array $p): int => array_sum(array_column($p['cajas'], 'cantidad')), $productos));
     $unidades = array_sum(array_column($productos, 'unidades'));
     $plural = fn (int $n, string $uno, string $varios): string => $n === 1 ? "1 {$uno}" : number_format($n)." {$varios}";
+    $cambios = $d['cambios'];
 @endphp
 
 <style>
@@ -25,10 +28,17 @@
     .rp td.cg-cant span { display: block; }
     .rp .cg-prod td.marca { vertical-align: middle; }
     .rp .cg-prod tfoot td { font-weight: 700; }
+    .rp .cg-cambios td { vertical-align: top; }
+    .rp .cg-cambios ul { margin: 0; padding: 0; list-style: none; }
+    .rp .cg-cambios li + li { margin-top: 0.15rem; }
+    .rp .cg-cambios td.dia small { display: block; }
+    .rp .cg-cambios td.recibio, .rp .cg-cambios th.recibio { width: 11rem; }
     @media print {
         .rp .cg-prod td { padding-top: 7px; padding-bottom: 7px; }
         .rp td.cg-cant b { font-size: 13px; }
         .rp .cg-prod tr { break-inside: avoid; }
+        .rp .cg-cambios td { padding-top: 10px; padding-bottom: 10px; }
+        .rp .cg-cambios tr { break-inside: avoid; }
     }
 </style>
 
@@ -36,9 +46,9 @@
     @include('reportes.partes.carga-datos', ['d' => $d, 'pantalla' => $pantalla])
 
     <section class="rp-seccion">
-        <h2>Lo que se sube al camión <small>{{ $plural(count($productos), 'producto', 'productos') }} · {{ $plural($cajas, 'caja', 'cajas') }} y {{ $plural($unidades, 'unidad', 'unidades') }}, sumado de las facturas que lleva</small></h2>
+        <h2>Lo que se sube al camión <small>{{ $plural(count($productos), 'producto', 'productos') }} · {{ $plural($cajas, 'caja', 'cajas') }} y {{ $plural($unidades, 'unidad', 'unidades') }}, sumado de las facturas{{ $cambios === [] ? '' : ' y los cambios' }} que lleva</small></h2>
         @if ($productos === [])
-            <div class="rp-vacio">La carga no lleva facturas vigentes.</div>
+            <div class="rp-vacio">La carga no lleva facturas vigentes ni cambios.</div>
         @else
             <div class="rp-tabla">
                 <table class="cg-prod">
@@ -65,6 +75,9 @@
                                     {{ $p['descripcion'] }}
                                     @if ($p['regalo'] !== null)
                                         <small>Incluye de regalo: {{ $p['regalo'] }}</small>
+                                    @endif
+                                    @if ($p['cambio'] !== null)
+                                        <small>Incluye de cambios: {{ $p['cambio'] }}</small>
                                     @endif
                                 </td>
                                 <td class="cg-cant">
@@ -97,6 +110,50 @@
             </div>
         @endif
     </section>
+
+    @if ($cambios !== [])
+        <section class="rp-seccion">
+            <h2>Cambios que lleva <small>{{ $plural(count($cambios), 'cambio', 'cambios') }} por cambio: a quién se le da cada uno (ya van sumados arriba)</small></h2>
+            <div class="rp-tabla">
+                <table class="cg-cambios">
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Qué se le lleva</th>
+                            <th>Devolución</th>
+                            @unless ($pantalla)
+                                <th class="recibio">Recibió (firma)</th>
+                            @endunless
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($cambios as $c)
+                            <tr>
+                                <td class="nombre">
+                                    {{ $c['cliente'] }}
+                                    <small>{{ collect([$c['municipio'], $c['ruta']])->filter()->implode(' · ') }}</small>
+                                    @if ($c['nota'] !== null)
+                                        <small class="aviso">{{ $c['nota'] }}</small>
+                                    @endif
+                                </td>
+                                <td>
+                                    <ul>
+                                        @foreach ($c['lleva'] as $lleva)
+                                            <li>{{ $lleva }}</li>
+                                        @endforeach
+                                    </ul>
+                                </td>
+                                <td class="dia">{{ $c['devolucion'] }}@if ($c['factura'] !== null)<small class="cod">Factura {{ $c['factura'] }}</small>@endif</td>
+                                @unless ($pantalla)
+                                    <td class="recibio"></td>
+                                @endunless
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    @endif
 
     <section class="rp-seccion">
         <h2>Facturas que lleva <small>en el orden en que se cargaron</small></h2>

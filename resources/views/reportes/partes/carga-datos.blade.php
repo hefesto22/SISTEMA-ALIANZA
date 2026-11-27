@@ -1,6 +1,6 @@
 {{--
     Arriba de las hojas de una carga (carga, cobro y liquidación) y de la
-    carga en pantalla: quién sale, cuántas facturas y con cuánto
+    carga en pantalla: quién sale, cuántas facturas (y cambios) y con cuánto
     sale. Trae los estilos que comparten las tres hojas.
     Datos: $d = App\Domain\Cargas\HojaDeCarga::datos(); $pantalla (en el panel, sin firmas).
 --}}
@@ -9,6 +9,9 @@
     $pantalla ??= false;
     $c = $d['cuenta'] ?? null;
     $entregadas = count(array_filter($d['facturas'], fn (array $f): bool => $f['estado'] === \App\Enums\EntregaFactura::Entregada));
+    $cambios = $d['cambios'] ?? [];
+    $cambiosEntregados = count(array_filter($cambios, fn (array $cambio): bool => $cambio['estado'] === \App\Enums\EntregaFactura::Entregada));
+    $plural = fn (int $n, string $uno, string $varios): string => $n === 1 ? "1 {$uno}" : number_format($n)." {$varios}";
 @endphp
 
 <style>
@@ -61,11 +64,21 @@
         <small>
             @if ($d['liquidada'])
                 {{ $entregadas === 1 ? '1 entregada' : number_format($entregadas).' entregadas' }}
+                @if ($cambios !== [])
+                    · {{ $cambiosEntregados }} de {{ $plural(count($cambios), 'cambio entregado', 'cambios entregados') }}
+                @endif
             @else
                 {{ $d['bodega'] }}
             @endif
         </small>
     </div>
+    @if ($cambios !== [] && ! $d['liquidada'])
+        <div class="rp-kpi">
+            <span>Cambios</span>
+            <strong>{{ number_format(count($cambios)) }}</strong>
+            <small>cambio por cambio para entregar</small>
+        </div>
+    @endif
     @if ($c === null)
         <div class="rp-kpi principal">
             <span>Sale con</span>

@@ -31,6 +31,8 @@ final class LimpiarMovimientos
     public const TABLAS = [
         'carga_pagos',
         'carga_factura',
+        'carga_reposiciones',
+        'reposiciones',
         'cargas',
         'devolucion_items',
         'devoluciones',

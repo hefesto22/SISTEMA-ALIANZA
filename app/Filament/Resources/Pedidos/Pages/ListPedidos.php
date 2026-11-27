@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Cargas\FacturasParaCargar;
+use App\Domain\Devoluciones\Reposiciones;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Facturacion\DiasDeFacturacion;
 use App\Domain\Facturacion\ResumenDelDia;
@@ -23,8 +24,10 @@ use App\Models\Bodega;
 use App\Models\Carga;
 use App\Models\Factura;
 use App\Models\Pedido;
+use App\Models\Reposicion;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
@@ -244,7 +247,8 @@ class ListPedidos extends ListRecords
             ->modalIcon(Heroicon::OutlinedTruck)
             ->modalWidth(Width::TwoExtraLarge)
             ->fillForm(fn (array $arguments): array => [
-                'fecha' => max(today()->toDateString(), $this->paraCargar($arguments)['hasta'] ?? today()->toDateString()),
+                'fecha'   => max(today()->toDateString(), $this->paraCargar($arguments)['hasta'] ?? today()->toDateString()),
+                'cambios' => $this->paraCargar($arguments)['marcados'],
             ])
             ->schema(function (array $arguments): array {
                 $carga = $this->paraCargar($arguments);
@@ -266,6 +270,13 @@ class ListPedidos extends ListRecords
                                 ->maxDate(today()->addDays(2)->toDateString())
                                 ->required(),
                         ]),
+                    CheckboxList::make('cambios')
+                        ->label('Cambios por entregar que lleva')
+                        ->helperText('Vienen marcados los de las rutas de estas facturas. Salen de la bodega al guardar la carga y van en la hoja de carga.')
+                        ->options($carga['cambios'])
+                        ->descriptions($carga['notas'])
+                        ->visible($carga['cuantas'] > 0 && $carga['cambios'] !== [])
+                        ->bulkToggleable(),
                 ];
             })
             ->modalSubmitActionLabel('Guardar carga')
@@ -298,6 +309,7 @@ class ListPedidos extends ListRecords
                         'fecha'         => $fecha,
                         'repartidor_id' => (int) ($data['repartidor_id'] ?? 0),
                         'facturas'      => array_map(intval(...), $facturas),
+                        'cambios'       => CargaForm::ids($data['cambios'] ?? null),
                     ], $usuario);
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
@@ -468,7 +480,7 @@ class ListPedidos extends ListRecords
      *
      * @param array<string, mixed> $arguments
      *
-     * @return array{bodega: int|null, nombre: string, dias: list<string>, hasta: string|null, cuantas: int, total: float, porDia: list<array{dia: string, titulo: string, cuantas: int, total: float}>}
+     * @return array{bodega: int|null, nombre: string, dias: list<string>, hasta: string|null, cuantas: int, total: float, porDia: list<array{dia: string, titulo: string, cuantas: int, total: float}>, cambios: array<int, string>, notas: array<int, string>, marcados: list<string>}
      */
     private function paraCargar(array $arguments): array
     {
@@ -480,7 +492,7 @@ class ListPedidos extends ListRecords
     /**
      * @param array<string, mixed> $arguments
      *
-     * @return array{bodega: int|null, nombre: string, dias: list<string>, hasta: string|null, cuantas: int, total: float, porDia: list<array{dia: string, titulo: string, cuantas: int, total: float}>}
+     * @return array{bodega: int|null, nombre: string, dias: list<string>, hasta: string|null, cuantas: int, total: float, porDia: list<array{dia: string, titulo: string, cuantas: int, total: float}>, cambios: array<int, string>, notas: array<int, string>, marcados: list<string>}
      */
     private function calcularParaCargar(array $arguments): array
     {
@@ -512,14 +524,21 @@ class ListPedidos extends ListRecords
             ];
         }
 
+        // Los cambios por entregar de la bodega; marcados, los de las rutas de esas facturas.
+        $cambios = $bodega === null ? new Collection : Reposiciones::paraCarga($bodega);
+        $marcados = $bodega === null || $facturas->isEmpty() ? [] : CargaForm::cambiosDeLasRutas($bodega, $facturas)->map(fn (Reposicion $cambio): string => (string) $cambio->id)->values()->all();
+
         return [
-            'bodega'  => $bodega,
-            'nombre'  => $bodega === null ? '' : (string) Bodega::query()->whereKey($bodega)->value('nombre'),
-            'dias'    => $dias,
-            'hasta'   => $dias === [] ? null : max($dias),
-            'cuantas' => $facturas->count(),
-            'total'   => round((float) $facturas->sum('total'), 2),
-            'porDia'  => $porDia,
+            'bodega'   => $bodega,
+            'nombre'   => $bodega === null ? '' : (string) Bodega::query()->whereKey($bodega)->value('nombre'),
+            'dias'     => $dias,
+            'hasta'    => $dias === [] ? null : max($dias),
+            'cuantas'  => $facturas->count(),
+            'total'    => round((float) $facturas->sum('total'), 2),
+            'porDia'   => $porDia,
+            'cambios'  => $cambios->mapWithKeys(fn (Reposicion $cambio): array => [$cambio->id => $cambio->etiqueta()])->all(),
+            'notas'    => $cambios->filter(fn (Reposicion $cambio): bool => $cambio->nota !== null)->mapWithKeys(fn (Reposicion $cambio): array => [$cambio->id => (string) $cambio->nota])->all(),
+            'marcados' => $marcados,
         ];
     }
 

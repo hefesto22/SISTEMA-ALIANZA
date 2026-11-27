@@ -9,12 +9,14 @@ use App\Domain\Exceptions\ReglaNegocioException;
 use App\Models\Cai;
 use App\Models\Carga;
 use App\Models\CargaFactura;
+use App\Models\CargaReposicion;
 use App\Models\ComisionFactura;
 use App\Models\Devolucion;
 use App\Models\Existencia;
 use App\Models\Factura;
 use App\Models\MovimientoInventario;
 use App\Models\Pedido;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -137,22 +139,29 @@ final class BorrarPedidos
     }
 
     /**
-     * Sus facturas salen de las cargas del camión; la carga que se queda sin
-     * facturas se borra y a las demás se les vuelve a sacar el total.
+     * Sus facturas y los cambios de sus devoluciones salen de las cargas del
+     * camión (lo que movieron esos cambios en la bodega ya se deshizo con el
+     * kárdex del pedido); la carga que se queda vacía se borra y a las demás
+     * se les vuelve a sacar el total.
      *
      * @param list<int> $ids
      */
     private function quitarDeCargas(array $ids): void
     {
         $facturas = Factura::query()->whereIn('pedido_id', $ids)->select('id');
-        $cargas = CargaFactura::query()->whereIn('factura_id', $facturas)->distinct()->pluck('carga_id')->map(fn (mixed $id): int => (int) $id)->all();
+        $cambios = CargaReposicion::query()->whereHas('reposicion.devolucion', fn (Builder $q): Builder => $q->whereIn('pedido_id', $ids));
+        $cargas = array_values(array_unique(array_map(intval(...), [
+            ...CargaFactura::query()->whereIn('factura_id', $facturas)->distinct()->pluck('carga_id')->all(),
+            ...(clone $cambios)->distinct()->pluck('carga_id')->all(),
+        ])));
 
         if ($cargas === []) {
             return;
         }
 
         CargaFactura::query()->whereIn('factura_id', $facturas)->delete();
-        Carga::query()->whereKey($cargas)->whereDoesntHave('renglones')->delete();
+        $cambios->delete();
+        Carga::query()->whereKey($cargas)->whereDoesntHave('renglones')->whereDoesntHave('cambios')->delete();
 
         foreach (Carga::query()->whereKey($cargas)->get() as $carga) {
             ArmarCarga::conTotal($carga);

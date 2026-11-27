@@ -8,6 +8,7 @@ use App\Domain\Inventario\RegistrarCompra;
 use App\Domain\Pedidos\CorregirPedido;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
+use App\Enums\EstadoReposicion;
 use App\Enums\Rol;
 use App\Enums\TipoDevolucion;
 use App\Enums\TipoMovimiento;
@@ -31,8 +32,9 @@ use Livewire\Livewire;
 
 /**
  * Devoluciones de un pedido entregado: lo bueno regresa a la bodega, lo
- * dañado queda marcado; cambio (se repone lo mismo) o crédito (interno o
- * con nota de crédito, según Configuración).
+ * dañado queda marcado; cambio (se le debe lo mismo: queda por entregar,
+ * ver CambiosPorEntregarTest) o crédito (interno o con nota de crédito,
+ * según Configuración).
  */
 beforeEach(function (): void {
     Filament::setCurrentPanel('admin');
@@ -75,27 +77,24 @@ beforeEach(function (): void {
     $this->lineaUn = $this->pedido->items()->where('presentacion_id', $this->un->id)->sole();
 });
 
-test('cambio: lo bueno regresa, lo dañado queda marcado y se repone lo mismo; si faltan sueltas se abre una caja', function (): void {
+test('cambio: lo bueno regresa, lo dañado queda marcado y lo que se le repone queda por entregar (sale al subirlo al camión)', function (): void {
     expect(Existencia::de($this->bodega->id, $this->un->id))->toBe(2);
 
     $devolucion = app(RegistrarDevolucion::class)->ejecutar($this->pedido, TipoDevolucion::Cambio, [
         $this->lineaUn->id => ['buenas' => 1, 'danadas' => 2],
     ], $this->encargado, 'venían golpeados');
 
-    // Entra 1 buena y salen 3 de reposición: quedan 0 sueltas.
+    // Entra 1 buena; las 3 que se le reponen todavía no salen.
     expect($devolucion->numero)->toBe('DEV-'.str_pad((string) $devolucion->id, 6, '0', STR_PAD_LEFT))
         ->and($devolucion->tipo)->toBe(TipoDevolucion::Cambio)
         ->and($devolucion->motivo)->toBe('VENÍAN GOLPEADOS')
         ->and($devolucion->nota_numero)->toBeNull()
         ->and($devolucion->items->map(fn (DevolucionItem $item): array => [$item->cantidad, $item->danado, $item->subtotal, $item->total])->all())->toBe([[1, false, 10.0, 11.5], [2, true, 20.0, 23.0]])
-        ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe(0)
-        ->and(MovimientoInventario::query()->where('pedido_id', $this->pedido->id)->whereIn('tipo', [TipoMovimiento::Devolucion, TipoMovimiento::Reposicion])->orderBy('id')->pluck('cantidad')->all())->toBe([1, -3]);
-
-    // Otro cambio de 2 dañadas sin sueltas: se abre una CJ12.
-    app(RegistrarDevolucion::class)->ejecutar($this->pedido, TipoDevolucion::Cambio, [$this->lineaUn->id => ['danadas' => 2]], $this->encargado);
-
-    expect(Existencia::de($this->bodega->id, $this->un->id))->toBe(10)
-        ->and(Existencia::de($this->bodega->id, $this->cj12->id))->toBe(1);
+        ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe(3)
+        ->and(MovimientoInventario::query()->where('pedido_id', $this->pedido->id)->whereIn('tipo', [TipoMovimiento::Devolucion, TipoMovimiento::Reposicion])->orderBy('id')->pluck('cantidad')->all())->toBe([1])
+        ->and($devolucion->reposicion?->estado)->toBe(EstadoReposicion::PorEntregar)
+        ->and($devolucion->reposicion?->cliente_id)->toBe($this->pedido->cliente_id)
+        ->and($devolucion->reposicion?->productos()[0]['cantidad'] ?? null)->toBe(3);
 });
 
 test('crédito interno: se abona lo que pagó con su ISV; no se devuelve más de lo que salió menos lo ya devuelto', function (): void {

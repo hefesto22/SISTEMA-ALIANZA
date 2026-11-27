@@ -232,6 +232,7 @@ test('liquidar: lo entregado menos lo devuelto; la que no se entregó se anula y
         'unidades'    => 19,
         'suelta'      => 'UN',
         'regalo'      => null,
+        'cambio'      => null,
     ]]);
 });
 

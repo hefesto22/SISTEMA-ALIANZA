@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -56,6 +57,7 @@ use Illuminate\Support\Carbon;
  * @property-read Cliente $cliente
  * @property-read User|null $usuario
  * @property-read Collection<int, DevolucionItem> $items
+ * @property-read Reposicion|null $reposicion
  */
 class Devolucion extends Model
 {
@@ -155,6 +157,16 @@ class Devolucion extends Model
     public function items(): HasMany
     {
         return $this->hasMany(DevolucionItem::class);
+    }
+
+    /**
+     * En un cambio: lo que se le debe llevar al cliente (o al que se quedó esperando).
+     *
+     * @return HasOne<Reposicion, $this>
+     */
+    public function reposicion(): HasOne
+    {
+        return $this->hasOne(Reposicion::class);
     }
 
     public function conNota(): bool

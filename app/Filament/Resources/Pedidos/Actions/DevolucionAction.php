@@ -16,9 +16,11 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 
@@ -27,9 +29,17 @@ use Filament\Support\Icons\Heroicon;
  * cuántas regresan buenas (vuelven a la bodega) y cuántas dañadas (quedan
  * marcadas), y si se le cambia por lo mismo o se le da crédito (con nota de
  * crédito si está encendida en Configuración). Lo hace RegistrarDevolucion.
+ *
+ * En un cambio se dice cómo se le entrega: se le lleva en la próxima carga
+ * (queda Por entregar a su nombre) o ya se le dio con producto del pedido
+ * de otro cliente (se escoge ese pedido: a ese otro se le queda debiendo).
  */
 final class DevolucionAction
 {
+    public const PROXIMA_CARGA = 'proxima';
+
+    public const DE_OTRO = 'otro';
+
     public static function make(): Action
     {
         return Action::make('devolucion')
@@ -41,7 +51,7 @@ final class DevolucionAction
             ->modalDescription('Lo bueno regresa a la bodega; lo dañado no, queda marcado para el reporte de producto dañado. Las unidades no importan de qué caja salieron: se cuentan en la presentación de cada línea.')
             ->modalWidth(Width::ThreeExtraLarge)
             ->modalSubmitActionLabel('Registrar devolución')
-            ->fillForm(fn (Pedido $record): array => ['tipo' => TipoDevolucion::Cambio->value, 'lineas' => self::lineas($record)])
+            ->fillForm(fn (Pedido $record): array => ['tipo' => TipoDevolucion::Cambio->value, 'entrega' => self::PROXIMA_CARGA, 'lineas' => self::lineas($record)])
             ->schema([
                 ToggleButtons::make('tipo')
                     ->label('Qué se le da al cliente')
@@ -52,9 +62,34 @@ final class DevolucionAction
                     ])
                     ->inline()
                     ->required()
+                    ->live()
                     ->helperText(fn (): string => Configuracion::actual()->notas_credito
                         ? 'Con crédito se emite la nota de crédito (CAI tipo 07) con los datos de la factura.'
                         : 'Con crédito queda como crédito interno: la nota de crédito se hace a mano (se enciende en Configuración).'),
+                ToggleButtons::make('entrega')
+                    ->label('Cómo se le entrega el cambio')
+                    ->options([
+                        self::PROXIMA_CARGA => 'Se le lleva en la próxima carga',
+                        self::DE_OTRO       => 'Ya se le dio con producto de otro cliente',
+                    ])
+                    ->icons([
+                        self::PROXIMA_CARGA => Heroicon::OutlinedTruck,
+                        self::DE_OTRO       => Heroicon::OutlinedUserGroup,
+                    ])
+                    ->inline()
+                    ->required(fn (Get $get): bool => self::esCambio($get))
+                    ->visible(fn (Get $get): bool => self::esCambio($get))
+                    ->live()
+                    ->helperText(fn (Get $get): string => $get('entrega') === self::DE_OTRO
+                        ? 'Lo que se le dio era del pedido de otro cliente: a ese otro se le queda debiendo y se le lleva en la próxima carga.'
+                        : 'Queda Por entregar a su nombre: se escoge al armar la próxima carga y sale de la bodega cuando se sube al camión.'),
+                Select::make('se_le_debe_a')
+                    ->label('Pedido del cliente al que se le quedó debiendo')
+                    ->options(fn (Pedido $record): array => self::paraDeberle($record))
+                    ->searchable()
+                    ->required(fn (Get $get): bool => self::esCambio($get) && $get('entrega') === self::DE_OTRO)
+                    ->visible(fn (Get $get): bool => self::esCambio($get) && $get('entrega') === self::DE_OTRO)
+                    ->helperText('Los pedidos entregados de la bodega de los últimos '.RegistrarDevolucion::DIAS_PARA_DEBERLE.' días.'),
                 Repeater::make('lineas')
                     ->label('Lo que regresa')
                     ->table([
@@ -97,9 +132,18 @@ final class DevolucionAction
                 }
 
                 $tipo = TipoDevolucion::tryFrom(is_string($data['tipo'] ?? null) ? $data['tipo'] : '') ?? TipoDevolucion::Cambio;
+                $otro = ($data['entrega'] ?? null) === self::DE_OTRO && is_numeric($data['se_le_debe_a'] ?? null)
+                    ? Pedido::query()->find((int) $data['se_le_debe_a'])
+                    : null;
+
+                if ($tipo === TipoDevolucion::Cambio && ($data['entrega'] ?? null) === self::DE_OTRO && $otro === null) {
+                    Notification::make()->title('Escoja el pedido del cliente al que se le quedó debiendo.')->danger()->send();
+
+                    return;
+                }
 
                 try {
-                    $devolucion = app(RegistrarDevolucion::class)->ejecutar($record, $tipo, $lineas, $usuario, is_string($data['motivo'] ?? null) ? $data['motivo'] : null);
+                    $devolucion = app(RegistrarDevolucion::class)->ejecutar($record, $tipo, $lineas, $usuario, is_string($data['motivo'] ?? null) ? $data['motivo'] : null, $otro);
                 } catch (ReglaNegocioException $e) {
                     Notification::make()->title($e->getMessage())->danger()->send();
 
@@ -111,7 +155,8 @@ final class DevolucionAction
                     ->body(match (true) {
                         $devolucion->conNota()                        => "Nota de crédito N° {$devolucion->nota_numero} por ".lempiras($devolucion->total).'.',
                         $devolucion->tipo === TipoDevolucion::Credito => 'Crédito interno por '.lempiras($devolucion->total).'.',
-                        default                                       => 'Se le repone lo mismo; sale de la bodega.',
+                        $otro !== null                                => "Se le quedó debiendo a {$otro->cliente->nombre}: queda por entregar, se escoge al armar la próxima carga.",
+                        default                                       => 'Queda por entregar: se escoge al armar la próxima carga y sale de la bodega cuando se sube al camión.',
                     })
                     ->success()
                     ->actions([
@@ -122,6 +167,33 @@ final class DevolucionAction
                     ->persistent()
                     ->send();
             });
+    }
+
+    /**
+     * Si en el formulario se escogió cambio.
+     */
+    private static function esCambio(Get $get): bool
+    {
+        $tipo = $get('tipo');
+
+        return ($tipo instanceof TipoDevolucion ? $tipo->value : $tipo) === TipoDevolucion::Cambio->value;
+    }
+
+    /**
+     * Los pedidos a cuyo cliente se le puede quedar debiendo el cambio:
+     * [id => "PULPERIA LA BENDICION · PED-000120 · CO22 · 18/11"].
+     *
+     * @return array<int, string>
+     */
+    private static function paraDeberle(Pedido $pedido): array
+    {
+        $opciones = [];
+
+        foreach (RegistrarDevolucion::paraDeberle($pedido)->with(['cliente', 'ruta'])->limit(300)->get() as $otro) {
+            $opciones[$otro->id] = implode(' · ', array_filter([$otro->cliente->nombre, $otro->numero, $otro->ruta?->codigo(), $otro->fecha->format('d/m')]));
+        }
+
+        return $opciones;
     }
 
     /**

@@ -13,10 +13,12 @@ use App\Filament\Support\Acceso;
 use App\Models\Bodega;
 use App\Models\Carga;
 use App\Models\Factura;
+use App\Models\Reposicion;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Filament\Support\Enums\Width;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -24,7 +26,8 @@ use Illuminate\Database\Eloquent\Model;
  * cargar el camión con uno o varios días) llega con
  * ?dias=2026-11-25,2026-11-26&bodega=2 (o ?dia=2026-11-26): la bodega y las
  * facturas de esos días que todavía se pueden cargar vienen marcadas (si un
- * día es de antes, "Impresas desde" empieza en el más viejo).
+ * día es de antes, "Impresas desde" empieza en el más viejo), y también los
+ * cambios por entregar de las rutas de esas facturas.
  */
 class CreateCarga extends CreateRecord
 {
@@ -58,13 +61,17 @@ class CreateCarga extends CreateRecord
             $desde = FacturasParaCargar::anteriores($bodega, $desde)['ultimo'] ?? $desde;
         }
 
+        $facturas = $bodega !== null ? CargaForm::deLosDias($bodega, $dias) : new Collection;
+        $cambios = $bodega !== null && $facturas->isNotEmpty() ? CargaForm::cambiosDeLasRutas($bodega, $facturas) : new Collection;
+
         $this->callHook('beforeFill');
 
         $this->form->fill([
             'bodega_id' => $bodega,
             'fecha'     => today()->toDateString(),
             'desde'     => $desde,
-            'facturas'  => $bodega !== null ? CargaForm::deLosDias($bodega, $dias)->map(fn (Factura $factura): string => (string) $factura->id)->values()->all() : [],
+            'cambios'   => $cambios->map(fn (Reposicion $cambio): string => (string) $cambio->id)->values()->all(),
+            'facturas'  => $facturas->map(fn (Factura $factura): string => (string) $factura->id)->values()->all(),
         ]);
 
         $this->callHook('afterFill');

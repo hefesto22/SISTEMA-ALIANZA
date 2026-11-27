@@ -171,7 +171,7 @@
                             </tfoot>
                         </table>
                     </div>
-                    <div class="rp-nota">Lo bueno volvió a la existencia. Lo dañado no volvió y también está en Pérdidas. Al cliente se le repuso todo.</div>
+                    <div class="rp-nota">Lo bueno volvió a la existencia. Lo dañado no volvió y también está en Pérdidas. Al cliente se le repone todo: sale de la bodega cuando se sube al camión (Cambios por entregar).</div>
                 @endif
             </section>
         @endif

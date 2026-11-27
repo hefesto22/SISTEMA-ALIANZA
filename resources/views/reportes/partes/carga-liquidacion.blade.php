@@ -1,7 +1,7 @@
 {{--
     Liquidación de una carga: el cuadre que se guardó al liquidar (lo que
-    debía traer y lo que trajo), qué pasó con cada factura, los cheques, las
-    transferencias, las devoluciones y la nota. En papel, las firmas de quien
+    debía traer y lo que trajo), qué pasó con cada factura y cada cambio que
+    llevaba, los cheques, las transferencias, las devoluciones y la nota. En papel, las firmas de quien
     entregó el dinero y de quien lo recibió; en pantalla (la carga liquidada), sin firmas.
     Hoja: App\Http\Controllers\ImprimirCargaController (?hoja=liquidacion).
     Datos: $d = App\Domain\Cargas\HojaDeCarga::datos() de una carga liquidada; $pantalla.
@@ -77,6 +77,40 @@
             </table>
         </div>
     </section>
+
+    @if ($d['cambios'] !== [])
+        <section class="rp-seccion">
+            <h2>Cambios que llevaba <small>los que no se entregaron regresaron a la bodega y esperan otra carga</small></h2>
+            <div class="rp-tabla">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Qué se le llevaba</th>
+                            <th>Devolución</th>
+                            <th>Cómo terminó</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($d['cambios'] as $cambio)
+                            <tr @class(['tenue' => $cambio['estado'] !== \App\Enums\EntregaFactura::Entregada])>
+                                <td class="nombre">{{ $cambio['cliente'] }}<small>{{ collect([$cambio['municipio'], $cambio['ruta']])->filter()->implode(' · ') }}</small></td>
+                                <td>{{ implode(', ', $cambio['lleva']) }}</td>
+                                <td class="dia">{{ $cambio['devolucion'] }}</td>
+                                <td>
+                                    @if ($cambio['estado'] === \App\Enums\EntregaFactura::Entregada)
+                                        <span class="bien">Entregado</span>
+                                    @else
+                                        No se entregó: regresó a la bodega
+                                    @endif
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    @endif
 
     @foreach ($pagos as $titulo => $lista)
         @if ($lista !== [])
