@@ -383,6 +383,15 @@ class Promocion extends Model
     }
 
     /**
+     * Línea del plan que este mes no tiene unidades autorizadas (tope 0): no
+     * se ofrece en la preventa ni da regalo.
+     */
+    public function sinAutorizadas(): bool
+    {
+        return $this->tieneTope() && (int) $this->tope_unidades === 0;
+    }
+
+    /**
      * "24+1" (o "8+1"). Vacío si no cuenta unidades.
      */
     public function mecanica(): string

@@ -207,6 +207,21 @@ test('una línea que deja mezclar junta las unidades de sus productos y regala e
         ->and(AvancePlan::de($plan)['lineas'][0]['mezclan'])->toBeTrue();
 });
 
+test('una línea con 0 autorizadas no se ofrece en la preventa ni da regalo', function (): void {
+    planNectar($this, 0);
+    $this->actingAs($this->vendedor);
+
+    /** @var array{promos: list<array<string, mixed>>, productos: array<int, array<string, mixed>>} $hoy */
+    $hoy = Livewire::test(CreatePedido::class)
+        ->instance()
+        ->callSchemaComponentMethod('form.items', 'promocionesDeHoy', []);
+    $resumen = PedidoForm::resumenDe([['id' => null, 'producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 1]], $this->bodega->id);
+
+    expect($hoy['promos'])->toBe([])
+        ->and($resumen['promociones'])->not->toContain('agotada')
+        ->and(regaloDe(preventaNectar($this, [[caja($this->manzana), 1]])))->toBe(0);
+});
+
 test('no se regala más de lo autorizado: se aparta desde la preventa y al anular regresa', function (): void {
     $linea = planNectar($this, 3)->promociones()->sole();
 

@@ -36,6 +36,7 @@ use App\Models\Promocion;
  *    la promoción (24 de pera → 1 de manzana) o, si regala del mismo, de ese
  *    producto, en su unidad. Lo que va del mismo regalo se junta. Solo como
  *    bonificación (gratis).
+ *  - Una línea con 0 autorizadas no aplica (ni se avisa).
  *  - Tope (lo que autorizó el proveedor): $disponibles dice cuánto le queda
  *    de regalo a cada promoción con tope, para todos sus productos juntos
  *    (se van tomando en el orden de la promoción). Si le toca más, se le da
@@ -62,7 +63,7 @@ final class MotorPromociones
         $agotadas = [];
 
         foreach ($promociones as $promocion) {
-            if ($promocion->cantidad_beneficio <= 0 || $promocion->descuento_porcentaje <= 0) {
+            if ($promocion->cantidad_beneficio <= 0 || $promocion->descuento_porcentaje <= 0 || $promocion->sinAutorizadas()) {
                 continue;
             }
 

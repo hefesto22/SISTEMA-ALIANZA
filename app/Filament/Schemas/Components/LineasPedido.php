@@ -245,7 +245,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             ->paraBodega($bodega)
             ->with(['condiciones.producto.presentaciones.unidadMedida', 'productoBeneficio.presentaciones.unidadMedida', ...Promocion::PARA_CALCULAR])
             ->orderBy('id')
-            ->get();
+            ->get()
+            // Las líneas del plan con 0 autorizadas este mes no se ofrecen.
+            ->reject(fn (Promocion $promocion): bool => $promocion->sinAutorizadas())
+            ->values();
 
         if ($promociones->isEmpty()) {
             return ['promos' => [], 'productos' => []];

@@ -891,11 +891,9 @@
                 return Number(pr.tope) > 0 ? Math.max(0, Math.min(100, Math.round(Number(pr.quedan ?? 0) / Number(pr.tope) * 100))) : 0
             },
 
-            {{-- "Quedan 140 de 500 UN de regalo" / "Agotada: ya se regalaron las 500 UN autorizadas" / sin autorizadas. --}}
+            {{-- "Quedan 140 de 500 UN de regalo" / "Agotada: ya se regalaron las 500 UN autorizadas". --}}
             topeTexto(pr) {
                 if (pr.quedan === null || pr.quedan === undefined) return ''
-
-                if (Number(pr.tope) <= 0) return 'Este mes no tiene unidades de regalo autorizadas.'
 
                 return this.agotada(pr)
                     ? 'Agotada: ya se regalaron las ' + pr.tope + ' ' + pr.sigla + ' autorizadas.'
