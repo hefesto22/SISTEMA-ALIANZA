@@ -7,6 +7,7 @@ use App\Domain\Precios\ActualizarPrecioProducto;
 use App\Enums\EstadoPedido;
 use App\Enums\MotivoCambioPrecio;
 use App\Enums\Rol;
+use App\Filament\Pages\Auth\Login;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
 use App\Filament\Resources\Cais\Pages\ManageCais;
 use App\Filament\Resources\CambiosPrecio\Pages\ListCambiosPrecio;
@@ -316,6 +317,28 @@ test('un usuario desactivado ya no abre las hojas aunque tenga la sesión abiert
 
 test('el personal entra con su código de usuario', function (): void {
     expect(auth()->attempt(['codigo' => 'HO77', 'password' => 'password']))->toBeTrue();
+});
+
+test('el correo se guarda en minúsculas y al entrar el correo y el código valen como sea que se escriban', function (): void {
+    $this->encargado->update(['email' => ' Encargado@Alianza.HN ']);
+
+    expect($this->encargado->fresh()?->email)->toBe('encargado@alianza.hn');
+
+    Livewire::test(Login::class)
+        ->fillForm(['email' => 'ENCARGADO@alianza.hn', 'password' => 'password'])
+        ->call('authenticate')
+        ->assertHasNoFormErrors();
+
+    expect(auth()->id())->toBe($this->encargado->id);
+
+    auth()->logout();
+
+    Livewire::test(Login::class)
+        ->fillForm(['email' => 'ho77', 'password' => 'password'])
+        ->call('authenticate')
+        ->assertHasNoFormErrors();
+
+    expect(auth()->id())->toBe($this->vendedor->id);
 });
 
 test('precio fijo: las compras no lo mueven; al abrir se ve lo que deja y con "Con %" vuelve a salir del costo', function (): void {

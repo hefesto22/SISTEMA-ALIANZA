@@ -13,6 +13,8 @@ use SensitiveParameter;
 /**
  * Login que acepta el correo O el código de usuario (HO01, HO24…),
  * para que los vendedores entren desde el celular sin escribir un correo.
+ * El correo se busca en minúsculas (así se guarda) y el código en
+ * mayúsculas: da igual cómo lo escriba el teclado del celular.
  */
 class Login extends BaseLogin
 {
@@ -38,7 +40,7 @@ class Login extends BaseLogin
         $campo = str_contains($usuario, '@') ? 'email' : 'codigo';
 
         return [
-            $campo     => $campo === 'codigo' ? mb_strtoupper($usuario) : $usuario,
+            $campo     => $campo === 'codigo' ? mb_strtoupper($usuario) : mb_strtolower($usuario),
             'password' => $data['password'],
         ];
     }

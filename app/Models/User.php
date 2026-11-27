@@ -125,10 +125,17 @@ class User extends Authenticatable implements FilamentUser
 
     /**
      * Nunca se queda el sistema sin un super admin activo, y al desactivar a
-     * alguien se le cierra el "Recordarme" (la cookie deja de servir).
+     * alguien se le cierra el "Recordarme" (la cookie deja de servir). El
+     * correo se guarda en minúsculas (al entrar se busca así).
      */
     protected static function booted(): void
     {
+        static::saving(function (User $user): void {
+            if ($user->isDirty('email')) {
+                $user->email = mb_strtolower(trim($user->email));
+            }
+        });
+
         static::updating(function (User $user): void {
             if (! $user->isDirty('is_active') || $user->is_active) {
                 return;

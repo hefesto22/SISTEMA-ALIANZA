@@ -33,12 +33,13 @@ class AdminPanelProvider extends PanelProvider
      * Los campos de texto se ven en mayúsculas mientras se escribe (menos
      * correo, contraseña y la pantalla de entrada; los ejemplos en gris
      * quedan como se escribieron). Lo que se guarda lo pasa a mayúsculas el
-     * modelo.
+     * modelo. La regla de la pantalla de entrada repite los :not() para
+     * pesar más que la de mayúsculas (si no, el correo se veía en mayúsculas).
      */
     private const ESTILO_MAYUSCULAS = '<style>'
         .'.fi-fo-text-input input:not([type=email]):not([type=password]):not([type=url]),'
         .'.fi-fo-textarea textarea{text-transform:uppercase}'
-        .'.fi-simple-layout .fi-fo-text-input input,'
+        .'.fi-simple-layout .fi-fo-text-input input:not([type=email]):not([type=password]):not([type=url]),'
         .'.fi-fo-text-input input::placeholder,.fi-fo-textarea textarea::placeholder{text-transform:none}'
         .'</style>';
 
