@@ -13,15 +13,15 @@ use App\Models\PromocionCondicion;
  * Cómo va un plan del proveedor, línea por línea: cuánto regalo autorizó,
  * cuánto ya se entregó (pedidos impresos), cuánto está comprometido
  * (pedidos sin imprimir) y cuánto queda; y lo mismo en lempiras, al costo de
- * hoy del regalo (lo que el proveedor le reconoce a la distribuidora). Como
- * cada producto regala del mismo, es el costo promedio de los de la línea.
+ * hoy del regalo (lo que el proveedor le reconoce a la distribuidora). Si
+ * cada producto regala del mismo, el costo promedio de los de la línea.
  * También compara el % que da la mecánica con el autorizado en la hoja.
  */
 final class AvancePlan
 {
     /**
      * @return array{
-     *     lineas: list<array{id: int, codigo: string, mecanica: string, productos: list<string>, regalo: string, sigla: string, activa: bool, tope: int, entregadas: int, comprometidas: int, quedan: int, usado: float, costo: float, autorizado: float, invertido: float, porcentaje: float|null, porcentaje_autorizado: float|null, excede: bool}>,
+     *     lineas: list<array{id: int, codigo: string, mecanica: string, productos: list<string>, mezclan: bool, regalo: string, sigla: string, activa: bool, tope: int, entregadas: int, comprometidas: int, quedan: int, usado: float, costo: float, autorizado: float, invertido: float, porcentaje: float|null, porcentaje_autorizado: float|null, excede: bool}>,
      *     totales: array{tope: int, entregadas: int, comprometidas: int, quedan: int, usado: float, autorizado: float, invertido: float, comprometido: float}
      * }
      */
@@ -59,15 +59,18 @@ final class AvancePlan
     /**
      * @param array{entregadas: int, comprometidas: int} $uso
      *
-     * @return array{id: int, codigo: string, mecanica: string, productos: list<string>, regalo: string, sigla: string, activa: bool, tope: int, entregadas: int, comprometidas: int, quedan: int, usado: float, costo: float, autorizado: float, invertido: float, porcentaje: float|null, porcentaje_autorizado: float|null, excede: bool}
+     * @return array{id: int, codigo: string, mecanica: string, productos: list<string>, mezclan: bool, regalo: string, sigla: string, activa: bool, tope: int, entregadas: int, comprometidas: int, quedan: int, usado: float, costo: float, autorizado: float, invertido: float, porcentaje: float|null, porcentaje_autorizado: float|null, excede: bool}
      */
     private static function linea(Promocion $promocion, array $uso): array
     {
         $tope = (int) $promocion->tope_unidades;
-        // Cada producto regala del mismo: al costo promedio de sus unidades.
-        $costo = GuardarPlanPromocion::costoDelRegalo($promocion->condiciones->map(fn (PromocionCondicion $c): Presentacion => $c->presentacion)) ?? 0.0;
+        $elMismo = $promocion->regala_el_mismo;
+        // Si cada producto regala del mismo, al costo promedio de sus unidades.
+        $costo = GuardarPlanPromocion::costoDelRegalo($elMismo
+            ? $promocion->condiciones->map(fn (PromocionCondicion $c): Presentacion => $c->presentacion)
+            : [$promocion->beneficioPresentacion]) ?? 0.0;
         $primera = $promocion->condiciones->first()?->presentacion;
-        $porcentaje = GuardarPlanPromocion::porcentaje((int) $promocion->compra_unidades, $promocion->cantidad_beneficio, $primera, $primera);
+        $porcentaje = GuardarPlanPromocion::porcentaje((int) $promocion->compra_unidades, $promocion->cantidad_beneficio, $primera, $elMismo ? $primera : $promocion->beneficioPresentacion);
         $autorizado = $promocion->porcentaje_autorizado;
         $productos = array_values($promocion->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->all());
 
@@ -76,7 +79,8 @@ final class AvancePlan
             'codigo'                => (string) $promocion->codigo,
             'mecanica'              => $promocion->mecanica(),
             'productos'             => $productos,
-            'regalo'                => count($productos) > 1 ? 'Del mismo producto que compra' : $promocion->productoBeneficio->descripcion,
+            'mezclan'               => $promocion->se_mezclan,
+            'regalo'                => $elMismo && count($productos) > 1 ? 'El mismo producto que compra' : $promocion->productoBeneficio->descripcion,
             'sigla'                 => $promocion->beneficioPresentacion->sigla(),
             'activa'                => $promocion->activa,
             'tope'                  => $tope,

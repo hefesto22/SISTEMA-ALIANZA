@@ -29,10 +29,13 @@ use App\Models\Promocion;
  *  - Una línea recibe a lo sumo un descuento; las promociones se aplican en el orden recibido.
  *  - Descuento = precio sin ISV × las que cubre × % (gratis = 100 %, mitad = 50 %).
  *  - En unidades (las del plan del proveedor, "24+1"): cada producto cuenta
- *    aparte, no se mezclan. Cuenta las UNIDADES de ese producto en cualquier
- *    presentación (2 CJ12 = 24 unidades; 12 de manzana + 12 de pera, no).
- *    Veces = unidades ÷ N, y el regalo es de ese mismo producto, en su
- *    unidad. Solo como bonificación (gratis).
+ *    aparte. Cuenta las UNIDADES de ese producto en cualquier presentación
+ *    (2 CJ12 = 24 unidades; 12 de manzana + 12 de pera, no). Si la línea
+ *    deja mezclar (se_mezclan), se juntan las de todos sus productos (6 de
+ *    un aroma + 6 de otro = 12). Veces = unidades ÷ N, y el regalo es el de
+ *    la promoción (24 de pera → 1 de manzana) o, si regala del mismo, de ese
+ *    producto, en su unidad. Lo que va del mismo regalo se junta. Solo como
+ *    bonificación (gratis).
  *  - Tope (lo que autorizó el proveedor): $disponibles dice cuánto le queda
  *    de regalo a cada promoción con tope, para todos sus productos juntos
  *    (se van tomando en el orden de la promoción). Si le toca más, se le da
@@ -68,9 +71,8 @@ final class MotorPromociones
 
             if ($promocion->cuentaUnidades()) {
                 if ($promocion->esBonificacion()) {
-                    foreach (self::unidadesPorProducto($promocion, $lineas) as [$base, $unidades]) {
-                        $ganadas = intdiv($unidades, max(1, (int) $promocion->compra_unidades)) * $porRegalo;
-                        self::regalar($promocion, $base, $ganadas, $disponibles, $regalos, $agotadas);
+                    foreach (self::regalosEnUnidades($promocion, $lineas) as [$presentacion, $ganadas]) {
+                        self::regalar($promocion, $presentacion, $ganadas, $disponibles, $regalos, $agotadas);
                     }
                 }
 
@@ -163,15 +165,18 @@ final class MotorPromociones
     }
 
     /**
-     * Las unidades que trae el pedido de cada producto de la promoción (en
-     * cualquier presentación), con la presentación de su condición (su
-     * unidad, que es la del regalo), en el orden de la promoción.
+     * Lo que gana el pedido en una que cuenta unidades: cada producto de la
+     * promoción aparte (sus unidades en cualquier presentación ÷ N × M), con
+     * el regalo de la promoción o, si regala del mismo, la unidad de ese
+     * producto (la de su condición). Lo que va del mismo regalo se junta, en
+     * el orden de la promoción. Si se mezclan, todas sus unidades juntas ÷ N
+     * × M, con el regalo de la promoción.
      *
      * @param array<LineaPromocion> $lineas
      *
      * @return list<array{0: Presentacion, 1: int}>
      */
-    private static function unidadesPorProducto(Promocion $promocion, array $lineas): array
+    private static function regalosEnUnidades(Promocion $promocion, array $lineas): array
     {
         $unidades = [];
 
@@ -179,15 +184,36 @@ final class MotorPromociones
             $unidades[$linea->productoId] = ($unidades[$linea->productoId] ?? 0) + $linea->unidades();
         }
 
-        $porProducto = [];
+        $contados = [];
 
-        foreach ($promocion->condiciones as $condicion) {
-            if (! isset($porProducto[$condicion->producto_id])) {
-                $porProducto[$condicion->producto_id] = [$condicion->presentacion, $unidades[$condicion->producto_id] ?? 0];
+        if ($promocion->se_mezclan) {
+            $juntas = 0;
+
+            foreach ($promocion->condiciones as $condicion) {
+                if (! isset($contados[$condicion->producto_id])) {
+                    $contados[$condicion->producto_id] = true;
+                    $juntas += $unidades[$condicion->producto_id] ?? 0;
+                }
             }
+
+            return [[$promocion->beneficioPresentacion, intdiv($juntas, max(1, (int) $promocion->compra_unidades)) * $promocion->cantidad_beneficio]];
         }
 
-        return array_values($porProducto);
+        $porRegalo = [];
+
+        foreach ($promocion->condiciones as $condicion) {
+            if (isset($contados[$condicion->producto_id])) {
+                continue;
+            }
+
+            $contados[$condicion->producto_id] = true;
+            $regalo = $promocion->regala_el_mismo ? $condicion->presentacion : $promocion->beneficioPresentacion;
+            $ganadas = intdiv($unidades[$condicion->producto_id] ?? 0, max(1, (int) $promocion->compra_unidades)) * $promocion->cantidad_beneficio;
+
+            $porRegalo[$regalo->id] = [$regalo, ($porRegalo[$regalo->id][1] ?? 0) + $ganadas];
+        }
+
+        return array_values($porRegalo);
     }
 
     /**

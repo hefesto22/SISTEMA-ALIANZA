@@ -18,10 +18,11 @@ use Illuminate\Support\Str;
 /**
  * Arma o cambia un plan del proveedor con sus líneas, como viene en la hoja.
  * Cada línea es una promoción del plan (gratis, contando unidades, con
- * tope): "24+1 de NÉCTAR MANZANA o PERA, 1,000 unidades". Cada producto
- * cuenta aparte (no se mezclan) y se regala de ese mismo, en su unidad: no
- * se escoge el regalo. Las fechas y las bodegas del plan pasan a sus
- * promociones.
+ * tope): "24+1 de NÉCTAR PERA o PIÑA, se regala NÉCTAR MANZANA, 1,000
+ * unidades". Cada producto cuenta aparte (salvo que la línea deje mezclar:
+ * "mezclar") y se regala, en su unidad, el producto de la hoja (regalo_id)
+ * o, sin él, de ese mismo producto (si se mezclan, el primero de la línea).
+ * Las fechas y las bodegas del plan pasan a sus promociones.
  *
  * Al cambiarlo: las líneas que siguen se actualizan (lo ya regalado sigue
  * contando para su tope), las nuevas se crean y las que se quitan se
@@ -41,7 +42,7 @@ final class GuardarPlanPromocion
      *     archivo?: string|null,
      *     notas?: string|null,
      *     bodegas?: list<int>,
-     *     lineas: list<array{id?: int|null, productos: list<int>, compra: int, regala: int, tope: int, porcentaje?: float|null, activa?: bool}>
+     *     lineas: list<array{id?: int|null, productos: list<int>, compra: int, regala: int, mezclar?: bool, regalo_id?: int|null, tope: int, porcentaje?: float|null, activa?: bool}>
      * } $datos
      */
     public function ejecutar(?PlanPromocion $plan, array $datos, User $usuario): PlanPromocion
@@ -102,10 +103,11 @@ final class GuardarPlanPromocion
 
     /**
      * Una línea de la hoja: la promoción gratis que cuenta unidades, con su
-     * tope. El regalo que queda guardado es el primer producto, en su unidad
-     * (para el nombre y la sigla); el motor regala del que se compró.
+     * tope y su regalo, en su unidad. Sin regalo_id regala del mismo que se
+     * compró: queda guardado el primero (para el nombre y la sigla); si se
+     * mezclan, regala el primero.
      *
-     * @param array{id?: int|null, productos: list<int>, compra: int, regala: int, tope: int, porcentaje?: float|null, activa?: bool} $linea
+     * @param array{id?: int|null, productos: list<int>, compra: int, regala: int, mezclar?: bool, regalo_id?: int|null, tope: int, porcentaje?: float|null, activa?: bool} $linea
      */
     private function guardarLinea(PlanPromocion $plan, ?Promocion $promocion, array $linea, int $numero, User $usuario): Promocion
     {
@@ -124,12 +126,19 @@ final class GuardarPlanPromocion
         }
 
         $compra = $productos->sortBy(fn (Producto $p): int => (int) array_search($p->id, $linea['productos'], true))->values();
-        $regalo = $compra->first();
+        $mezclar = (bool) ($linea['mezclar'] ?? false);
+        $sinRegalo = ($linea['regalo_id'] ?? null) === null;
+        $regalo = $sinRegalo ? $compra->first() : Producto::query()->with('presentaciones')->find($linea['regalo_id']);
         $baseRegalo = $regalo?->presentaciones->first(fn (Presentacion $p): bool => $p->es_base);
 
-        if (! $regalo instanceof Producto || ! $baseRegalo instanceof Presentacion) {
-            throw new ReglaNegocioException("Línea {$numero}: {$regalo?->descripcion} no tiene unidad base.");
+        if (! $regalo instanceof Producto) {
+            throw new ReglaNegocioException("Línea {$numero}: el producto que se regala no existe.");
         }
+
+        if (! $baseRegalo instanceof Presentacion) {
+            throw new ReglaNegocioException("Línea {$numero}: {$regalo->descripcion} no tiene unidad base para regalarlo.");
+        }
+
         $nombre = "{$linea['compra']}+{$linea['regala']} {$compra->first()?->descripcion}".($compra->count() > 1 ? ' Y '.($compra->count() - 1).' MÁS' : '');
 
         $promocion ??= new Promocion(['created_by' => $usuario->id, 'activa' => true]);
@@ -142,6 +151,8 @@ final class GuardarPlanPromocion
             'cantidad_beneficio'        => $linea['regala'],
             'descuento_porcentaje'      => 100,
             'compra_unidades'           => $linea['compra'],
+            'se_mezclan'                => $mezclar,
+            'regala_el_mismo'           => $sinRegalo && ! $mezclar,
             'tope_unidades'             => $linea['tope'],
             'porcentaje_autorizado'     => $linea['porcentaje'] ?? null,
             'vigente_desde'             => $plan->vigente_desde->toDateString(),
@@ -175,9 +186,9 @@ final class GuardarPlanPromocion
     }
 
     /**
-     * Lo que vale al costo la unidad del regalo de una línea: como cada
-     * producto regala del mismo, el promedio de sus unidades (las que tienen
-     * costo). Null si ninguna tiene.
+     * Lo que vale al costo la unidad del regalo de una línea: la del regalo
+     * o, si cada producto regala del mismo, el promedio de sus unidades (las
+     * que tienen costo). Null si ninguna tiene.
      *
      * @param iterable<Presentacion|null> $bases
      */

@@ -130,34 +130,64 @@
         .pv-promos-titulo { font-size: 0.9rem; font-weight: 700; }
         .pv-promos-cuantas { min-width: 1.4rem; padding: 0 0.4rem; border-radius: 999px; text-align: center; font-size: 0.75rem; font-weight: 800; line-height: 1.4rem; color: #fff; background: var(--success-600); }
         .pv-promos-ver { margin-inline-start: auto; font-size: 0.8rem; font-weight: 600; }
-        .pv-promos-lista { display: grid; gap: 0.6rem; padding: 0 0.75rem 0.75rem; max-height: min(26rem, 60vh); overflow-y: auto; overscroll-behavior: contain; }
-        .pv-promo { display: grid; gap: 0.35rem; padding: 0.75rem 0.85rem; border-radius: 0.625rem; background: #fff; outline: 1px solid rgb(3 7 18 / 0.08); }
-        .dark .pv-promo { background: var(--gray-900); outline-color: rgb(255 255 255 / 0.1); }
-        .pv-promo-arriba { display: flex; align-items: flex-start; gap: 0.6rem; }
-        .pv-promo-mecanica { flex-shrink: 0; padding: 0.1rem 0.55rem; border-radius: 0.5rem; font-size: 1.1rem; font-weight: 800; line-height: 1.35; font-variant-numeric: tabular-nums; color: #fff; background: var(--success-600); }
-        .pv-promo-titulo { min-width: 0; padding-top: 0.15rem; font-size: 0.88rem; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
-        .pv-promo-lista { display: grid; gap: 0.15rem; margin: 0; padding-inline-start: 1.1rem; list-style: disc; font-size: 0.82rem; line-height: 1.35; }
-        .pv-promo-lleva { display: flex; align-items: flex-start; gap: 0.4rem; font-size: 0.85rem; font-weight: 600; line-height: 1.35; color: var(--success-700); }
+        /* Hoja de promociones: pantalla completa en el teléfono; en la computadora, al centro. */
+        .pv-hoja-fondo { position: fixed; inset: 0; z-index: 50; margin: 0; display: flex; align-items: stretch; justify-content: center; background: rgb(3 7 18 / 0.55); }
+        .pv-hoja { display: flex; flex-direction: column; width: 100%; max-width: 40rem; height: 100%; background: var(--gray-50); }
+        .dark .pv-hoja { background: var(--gray-900); }
+        .pv-hoja-arriba { display: grid; gap: 0.6rem; padding: calc(0.85rem + env(safe-area-inset-top)) 1rem 0.75rem; border-bottom: 1px solid rgb(3 7 18 / 0.08); background: #fff; }
+        .dark .pv-hoja-arriba { border-bottom-color: rgb(255 255 255 / 0.08); background: var(--gray-800); }
+        .pv-hoja-titulo { display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; font-weight: 800; color: var(--success-700); }
+        .dark .pv-hoja-titulo { color: var(--success-400); }
+        .pv-hoja-titulo > svg { width: 1.35rem; height: 1.35rem; }
+        .pv-hoja-cerrar { margin-inline-start: auto; padding: 0.4rem 0.8rem; border-radius: 0.5rem; font-size: 0.85rem; font-weight: 700; color: var(--gray-700); outline: 1px solid rgb(3 7 18 / 0.15); }
+        .dark .pv-hoja-cerrar { color: var(--gray-200); outline-color: rgb(255 255 255 / 0.2); }
+        .pv-hoja-nota { font-size: 0.78rem; line-height: 1.35; color: var(--gray-500); }
+        .dark .pv-hoja-nota { color: var(--gray-400); }
+        .pv-hoja-buscar { width: 100%; padding: 0.55rem 0.75rem; border: 0; border-radius: 0.5rem; font-size: 0.9rem; background: var(--gray-50); outline: 1px solid rgb(3 7 18 / 0.12); }
+        .dark .pv-hoja-buscar { background: var(--gray-900); outline-color: rgb(255 255 255 / 0.15); }
+        .pv-hoja-lista { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 0.9rem; padding: 0.9rem 0.75rem calc(1.25rem + env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+        .pv-hoja-lista > * { flex-shrink: 0; }
+        @media (min-width: 640px) {
+            .pv-hoja-fondo { align-items: center; padding: 1.5rem; }
+            .pv-hoja { height: auto; max-height: 90vh; border-radius: 1rem; overflow: hidden; }
+            .pv-hoja-arriba { padding-top: 1rem; }
+        }
+
+        /* Una línea de la promoción, como en la hoja del proveedor: mecánica, regalo, productos y lo que queda. */
+        .pv-promo { display: grid; border-radius: 0.75rem; overflow: hidden; background: #fff; outline: 1px solid rgb(3 7 18 / 0.1); }
+        .dark .pv-promo { background: var(--gray-800); outline-color: rgb(255 255 255 / 0.1); }
+        .pv-promo-cabeza { display: grid; gap: 0.4rem; padding: 0.75rem 0.85rem; background: color-mix(in oklab, var(--success-500) 9%, transparent); border-bottom: 1px solid color-mix(in oklab, var(--success-500) 22%, transparent); }
+        .pv-promo-arriba { display: flex; align-items: center; gap: 0.65rem; }
+        .pv-promo-mecanica { flex-shrink: 0; padding: 0.15rem 0.6rem; border-radius: 0.5rem; font-size: 1.25rem; font-weight: 800; line-height: 1.3; font-variant-numeric: tabular-nums; color: #fff; background: var(--success-600); }
+        .pv-promo-titulo { min-width: 0; font-size: 0.86rem; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+        .pv-promo-lleva { display: flex; align-items: flex-start; gap: 0.4rem; font-size: 0.88rem; font-weight: 700; line-height: 1.35; color: var(--success-700); }
         .dark .pv-promo-lleva { color: var(--success-400); }
-        .pv-promo-lleva svg { flex-shrink: 0; width: 1.05rem; height: 1.05rem; margin-top: 0.05rem; }
-        .pv-promo-opciones { display: grid; border-radius: 0.5rem; outline: 1px solid rgb(3 7 18 / 0.1); overflow: hidden; }
-        .dark .pv-promo-opciones { outline-color: rgb(255 255 255 / 0.12); }
-        .pv-promo-opcion { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; font-size: 0.8rem; line-height: 1.3; }
-        .pv-promo-opcion + .pv-promo-opcion { border-top: 1px solid rgb(3 7 18 / 0.1); }
-        .dark .pv-promo-opcion + .pv-promo-opcion { border-top-color: rgb(255 255 255 / 0.12); }
+        .pv-promo-lleva svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; margin-top: 0.05rem; }
+        .pv-promo-cuerpo { display: grid; }
+        .pv-promo-etiqueta { padding: 0.55rem 0.85rem 0.1rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--gray-500); }
+        .dark .pv-promo-etiqueta { color: var(--gray-400); }
+        .pv-promo-lista { display: grid; gap: 0.15rem; margin: 0; padding: 0.25rem 0.85rem 0.6rem 2rem; list-style: disc; font-size: 0.84rem; line-height: 1.35; }
+        .pv-promo-opcion { display: flex; align-items: center; gap: 0.75rem; min-height: 3.1rem; padding: 0.5rem 0.85rem; font-size: 0.84rem; line-height: 1.3; }
+        .pv-promo-opcion + .pv-promo-opcion { border-top: 1px solid rgb(3 7 18 / 0.07); }
+        .dark .pv-promo-opcion + .pv-promo-opcion { border-top-color: rgb(255 255 255 / 0.07); }
         .pv-promo-opcion > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-        .pv-promo-mas { flex-shrink: 0; display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.45rem 0.7rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 700; white-space: nowrap; color: #fff; background: var(--success-600); }
+        .pv-promo-mas { flex-shrink: 0; display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.82rem; font-weight: 700; white-space: nowrap; color: #fff; background: var(--success-600); }
         .pv-promo-mas:hover { background: var(--success-700); }
-        .pv-promo-mas svg { width: 0.9rem; height: 0.9rem; }
-        .pv-promo-nota { font-size: 0.75rem; font-style: italic; color: var(--gray-500); }
-        .pv-promo-tope { justify-self: start; padding: 0.1rem 0.5rem; border-radius: 0.375rem; font-size: 0.75rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--success-700); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
-        .dark .pv-promo-tope { color: var(--success-400); }
-        .pv-promo-tope.pv-promo-agotada { color: var(--danger-700); background: color-mix(in oklab, var(--danger-500) 12%, transparent); }
+        .pv-promo-mas svg { width: 0.95rem; height: 0.95rem; }
+        .pv-promo-pie { display: grid; gap: 0.35rem; padding: 0.6rem 0.85rem 0.75rem; border-top: 1px solid rgb(3 7 18 / 0.07); }
+        .dark .pv-promo-pie { border-top-color: rgb(255 255 255 / 0.07); }
+        .pv-promo-barra { height: 0.4rem; border-radius: 999px; overflow: hidden; background: color-mix(in oklab, var(--gray-500) 22%, transparent); }
+        .pv-promo-barra > span { display: block; height: 100%; border-radius: 999px; background: var(--success-600); }
+        .pv-promo-tope { font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--gray-600); }
+        .dark .pv-promo-tope { color: var(--gray-300); }
+        .pv-promo-tope.pv-promo-agotada { color: var(--danger-700); }
         .dark .pv-promo-tope.pv-promo-agotada { color: var(--danger-400); }
+        .pv-promo-nota { font-size: 0.75rem; font-style: italic; color: var(--gray-500); }
         .dark .pv-promo-nota { color: var(--gray-400); }
-        .pv-promo-agregar { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; margin-top: 0.2rem; padding: 0.55rem 0.9rem; border-radius: 0.5rem; font-size: 0.85rem; font-weight: 700; color: #fff; background: var(--success-600); }
+        .pv-promo-agregar { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.6rem 0.9rem; border-radius: 0.5rem; font-size: 0.88rem; font-weight: 700; color: #fff; background: var(--success-600); }
         .pv-promo-agregar:hover { background: var(--success-700); }
         .pv-promo-agregar svg { width: 1rem; height: 1rem; }
+        .pv-promo-cuerpo > .pv-promo-agregar { margin: 0.1rem 0.85rem 0.75rem; }
         .pv-promo-ok { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.82rem; font-weight: 600; color: var(--success-700); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
         .dark .pv-promo-ok { color: var(--success-400); }
         .pv-promo-ok svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; }
@@ -166,7 +196,7 @@
         .dark .pv-linea-promo { color: var(--success-400); }
 
         /* ¿Agrega la promoción? En el teléfono sale abajo; en la computadora, al centro. */
-        .pv-pregunta-fondo { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 0; background: rgb(3 7 18 / 0.55); }
+        .pv-pregunta-fondo { position: fixed; inset: 0; z-index: 50; margin: 0; display: flex; align-items: flex-end; justify-content: center; padding: 0; background: rgb(3 7 18 / 0.55); }
         .pv-pregunta { display: grid; gap: 0.6rem; width: 100%; max-width: 32rem; max-height: 85vh; overflow-y: auto; padding: 1.1rem 1rem calc(1rem + env(safe-area-inset-bottom)); border-radius: 1rem 1rem 0 0; background: var(--gray-50); box-shadow: 0 -10px 30px rgb(0 0 0 / 0.2); }
         .dark .pv-pregunta { background: var(--gray-800); }
         .pv-pregunta-titulo { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; font-weight: 800; color: var(--success-700); }
@@ -175,7 +205,7 @@
         .pv-pregunta-producto { font-size: 0.9rem; font-weight: 600; }
         .pv-pregunta-dile { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--gray-500); }
         .dark .pv-pregunta-dile { color: var(--gray-400); }
-        .pv-pregunta .pv-promo-agregar { width: 100%; padding: 0.7rem 1rem; font-size: 0.95rem; }
+        .pv-pregunta .pv-promo-agregar { padding: 0.7rem 1rem; font-size: 0.95rem; }
         .pv-pregunta-no { width: 100%; padding: 0.7rem 1rem; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 600; color: var(--gray-700); outline: 1px solid rgb(3 7 18 / 0.15); }
         .dark .pv-pregunta-no { color: var(--gray-200); outline-color: rgb(255 255 255 / 0.18); }
         @media (min-width: 640px) {
@@ -298,6 +328,7 @@
             ultimo: null,
             promosHoy: @js($config['hoy']),
             verPromos: false,
+            buscarPromo: '',
             pregunta: null,
             avisoPromo: '',
             esperaAvisoPromo: null,
@@ -802,7 +833,25 @@
 
             {{-- Promociones en las que entra el producto: lo pide la promoción o es el regalo (las agotadas no). --}}
             promosDe(id) {
-                return this.promosHoy.filter((pr) => ! this.agotada(pr) && (pr.compra.includes(Number(id)) || Number(pr.regalo) === Number(id)))
+                return this.promosHoy.filter((pr) => ! this.agotada(pr) && (pr.compra.includes(Number(id)) || ((pr.opciones ?? []).length === 0 && Number(pr.regalo) === Number(id))))
+            },
+
+            abrirPromos() {
+                this.buscarPromo = ''
+                this.avisoPromo = ''
+                this.verPromos = true
+            },
+
+            {{-- Las de la hoja que tienen el producto buscado (sin importar tildes ni mayúsculas). --}}
+            promosFiltradas() {
+                const quitar = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+                const busca = quitar(this.buscarPromo.trim())
+
+                if (busca === '') {
+                    return this.promosHoy
+                }
+
+                return this.promosHoy.filter((pr) => quitar([pr.nombre, pr.partes?.lleva, ...(pr.partes?.productos ?? []), ...(pr.opciones ?? []).map((o) => o.nombre)].join(' ')).includes(busca))
             },
 
             {{-- En las del plan (no se mezclan) la promoción con lo que agrega ese producto; las demás, igual. --}}
@@ -817,9 +866,16 @@
                 return pr.quedan !== null && pr.quedan !== undefined && Number(pr.quedan) <= 0
             },
 
-            {{-- "Quedan 140 de 500 UN de regalo" / "Agotada: ya se regalaron las 500 UN autorizadas". --}}
+            {{-- Lo que queda del tope, de 0 a 100 (la barra de la tarjeta). --}}
+            quedaPct(pr) {
+                return Number(pr.tope) > 0 ? Math.max(0, Math.min(100, Math.round(Number(pr.quedan ?? 0) / Number(pr.tope) * 100))) : 0
+            },
+
+            {{-- "Quedan 140 de 500 UN de regalo" / "Agotada: ya se regalaron las 500 UN autorizadas" / sin autorizadas. --}}
             topeTexto(pr) {
                 if (pr.quedan === null || pr.quedan === undefined) return ''
+
+                if (Number(pr.tope) <= 0) return 'Este mes no tiene unidades de regalo autorizadas.'
 
                 return this.agotada(pr)
                     ? 'Agotada: ya se regalaron las ' + pr.tope + ' ' + pr.sigla + ' autorizadas.'
@@ -999,25 +1055,42 @@
             </div>
         </div>
 
-        {{-- Promociones de hoy de la bodega: se agregan de un toque --}}
+        {{-- Promociones de hoy de la bodega: en una hoja aparte (pantalla completa en el teléfono), como la del proveedor; se agregan de un toque --}}
         @if ($config['hoy'] !== [] || $config['veTodo'])
             <div class="pv-promos" x-show="promosHoy.length > 0" @if ($config['hoy'] === []) style="display: none" @endif>
-                <button type="button" class="pv-promos-boton" x-on:click="verPromos = ! verPromos" x-bind:aria-expanded="verPromos">
+                <button type="button" class="pv-promos-boton" x-on:click="abrirPromos()" aria-haspopup="dialog">
                     {{ svg('heroicon-m-gift') }}
                     <span class="pv-promos-titulo">Promociones de hoy</span>
                     <span class="pv-promos-cuantas" x-text="promosHoy.length">{{ count($config['hoy']) }}</span>
-                    <span class="pv-promos-ver" x-text="verPromos ? 'Cerrar' : 'Ver y agregar'">Ver y agregar</span>
+                    <span class="pv-promos-ver">Ver y agregar</span>
                 </button>
+            </div>
 
-                <div class="pv-promos-lista" x-show="verPromos" x-cloak>
-                    <div class="pv-aviso-sin" x-show="avisoPromo !== '' && ! pregunta" x-cloak>
-                        {{ svg('heroicon-m-no-symbol') }}
-                        <span x-text="avisoPromo"></span>
+            <div class="pv-hoja-fondo" x-show="verPromos" x-cloak x-transition.opacity x-on:click.self="verPromos = false" x-on:keydown.escape.window="verPromos = false">
+                <div class="pv-hoja" role="dialog" aria-modal="true" aria-labelledby="pv-hoja-titulo">
+                    <div class="pv-hoja-arriba">
+                        <div class="pv-hoja-titulo" id="pv-hoja-titulo">
+                            {{ svg('heroicon-m-gift') }}
+                            <span>Promociones de hoy</span>
+                            <span class="pv-promos-cuantas" x-text="promosHoy.length"></span>
+                            <button type="button" class="pv-hoja-cerrar" x-on:click="verPromos = false">Cerrar</button>
+                        </div>
+                        <div class="pv-hoja-nota">Toque el botón verde del producto que lleva el cliente: se agrega lo que pide la promoción y el regalo se pone solo.</div>
+                        <input type="search" class="pv-hoja-buscar" x-model="buscarPromo" x-show="promosHoy.length > 3" placeholder="Buscar producto en las promociones…" autocomplete="off" enterkeyhint="search">
                     </div>
 
-                    <template x-for="pr in promosHoy" x-bind:key="pr.id">
-                        @include('filament.pedidos.promo-tarjeta', ['enPregunta' => false])
-                    </template>
+                    <div class="pv-hoja-lista">
+                        <div class="pv-aviso-sin" x-show="avisoPromo !== '' && ! pregunta" x-cloak>
+                            {{ svg('heroicon-m-no-symbol') }}
+                            <span x-text="avisoPromo"></span>
+                        </div>
+
+                        <template x-for="pr in promosFiltradas()" x-bind:key="pr.id">
+                            @include('filament.pedidos.promo-tarjeta', ['enPregunta' => false])
+                        </template>
+
+                        <div class="pv-aviso" x-show="promosFiltradas().length === 0">Ninguna promoción tiene ese producto.</div>
+                    </div>
                 </div>
             </div>
         @endif

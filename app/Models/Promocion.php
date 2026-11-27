@@ -41,15 +41,19 @@ use Illuminate\Support\Carbon;
  *
  * Plan del proveedor (PlanPromocion): cada línea autorizada del plan es una
  * promoción con plan_id, que se arma y se cambia desde el plan. Cuenta
- * UNIDADES (compra_unidades) de cada producto aparte, no se mezclan: "24+1"
- * se cumple con 24 unidades de un mismo producto, en cualquier
- * presentación, y se regala de ese mismo producto. Con tope_unidades (de
- * toda la línea), no se regala más de lo autorizado: lo que queda lo dice
+ * UNIDADES (compra_unidades) de cada producto aparte: "24+1" se cumple con
+ * 24 unidades de un mismo producto, en cualquier presentación (con
+ * se_mezclan, de cualquiera de sus productos juntos), y se regala el
+ * producto de la hoja (producto_beneficio_id) o, con regala_el_mismo, de
+ * ese mismo producto. Con tope_unidades (de toda
+ * la línea), no se regala más de lo autorizado: lo que queda lo dice
  * App\Domain\Promociones\UsoDePromociones.
  *
  * @property int $id
  * @property int|null $plan_id
- * @property int|null $compra_unidades N de "N+M" contando unidades de los productos de la condición (null = presentación exacta)
+ * @property int|null $compra_unidades N de "N+M" contando unidades de cada producto de la condición (null = presentación exacta)
+ * @property bool $se_mezclan en las que cuentan unidades: sus productos se juntan para completar N
+ * @property bool $regala_el_mismo en las que cuentan unidades: cada producto regala de sí mismo (si no, el producto del beneficio)
  * @property int|null $tope_unidades unidades de regalo autorizadas (null = sin tope)
  * @property float|null $porcentaje_autorizado
  * @property string|null $codigo
@@ -90,6 +94,8 @@ class Promocion extends Model
         'nombre',
         'descripcion',
         'compra_unidades',
+        'se_mezclan',
+        'regala_el_mismo',
         'tope_unidades',
         'porcentaje_autorizado',
         'producto_beneficio_id',
@@ -121,6 +127,8 @@ class Promocion extends Model
             'descuento_porcentaje'      => 'float',
             'plan_id'                   => 'integer',
             'compra_unidades'           => 'integer',
+            'se_mezclan'                => 'boolean',
+            'regala_el_mismo'           => 'boolean',
             'tope_unidades'             => 'integer',
             'porcentaje_autorizado'     => 'float',
             'activa'                    => 'boolean',
@@ -358,7 +366,8 @@ class Promocion extends Model
     }
 
     /**
-     * "24+1": cuenta unidades de cada uno de sus productos (no se mezclan).
+     * "24+1": cuenta unidades de cada uno de sus productos (o de todos
+     * juntos, si se mezclan).
      */
     public function cuentaUnidades(): bool
     {
@@ -429,31 +438,36 @@ class Promocion extends Model
     }
 
     /**
-     * "Por cada 24 unidades de NECTAR MANZANA lleva 1 unidad más gratis"; con
+     * "Por cada 48 unidades de UNOX lleva 2 unidades más gratis"; "Por cada
+     * 12 unidades de RAPTOR 600 lleva 1 unidad de RAPTOR 300 gratis"; con
      * varios productos: "Por cada 24 unidades de un mismo producto (NECTAR
-     * MANZANA o NECTAR PERA) lleva 1 unidad de ese mismo producto gratis; no
-     * se mezclan".
+     * PERA o NECTAR PIÑA) lleva 1 unidad de NECTAR MANZANA gratis; no se
+     * mezclan" o, si se mezclan, "Por cada 12 unidades de TERSO DELICADA o
+     * TERSO INTENSAS (se pueden mezclar) lleva 1 unidad de TERSO DELICADA
+     * gratis".
      */
     private function resumenEnUnidades(): string
     {
-        $productos = $this->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->values();
-        $cuantas = $this->unidadesTexto();
-        $beneficio = $this->beneficioPresentacion->enPalabras($this->cantidad_beneficio);
+        $productos = $this->productosQueCompra();
 
-        if ($productos->count() <= 1) {
-            return "Por cada {$cuantas} de {$productos->first()} lleva {$beneficio} más {$this->beneficioTexto()}";
+        if (count($productos) <= 1) {
+            return "Por cada {$this->unidadesTexto()} de ".($productos[0] ?? '')." lleva {$this->llevaEnUnidades()}";
         }
 
-        $cuales = $productos->slice(0, -1)->implode(', ').' o '.$productos->last();
+        $cuales = implode(', ', array_slice($productos, 0, -1)).' o '.$productos[count($productos) - 1];
 
-        return "Por cada {$cuantas} de un mismo producto ({$cuales}) lleva {$beneficio} de ese mismo producto {$this->beneficioTexto()}; no se mezclan";
+        if ($this->se_mezclan) {
+            return "Por cada {$this->unidadesTexto()} de {$cuales} (se pueden mezclar) lleva {$this->llevaEnUnidades()}";
+        }
+
+        return "Por cada {$this->unidadesTexto()} de un mismo producto ({$cuales}) lleva {$this->llevaEnUnidades()}; no se mezclan";
     }
 
     /**
      * La promoción en partes, para la tarjeta de la preventa en el teléfono:
      * la mecánica ("20+1"; vacía si no cuenta unidades), el título (las del
-     * plan no llevan: la mecánica y los productos lo dicen todo), qué compra,
-     * de qué productos y qué lleva.
+     * plan no llevan: la mecánica, el regalo y los productos lo dicen todo),
+     * qué compra, de qué productos y qué lleva.
      *
      * @return array{mecanica: string, titulo: string, compra: string, productos: list<string>, lleva: string}
      */
@@ -462,15 +476,19 @@ class Promocion extends Model
         $beneficio = $this->beneficioPresentacion->enPalabras($this->cantidad_beneficio);
 
         if ($this->cuentaUnidades()) {
-            $productos = array_values($this->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->all());
-            $varios = count($productos) > 1;
+            $productos = $this->productosQueCompra();
+            $compra = match (true) {
+                count($productos) <= 1 => "Por cada {$this->unidadesTexto()}",
+                $this->se_mezclan      => "Por cada {$this->unidadesTexto()}, juntando cualquiera de estos (se pueden mezclar)",
+                default                => "Por cada {$this->unidadesTexto()} de un mismo producto (no se mezclan)",
+            };
 
             return [
                 'mecanica'  => $this->mecanica(),
                 'titulo'    => '',
-                'compra'    => $varios ? "Por cada {$this->unidadesTexto()} de un mismo producto (no se mezclan)" : "Por cada {$this->unidadesTexto()}",
+                'compra'    => $compra,
                 'productos' => $productos,
-                'lleva'     => $varios ? "Lleva {$beneficio} de ese mismo producto {$this->beneficioTexto()}" : "Lleva {$beneficio} más {$this->beneficioTexto()}",
+                'lleva'     => 'Lleva '.$this->llevaEnUnidades(),
             ];
         }
 
@@ -485,6 +503,33 @@ class Promocion extends Model
                 ? "Lleva {$beneficio} más {$this->beneficioTexto()}"
                 : "Lleva {$beneficio} de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}",
         ];
+    }
+
+    /**
+     * Lo que lleva en las que cuentan unidades: "1 unidad de ese mismo
+     * producto gratis", "2 unidades más gratis" (un solo producto que regala
+     * de sí mismo) o "1 unidad de NECTAR MANZANA gratis".
+     */
+    private function llevaEnUnidades(): string
+    {
+        $varios = count($this->productosQueCompra()) > 1;
+        $beneficio = $this->beneficioPresentacion->enPalabras($this->cantidad_beneficio);
+
+        return match (true) {
+            $this->regala_el_mismo && $varios                                   => "{$beneficio} de ese mismo producto {$this->beneficioTexto()}",
+            ! $varios && ($this->regala_el_mismo || $this->regaloEnCondicion()) => "{$beneficio} más {$this->beneficioTexto()}",
+            default                                                             => "{$beneficio} de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}",
+        };
+    }
+
+    /**
+     * Los productos que compra, sin repetir, en el orden de la promoción.
+     *
+     * @return list<string>
+     */
+    private function productosQueCompra(): array
+    {
+        return array_values($this->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->all());
     }
 
     /**
