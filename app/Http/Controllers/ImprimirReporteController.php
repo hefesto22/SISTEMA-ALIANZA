@@ -30,6 +30,7 @@ use Illuminate\Http\Response;
  *      /reportes/compras/imprimir?desde=2026-11-01&hasta=2026-11-14&proveedor=5&ver=productos
  *      /reportes/inventario/imprimir?bodega=2&proveedor=5&buscar=aceite&todos=1
  *      /reportes/devoluciones/imprimir?desde=2026-11-01&hasta=2026-11-30&proveedor=5&ver=perdidas
+ *      /reportes/devoluciones/acta?desde=2026-11-01&hasta=2026-11-30&bodega=2
  */
 class ImprimirReporteController extends Controller
 {
@@ -125,6 +126,29 @@ class ImprimirReporteController extends Controller
             'parte'     => 'reportes.partes.devoluciones',
             'd'         => $reporte->datos($ver),
             'embebido'  => $request->boolean('embebido'),
+        ]);
+    }
+
+    /**
+     * El acta de baja del periodo: lo que regresó dañado, para darlo de baja
+     * del inventario con las firmas (una hoja por bodega).
+     */
+    public function actaDeBaja(Request $request): Response
+    {
+        $usuario = self::usuario($request, ReporteDevoluciones::PERMISO);
+
+        $reporte = new DevolucionesDelPeriodo(
+            Periodo::de('otro', $request->string('desde')->toString(), $request->string('hasta')->toString()),
+            AlcanceReporte::bodega($usuario, $request->input('bodega')),
+            AlcanceReporte::proveedor($request->input('proveedor')),
+        );
+
+        return response()->view('reportes.acta-de-baja', [
+            'reporte'  => $reporte,
+            'actas'    => $reporte->acta(),
+            'fiscales' => DatosFiscales::actual(),
+            'usuario'  => $usuario->name,
+            'embebido' => $request->boolean('embebido'),
         ]);
     }
 

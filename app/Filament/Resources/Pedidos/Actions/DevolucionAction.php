@@ -9,6 +9,7 @@ use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\EstadoPedido;
 use App\Enums\TipoDevolucion;
 use App\Filament\Support\Acceso;
+use App\Models\Carga;
 use App\Models\Configuracion;
 use App\Models\Devolucion;
 use App\Models\Pedido;
@@ -33,6 +34,9 @@ use Filament\Support\Icons\Heroicon;
  * En un cambio se dice cómo se le entrega: se le lleva en la próxima carga
  * (queda Por entregar a su nombre) o ya se le dio con producto del pedido
  * de otro cliente (se escoge ese pedido: a ese otro se le queda debiendo).
+ *
+ * Sale en Ver pedido y, por cada factura, en Ver carga y en Liquidar
+ * (deLaCarga()): lo que el cliente regresó con el que salió en la ruta.
  */
 final class DevolucionAction
 {
@@ -46,7 +50,7 @@ final class DevolucionAction
             ->label('Devolución')
             ->icon(Heroicon::OutlinedArrowUturnLeft)
             ->color('gray')
-            ->visible(fn (Pedido $record): bool => $record->estado === EstadoPedido::Impreso && (Acceso::usuario()?->can('create', Devolucion::class) ?? false))
+            ->visible(fn (mixed $record): bool => $record instanceof Pedido && $record->estado === EstadoPedido::Impreso && (Acceso::usuario()?->can('create', Devolucion::class) ?? false))
             ->modalHeading(fn (Pedido $record): string => "Devolución · {$record->numero} · {$record->cliente->nombre}")
             ->modalDescription('Lo bueno regresa a la bodega; lo dañado no, queda marcado para el reporte de producto dañado. Las unidades no importan de qué caja salieron: se cuentan en la presentación de cada línea.')
             ->modalWidth(Width::ThreeExtraLarge)
@@ -81,8 +85,8 @@ final class DevolucionAction
                     ->visible(fn (Get $get): bool => self::esCambio($get))
                     ->live()
                     ->helperText(fn (Get $get): string => $get('entrega') === self::DE_OTRO
-                        ? 'Lo que se le dio era del pedido de otro cliente: a ese otro se le queda debiendo y se le lleva en la próxima carga.'
-                        : 'Queda Por entregar a su nombre: se escoge al armar la próxima carga y sale de la bodega cuando se sube al camión.'),
+                        ? 'Lo que se le dio era del pedido de otro cliente: a ese otro se le queda debiendo; la orden de cambio (CAM) sale a su nombre y se le lleva en la próxima carga.'
+                        : 'Se crea su orden de cambio (CAM): sale en Pedidos → Por imprimir; impresa, se sube a la próxima carga y sale de la bodega en ese momento.'),
                 Select::make('se_le_debe_a')
                     ->label('Pedido del cliente al que se le quedó debiendo')
                     ->options(fn (Pedido $record): array => self::paraDeberle($record))
@@ -155,8 +159,8 @@ final class DevolucionAction
                     ->body(match (true) {
                         $devolucion->conNota()                        => "Nota de crédito N° {$devolucion->nota_numero} por ".lempiras($devolucion->total).'.',
                         $devolucion->tipo === TipoDevolucion::Credito => 'Crédito interno por '.lempiras($devolucion->total).'.',
-                        $otro !== null                                => "Se le quedó debiendo a {$otro->cliente->nombre}: queda por entregar, se escoge al armar la próxima carga.",
-                        default                                       => 'Queda por entregar: se escoge al armar la próxima carga y sale de la bodega cuando se sube al camión.',
+                        $otro !== null                                => "Orden de cambio {$devolucion->reposicion?->numero} a nombre de {$otro->cliente->nombre} (se le quedó debiendo): imprímala en Pedidos → Por imprimir y súbala a la próxima carga.",
+                        default                                       => "Orden de cambio {$devolucion->reposicion?->numero}: imprímala en Pedidos → Por imprimir; impresa, se sube a la próxima carga.",
                     })
                     ->success()
                     ->actions([
@@ -166,6 +170,23 @@ final class DevolucionAction
                     ])
                     ->persistent()
                     ->send();
+            });
+    }
+
+    /**
+     * La misma, para una factura de la carga (argumento "factura": su id):
+     * en Ver carga y en Liquidar, al lado de cada factura. Solo de las
+     * facturas que lleva esa carga.
+     */
+    public static function deLaCarga(Carga $carga): Action
+    {
+        return self::make()
+            ->record(function (array $arguments) use ($carga): ?Pedido {
+                $factura = is_numeric($arguments['factura'] ?? null)
+                    ? $carga->renglones()->where('factura_id', (int) $arguments['factura'])->first()?->factura
+                    : null;
+
+                return $factura?->pedido;
             });
     }
 

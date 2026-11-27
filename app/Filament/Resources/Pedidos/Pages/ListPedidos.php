@@ -6,11 +6,14 @@ namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Cargas\FacturasParaCargar;
+use App\Domain\Cargas\HojaDeCarga;
+use App\Domain\Devoluciones\OrdenesDeCambio;
 use App\Domain\Devoluciones\Reposiciones;
 use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Facturacion\DiasDeFacturacion;
 use App\Domain\Facturacion\ResumenDelDia;
 use App\Domain\Reportes\Periodo;
+use App\Enums\EntregaFactura;
 use App\Enums\EstadoPedido;
 use App\Enums\FormatoFactura;
 use App\Enums\ModoImpresion;
@@ -24,6 +27,7 @@ use App\Filament\Support\Acceso;
 use App\Filament\Support\VistaImpresion;
 use App\Models\Bodega;
 use App\Models\Carga;
+use App\Models\CargaReposicion;
 use App\Models\Factura;
 use App\Models\Pedido;
 use App\Models\Reposicion;
@@ -93,6 +97,9 @@ class ListPedidos extends ListRecords
     /** @var list<int>|null */
     private ?array $idsPendientes = null;
 
+    /** @var array{cuales: string, ordenes: list<array<string, mixed>>, imprime: bool}|null */
+    private ?array $ordenes = null;
+
     /**
      * Lo de paraCargar() por días y bodega, para no buscarlo varias veces en la misma petición.
      *
@@ -140,6 +147,9 @@ class ListPedidos extends ListRecords
         return $schema
             ->components([
                 $this->getTabsContentComponent(),
+                View::make('filament.pedidos.ordenes-de-cambio')
+                    ->viewData(fn (): array => $this->ordenesDeCambio())
+                    ->visible(fn (): bool => $this->ordenesDeCambio()['ordenes'] !== []),
                 View::make('filament.pedidos.por-dia')
                     ->viewData(fn (): array => $this->datosPorDia())
                     ->visible(fn (): bool => $this->tieneVistaPorDia()),
@@ -235,6 +245,43 @@ class ListPedidos extends ListRecords
             ->schema(fn (array $arguments): array => ValidarVariosAction::schema($this->pendientesDelDia($arguments)))
             ->action(function (array $data, array $arguments): void {
                 ValidarVariosAction::ejecutar($this->pendientesDelDia($arguments), $data);
+            });
+    }
+
+    /**
+     * "Imprimir" de una orden de cambio (o "Imprimir las N", argumento ids):
+     * las marca impresas (pasan a Impreso, listas para subirse a la carga) y
+     * se imprimen sin salir de la página. En Impreso, "Reimprimir" saca una
+     * copia.
+     */
+    public function imprimirCambiosAction(): Action
+    {
+        return Action::make('imprimirCambios')
+            ->visible(fn (): bool => Acceso::puede('Validar:Pedido'))
+            ->action(function (array $arguments): void {
+                $usuario = Acceso::usuario();
+                $ids = array_values(array_filter(array_map(intval(...), (array) ($arguments['ids'] ?? []))));
+
+                if ($usuario === null || $ids === []) {
+                    return;
+                }
+
+                $impresas = app(OrdenesDeCambio::class)->imprimir($ids, $usuario);
+
+                if ($impresas === []) {
+                    Notification::make()->title('No se encontró la orden de cambio')->danger()->send();
+
+                    return;
+                }
+
+                $this->ordenes = null;
+                $this->dispatch(ImprimirPedidoAction::EVENTO, url: route('cambios.imprimir', ['ids' => implode(',', $impresas)]));
+
+                Notification::make()
+                    ->title(count($impresas) === 1 ? 'Orden de cambio enviada a imprimir' : count($impresas).' órdenes de cambio enviadas a imprimir')
+                    ->body('Quedan en Impreso, por cargar: se escogen al armar la carga. El cliente firma al recibir.')
+                    ->success()
+                    ->send();
             });
     }
 
@@ -406,11 +453,19 @@ class ListPedidos extends ListRecords
 
         $tabs = [];
 
+        // Las órdenes de cambio cuentan con los pedidos: por imprimir, por cargar (Impreso) y en ruta (Cargado).
+        $usuario = Acceso::usuario();
+        $ordenes = fn (string $cuales): int => $usuario === null ? 0 : OrdenesDeCambio::de($usuario, $cuales)->count();
+
         foreach (EstadoPedido::cases() as $estado) {
             $filtro = fn (Builder $query): Builder => $estado === EstadoPedido::Impreso
                 ? self::impresos($query, cargados: false)
                 : $query->where('estado', $estado);
-            $cantidad = $filtro(PedidoResource::getEloquentQuery())->count();
+            $cantidad = $filtro(PedidoResource::getEloquentQuery())->count() + match ($estado) {
+                EstadoPedido::PorImprimir => $ordenes(OrdenesDeCambio::POR_IMPRIMIR),
+                EstadoPedido::Impreso     => $ordenes(OrdenesDeCambio::POR_CARGAR),
+                default                   => 0,
+            };
 
             $tabs[$estado->value] = Tab::make($estado->getLabel())
                 ->badge($cantidad > 0 && $estado !== EstadoPedido::Anulado ? (string) $cantidad : null)
@@ -419,7 +474,7 @@ class ListPedidos extends ListRecords
 
             // Después de Impreso, los que ya van en una carga.
             if ($estado === EstadoPedido::Impreso) {
-                $cargados = self::impresos(PedidoResource::getEloquentQuery(), cargados: true)->count();
+                $cargados = self::impresos(PedidoResource::getEloquentQuery(), cargados: true)->count() + $ordenes(OrdenesDeCambio::EN_RUTA);
 
                 $tabs[self::CARGADO] = Tab::make('Cargado')
                     ->badge($cargados > 0 ? (string) $cargados : null)
@@ -468,6 +523,7 @@ class ListPedidos extends ListRecords
         unset($this->cachedTabs);
         $this->idsPorImprimir = null;
         $this->idsPendientes = null;
+        $this->ordenes = null;
     }
 
     /**
@@ -752,5 +808,54 @@ class ListPedidos extends ListRecords
 
         return ($dia === null ? '' : ' del '.ResumenDelDia::fechaLarga($dia))
             .(Acceso::veTodo() && is_numeric($bodega) ? ' · '.(string) Bodega::query()->whereKey((int) $bodega)->value('nombre') : '');
+    }
+
+    /**
+     * Las órdenes de cambio de la pestaña (arriba de los pedidos): por
+     * imprimir, por cargar (Impreso) o en ruta (Cargado).
+     *
+     * @return array{cuales: string, ordenes: list<array<string, mixed>>, imprime: bool}
+     */
+    private function ordenesDeCambio(): array
+    {
+        if ($this->ordenes !== null) {
+            return $this->ordenes;
+        }
+
+        $usuario = Acceso::usuario();
+        $cuales = match ($this->activeTab) {
+            EstadoPedido::PorImprimir->value => OrdenesDeCambio::POR_IMPRIMIR,
+            EstadoPedido::Impreso->value     => OrdenesDeCambio::POR_CARGAR,
+            self::CARGADO                    => OrdenesDeCambio::EN_RUTA,
+            default                          => null,
+        };
+        $ordenes = [];
+
+        if ($usuario !== null && $cuales !== null && ! Acceso::esVendedor()) {
+            foreach (OrdenesDeCambio::de($usuario, $cuales)->with([...Reposiciones::DATOS, 'renglones.carga'])->limit(60)->get() as $orden) {
+                $enRuta = $orden->renglones->first(fn (CargaReposicion $renglon): bool => $renglon->estado === EntregaFactura::EnRuta);
+                $factura = $orden->devolucion->factura;
+
+                $ordenes[] = [
+                    'id'         => $orden->id,
+                    'numero'     => (string) $orden->numero,
+                    'fecha'      => $orden->created_at?->format('d/m/Y') ?? '',
+                    'carga'      => $enRuta?->carga->numero(),
+                    'cliente'    => $orden->cliente->nombre,
+                    'municipio'  => $orden->cliente->municipio?->nombre,
+                    'ruta'       => $orden->deRuta(),
+                    'lleva'      => $orden->texto(),
+                    'devolucion' => (string) $orden->devolucion->numero,
+                    'factura'    => $factura !== null ? HojaDeCarga::corto($factura->numero) : null,
+                    'nota'       => $orden->nota,
+                ];
+            }
+        }
+
+        return $this->ordenes = [
+            'cuales'  => $cuales ?? OrdenesDeCambio::POR_IMPRIMIR,
+            'ordenes' => $ordenes,
+            'imprime' => Acceso::puede('Validar:Pedido'),
+        ];
     }
 }

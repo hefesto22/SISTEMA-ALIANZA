@@ -127,3 +127,40 @@ test('el encargado lo ve de su bodega, lo baja en Excel y lo imprime; el vendedo
     $this->get(ReporteDevoluciones::getUrl())->assertForbidden();
     $this->get(route('reportes.devoluciones.imprimir'))->assertForbidden();
 });
+
+test('el acta de baja: lo dañado del periodo, renglón por renglón y a costo, con las firmas; sale del reporte', function (): void {
+    $actas = (new DevolucionesDelPeriodo(Periodo::de('mes'), null))->acta();
+
+    expect($actas)->toHaveCount(1)
+        ->and([$actas[0]['bodega'], $actas[0]['total'], $actas[0]['proveedores']])->toBe(['BODEGA COPÁN', 16.0, [['proveedor' => 'MERHONSA', 'productos' => 1, 'perdida' => 16.0]]])
+        ->and(array_map(fn (array $r): array => [$r['devolucion'], $r['tipo'], $r['motivo'], $r['producto'], $r['presentacion'], $r['cantidad'], $r['costo'], $r['perdida']], $actas[0]['renglones']))->toBe([
+            [$this->cambio->numero, 'Cambio', 'VENÍAN GOLPEADOS', 'JABON BEST 250G', 'UN', 2, 8.0, 16.0],
+        ])
+        ->and((new DevolucionesDelPeriodo(Periodo::de('otro', now()->addWeek()->toDateString(), now()->addWeeks(2)->toDateString()), null))->acta())->toBe([]);
+
+    $this->actingAs($this->encargado);
+
+    Livewire::test(ReporteDevoluciones::class)
+        ->assertActionVisible('acta')
+        ->assertActionVisible('pdf');
+
+    $this->get(route('reportes.devoluciones.acta', ['desde' => now()->startOfMonth()->toDateString(), 'hasta' => now()->toDateString(), 'embebido' => 1]))
+        ->assertOk()
+        ->assertSee('ACTA DE BAJA DE INVENTARIO')
+        ->assertSee('BODEGA COPÁN')
+        ->assertSee($this->cambio->numero)
+        ->assertSee('JABON BEST 250G')
+        ->assertSee('L. 16.00')
+        ->assertSee('DIECISÉIS LEMPIRAS CON 00/100')
+        ->assertSee('Encargado de bodega')
+        ->assertSee('Testigo')
+        ->assertDontSee('Imprimir o guardar PDF');
+
+    $this->get(route('reportes.devoluciones.acta', ['desde' => now()->addWeek()->toDateString(), 'hasta' => now()->addWeeks(2)->toDateString()]))
+        ->assertOk()
+        ->assertSee('no hay nada que dar de baja');
+
+    $this->actingAs($this->vendedor);
+
+    $this->get(route('reportes.devoluciones.acta'))->assertForbidden();
+});

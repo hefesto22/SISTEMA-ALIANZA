@@ -25,11 +25,12 @@ final class VistaImpresion
 
     /**
      * @param Closure(): string $url enlace de la hoja, ya con embebido=1
+     * @param string $nombre de la acción (otra hoja en la misma página lleva otro, p. ej. "acta")
      */
-    public static function accion(string $titulo, Closure $url): Action
+    public static function accion(string $titulo, Closure $url, string $nombre = 'pdf', string $etiqueta = 'PDF / Imprimir'): Action
     {
-        return Action::make('pdf')
-            ->label('PDF / Imprimir')
+        return Action::make($nombre)
+            ->label($etiqueta)
             ->icon(Heroicon::OutlinedPrinter)
             ->modalHeading($titulo)
             ->modalDescription('Vista de impresión. Para el PDF, en la ventana de imprimir escoja «Guardar como PDF».')

@@ -99,10 +99,10 @@ class DevolucionResource extends Resource
                     ->label('El cambio')
                     ->badge()
                     ->placeholder('—')
-                    ->description(fn (Devolucion $record): ?string => $record->reposicion !== null && $record->reposicion->cliente_id !== $record->cliente_id
-                        ? 'para '.$record->reposicion->cliente->nombre
-                        : null)
-                    ->tooltip('Lo que se le debe por el cambio: por entregar (espera carga), en ruta o entregado.'),
+                    ->description(fn (Devolucion $record): ?string => $record->reposicion === null
+                        ? null
+                        : $record->reposicion->numero.($record->reposicion->cliente_id !== $record->cliente_id ? ' · para '.$record->reposicion->cliente->nombre : ''))
+                    ->tooltip('La orden de cambio (CAM): por entregar (por imprimir o esperando carga), en ruta o entregado.'),
                 TextColumn::make('nota_numero')
                     ->label('Nota de crédito')
                     ->placeholder(fn (Devolucion $record): string => $record->tipo === TipoDevolucion::Credito ? 'Interno' : '—')

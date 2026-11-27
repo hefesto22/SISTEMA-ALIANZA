@@ -20,7 +20,14 @@ use Illuminate\Support\Carbon;
  * pedido de otro, a ese otro (el que se quedó esperando). Sale de la bodega
  * cuando se sube al camión y se marca entregada al liquidar la carga.
  *
+ * Es la orden de cambio (CAM-000001, documento interno sin valor fiscal,
+ * App\Domain\Devoluciones\OrdenesDeCambio): sale en Pedidos → Por imprimir;
+ * ya impresa espera carga (Impreso) y solo así se sube al camión.
+ *
  * @property int $id
+ * @property string|null $numero CAM-000001
+ * @property Carbon|null $impresa_at la primera vez que se imprimió
+ * @property int $impresiones
  * @property int $devolucion_id
  * @property int $bodega_id
  * @property int $cliente_id a quién se le lleva
@@ -49,11 +56,14 @@ class Reposicion extends Model
         'estado',
         'nota',
         'entregada_at',
+        'impresa_at',
+        'impresiones',
     ];
 
     /** @var array<string, mixed> */
     protected $attributes = [
-        'estado' => 'por_entregar',
+        'estado'      => 'por_entregar',
+        'impresiones' => 0,
     ];
 
     /**
@@ -68,7 +78,24 @@ class Reposicion extends Model
             'pedido_id'     => 'integer',
             'estado'        => EstadoReposicion::class,
             'entregada_at'  => 'datetime',
+            'impresa_at'    => 'datetime',
+            'impresiones'   => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::created(function (Reposicion $reposicion): void {
+            $reposicion->forceFill(['numero' => 'CAM-'.str_pad((string) $reposicion->id, 6, '0', STR_PAD_LEFT)])->saveQuietly();
+        });
+    }
+
+    /**
+     * Ya se imprimió su orden de cambio (solo así se sube al camión).
+     */
+    public function estaImpresa(): bool
+    {
+        return $this->impresa_at !== null;
     }
 
     /**
@@ -165,12 +192,12 @@ class Reposicion extends Model
 
     /**
      * Para escoger en la carga: "CO22 · ALVARO · PULPERIA LA BENDICION: 1 CJ24
-     * MARGARINA… (DEV-000012)".
+     * MARGARINA… (CAM-000003 · DEV-000012)".
      */
     public function etiqueta(): string
     {
         $quien = implode(' · ', array_filter([$this->deRuta(), $this->cliente->nombre]));
 
-        return "{$quien}: {$this->texto()} ({$this->devolucion->numero})";
+        return "{$quien}: {$this->texto()} ({$this->numero} · {$this->devolucion->numero})";
     }
 }

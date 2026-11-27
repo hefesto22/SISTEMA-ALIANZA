@@ -194,6 +194,11 @@ final class ArmarCarga
                     : "El cambio de {$reposicion->cliente->nombre} ({$reposicion->devolucion->numero}) ya se entregó.");
             }
 
+            // Como las facturas: primero se imprime la orden de cambio (Pedidos → Por imprimir).
+            if (! $reposicion->estaImpresa()) {
+                throw new ReglaNegocioException("La orden de cambio {$reposicion->numero} de {$reposicion->cliente->nombre} no se ha impreso: imprímala en Pedidos → Por imprimir antes de subirla.");
+            }
+
             $this->reposiciones->subir($carga, $reposicion, $usuario);
         }
     }

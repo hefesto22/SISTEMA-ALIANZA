@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Cargas\Pages;
 use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Facturacion\ResumenDelDia;
 use App\Filament\Resources\Cargas\CargaResource;
+use App\Filament\Resources\Pedidos\Actions\DevolucionAction;
 use App\Filament\Support\Acceso;
 use App\Filament\Support\VistaImpresion;
 use App\Http\Controllers\ImprimirCargaController;
@@ -24,7 +25,8 @@ use Illuminate\Support\Facades\Gate;
  * La carga: en ruta, lo que lleva (cada producto con sus cajas y unidades, y
  * las facturas); liquidada, el cuadre. Arriba: Liquidar e Imprimir hoja de
  * carga (en ruta, para ir marcando lo que se sube), Imprimir (hoja de carga,
- * de cobro y la liquidación), Editar y Borrar (en ruta).
+ * de cobro y la liquidación), Editar y Borrar (en ruta). En ruta, cada
+ * factura trae Devolución (lo que el cliente regresó).
  */
 class ViewCarga extends ViewRecord
 {
@@ -63,6 +65,14 @@ class ViewCarga extends ViewRecord
                     return true;
                 }),
         ];
+    }
+
+    /**
+     * "Devolución" de una factura de la carga (botón de cada factura).
+     */
+    public function devolucionAction(): Action
+    {
+        return DevolucionAction::deLaCarga($this->carga());
     }
 
     public function getSubheading(): string

@@ -6,6 +6,7 @@ use App\Domain\Cargas\ArmarCarga;
 use App\Domain\Cargas\CuentaCarga;
 use App\Domain\Cargas\HojaDeCarga;
 use App\Domain\Cargas\LiquidarCarga;
+use App\Domain\Devoluciones\OrdenesDeCambio;
 use App\Domain\Devoluciones\RegistrarDevolucion;
 use App\Domain\Devoluciones\Reposiciones;
 use App\Domain\Exceptions\ReglaNegocioException;
@@ -23,6 +24,7 @@ use App\Filament\Resources\Cargas\Pages\CreateCarga;
 use App\Filament\Resources\Cargas\Pages\Liquidacion;
 use App\Filament\Resources\Cargas\Pages\ViewCarga;
 use App\Filament\Resources\Pedidos\Actions\DevolucionAction;
+use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Pages\ListPedidos;
 use App\Filament\Resources\Pedidos\Pages\ViewPedido;
 use App\Models\Bodega;
@@ -42,9 +44,10 @@ use Livewire\Livewire;
 /**
  * Cambios por entregar: lo que se le debe a un cliente por un cambio por
  * cambio queda Por entregar (a su nombre o, si ya se le dio con producto
- * del pedido de otro cliente, a nombre de ese otro); se escoge al armar la
- * carga y sale de la bodega al subirlo al camión; al liquidar, entregado o
- * no se entregó (regresa a la bodega y espera otra carga).
+ * del pedido de otro cliente, a nombre de ese otro) como orden de cambio
+ * (CAM-000001): se imprime en Pedidos → Por imprimir, ya impresa se escoge
+ * al armar la carga y sale de la bodega al subirlo al camión; al liquidar,
+ * entregado o no se entregó (regresa a la bodega y espera otra carga).
  *
  * Hay 12 UN y 3 CJ12 de jabón.
  */
@@ -92,13 +95,16 @@ function pedidoDeCambios(object $prueba, int $cantidad, string $cliente): Pedido
 }
 
 /**
- * Cambio de $danadas UN dañadas del pedido.
+ * Cambio de $danadas UN dañadas del pedido, con su orden de cambio ya
+ * impresa (lista para subirse a la carga).
  */
 function cambioDe(object $prueba, Pedido $pedido, int $danadas, ?Pedido $seLeDebeA = null): Reposicion
 {
     $devolucion = app(RegistrarDevolucion::class)->ejecutar($pedido, TipoDevolucion::Cambio, [$pedido->items()->sole()->id => ['danadas' => $danadas]], $prueba->encargado, seLeDebeA: $seLeDebeA);
+    $cambio = $devolucion->reposicion()->firstOrFail();
+    app(OrdenesDeCambio::class)->imprimir([$cambio->id], $prueba->encargado);
 
-    return $devolucion->reposicion()->firstOrFail();
+    return $cambio->fresh() ?? $cambio;
 }
 
 /**
@@ -128,7 +134,16 @@ test('el cambio queda por entregar a nombre del cliente; sale de la bodega al su
     // Solo entra la buena: lo del cambio todavía no sale.
     expect(Existencia::de($this->bodega->id, $this->un->id))->toBe(3)
         ->and([$uno->estado, $uno->cliente_id, $uno->pedido_id, $uno->nota])->toBe([EstadoReposicion::PorEntregar, $pedido->cliente_id, $pedido->id, null])
-        ->and($uno->texto())->toBe('3 UN JABON BEST 250G')
+        ->and($uno->texto())->toBe('3 UN JABON BEST 250G');
+
+    // Su orden de cambio todavía no se imprime: no se puede subir a la carga.
+    expect([$uno->numero, $uno->estaImpresa()])->toBe([sprintf('CAM-%06d', $uno->id), false])
+        ->and(OrdenesDeCambio::de($this->encargado, OrdenesDeCambio::POR_IMPRIMIR)->modelKeys())->toBe([$uno->id])
+        ->and(Reposiciones::paraCarga($this->bodega->id)->modelKeys())->toBe([$dos->id])
+        ->and(fn () => cargaConCambios($this, [], [$uno]))->toThrow(ReglaNegocioException::class, "La orden de cambio {$uno->numero}");
+
+    expect(app(OrdenesDeCambio::class)->imprimir([$uno->id], $this->encargado))->toBe([$uno->id])
+        ->and(OrdenesDeCambio::de($this->encargado, OrdenesDeCambio::POR_CARGAR)->modelKeys())->toBe([$uno->id, $dos->id])
         ->and(Reposiciones::paraCarga($this->bodega->id)->modelKeys())->toBe([$uno->id, $dos->id]);
 
     // Una carga solo con los cambios: salen 3 sueltas y, para las otras 2, se abre una CJ12.
@@ -260,6 +275,29 @@ test('bodega registra el cambio para otro cliente, sale marcado al cargar el cam
 
     expect($cambio->cliente_id)->toBe($roca->cliente_id);
 
+    // La orden de cambio sale en Pedidos → Por imprimir; al imprimirla pasa a Impreso (por cargar).
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::PorImprimir->value)
+        ->assertSee('Órdenes de cambio por imprimir')
+        ->assertSee((string) $cambio->numero)
+        ->callAction('imprimirCambios', arguments: ['ids' => [$cambio->id]])
+        ->assertDispatched(ImprimirPedidoAction::EVENTO)
+        ->assertNotified('Orden de cambio enviada a imprimir');
+
+    expect($cambio->fresh()?->estaImpresa())->toBeTrue();
+
+    $this->get(route('cambios.imprimir', ['ids' => $cambio->id]))
+        ->assertOk()
+        ->assertSee('ORDEN DE CAMBIO')
+        ->assertSee((string) $cambio->numero)
+        ->assertSee('PULPERIA LA ROCA')
+        ->assertSee('Recibió conforme');
+
+    Livewire::test(ListPedidos::class)
+        ->set('activeTab', EstadoPedido::Impreso->value)
+        ->assertSee('Órdenes de cambio por cargar')
+        ->assertSee((string) $cambio->numero);
+
     // Nueva carga desde Impresos ("Escoger una por una"): el cambio de esa ruta viene marcado.
     Livewire::withQueryParams(['dias' => today()->toDateString(), 'bodega' => $this->bodega->id])
         ->test(CreateCarga::class)
@@ -298,4 +336,50 @@ test('bodega registra el cambio para otro cliente, sale marcado al cargar el cam
         ->assertRedirect(CargaResource::getUrl('view', ['record' => $carga]));
 
     expect($cambio->fresh()?->estado)->toBe(EstadoReposicion::Entregada);
+});
+
+test('la devolución se registra desde la carga, por factura: en Ver carga y en Liquidar; la de crédito se descuenta del cuadre', function (): void {
+    $bendicion = pedidoDeCambios($this, 4, 'PULPERIA LA BENDICION');
+    $roca = pedidoDeCambios($this, 3, 'PULPERIA LA ROCA');
+    $carga = cargaConCambios($this, [$bendicion, $roca], []);
+    $facturaDe = fn (Pedido $pedido): Factura => Factura::query()->where('pedido_id', $pedido->id)->where('estado', EstadoFactura::Vigente)->sole();
+
+    $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
+
+    // Ver carga: cada factura trae Devolución; solo de las facturas que lleva.
+    Livewire::test(ViewCarga::class, ['record' => $carga->getRouteKey()])
+        ->assertSee('Devolución')
+        ->assertActionVisible('devolucion', ['factura' => $facturaDe($bendicion)->id])
+        ->assertActionHidden('devolucion', ['factura' => 999999])
+        ->callAction('devolucion', data: [
+            'tipo'    => TipoDevolucion::Cambio->value,
+            'entrega' => DevolucionAction::PROXIMA_CARGA,
+            'lineas'  => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
+        ], arguments: ['factura' => $facturaDe($bendicion)->id])
+        ->assertHasNoActionErrors()
+        ->assertNotified();
+
+    $cambio = Reposicion::query()->sole();
+
+    expect([$cambio->devolucion->carga_id, $cambio->cliente_id, $cambio->estaImpresa()])->toBe([$carga->id, $bendicion->cliente_id, false])
+        ->and(OrdenesDeCambio::de($this->encargado, OrdenesDeCambio::POR_IMPRIMIR)->modelKeys())->toBe([$cambio->id]);
+
+    Livewire::test(ViewCarga::class, ['record' => $carga->getRouteKey()])
+        ->assertSee('Devolución: '.$cambio->devolucion->numero.' · Cambio');
+
+    // Liquidar: la de crédito se descuenta de lo que debe traer.
+    Livewire::test(Liquidacion::class, ['record' => $carga->getRouteKey()])
+        ->callAction('devolucion', data: [
+            'tipo'   => TipoDevolucion::Credito->value,
+            'lineas' => [['id' => $roca->items()->sole()->id, 'buenas' => 1, 'danadas' => 0]],
+        ], arguments: ['factura' => $facturaDe($roca)->id])
+        ->assertHasNoActionErrors()
+        ->assertSee('Devoluciones que se descuentan');
+
+    $undoRepeaterFake();
+    $credito = $carga->devoluciones()->where('tipo', TipoDevolucion::Credito->value)->sole();
+
+    expect($credito->total)->toBeGreaterThan(0.0)
+        ->and(CuentaCarga::de($carga->fresh() ?? $carga, [], 0.0, [], [])['devuelto'])->toBe($credito->total);
 });

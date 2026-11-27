@@ -5,13 +5,16 @@
     lleva (a quién se le da cada uno) y las facturas. En papel, una casilla
     para ir marcando lo que se subió, la firma de cada cliente que recibe un
     cambio y las firmas de bodega y de quien sale. En pantalla (la carga en
-    ruta) va sin casillas ni firmas.
+    ruta) va sin casillas ni firmas; con $devolver, cada factura trae el
+    botón Devolución (lo que el cliente regresó; ViewCarga::devolucionAction)
+    y debajo las devoluciones que ya se registraron.
     Hoja: App\Http\Controllers\ImprimirCargaController (?hoja=carga).
-    Datos: $d = App\Domain\Cargas\HojaDeCarga::datos(); $pantalla.
+    Datos: $d = App\Domain\Cargas\HojaDeCarga::datos(); $pantalla; $devolver.
 --}}
 @php
     /** @var array<string, mixed> $d */
     $pantalla ??= false;
+    $devolver = $pantalla && ($devolver ?? false);
     $productos = $d['productos'];
     $cajas = array_sum(array_map(fn (array $p): int => array_sum(array_column($p['cajas'], 'cantidad')), $productos));
     $unidades = array_sum(array_column($productos, 'unidades'));
@@ -27,6 +30,7 @@
     .rp td.cg-cant small { margin-inline-start: 0.2rem; font-size: 0.7rem; font-weight: 600; color: var(--rp-tenue); }
     .rp td.cg-cant span { display: block; }
     .rp .cg-prod td.marca { vertical-align: middle; }
+    .rp td.cg-devolver { width: 1%; white-space: nowrap; text-align: right; }
     .rp .cg-prod tfoot td { font-weight: 700; }
     .rp .cg-cambios td { vertical-align: top; }
     .rp .cg-cambios ul { margin: 0; padding: 0; list-style: none; }
@@ -120,7 +124,7 @@
                         <tr>
                             <th>Cliente</th>
                             <th>Qué se le lleva</th>
-                            <th>Devolución</th>
+                            <th>Orden · devolución</th>
                             @unless ($pantalla)
                                 <th class="recibio">Recibió (firma)</th>
                             @endunless
@@ -165,6 +169,9 @@
                         <th>Cliente</th>
                         <th>Ruta · vendió</th>
                         <th class="n">Total</th>
+                        @if ($devolver)
+                            <th></th>
+                        @endif
                     </tr>
                 </thead>
                 <tbody>
@@ -177,9 +184,21 @@
                                 @if ($f['nota'] !== null)
                                     <small class="aviso">{{ $f['nota'] }}</small>
                                 @endif
+                                @if ($pantalla && $f['devoluciones'] !== [])
+                                    <small class="aviso">Devolución: {{ implode('; ', $f['devoluciones']) }}</small>
+                                @endif
                             </td>
                             <td>@if ($f['ruta'] !== null)<b>{{ $f['ruta'] }}</b> · @endif{{ $f['vendio'] }}</td>
                             <td class="n monto">{{ number_format($f['total'], 2) }}</td>
+                            @if ($devolver)
+                                <td class="cg-devolver">
+                                    @if ($f['vigente'] && $f['salio'])
+                                        <x-filament::button size="xs" color="gray" outlined icon="heroicon-o-arrow-uturn-left" wire:click="mountAction('devolucion', { factura: {{ $f['id'] }} })">
+                                            Devolución
+                                        </x-filament::button>
+                                    @endif
+                                </td>
+                            @endif
                         </tr>
                     @endforeach
                 </tbody>
@@ -187,6 +206,9 @@
                     <tr>
                         <td colspan="3">Sale con ({{ $d['cuantas'] === 1 ? '1 factura' : $d['cuantas'].' facturas' }})</td>
                         <td class="n">{{ number_format($d['total'], 2) }}</td>
+                        @if ($devolver)
+                            <td></td>
+                        @endif
                     </tr>
                 </tfoot>
             </table>

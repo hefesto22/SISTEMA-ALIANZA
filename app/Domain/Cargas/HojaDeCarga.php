@@ -40,7 +40,7 @@ final class HojaDeCarga
      *     bodega: string,
      *     sale: string,
      *     liquidada: bool,
-     *     facturas: list<array{id: int, numero: string, corto: string, cliente: string, municipio: string|null, vendio: string, ruta: string|null, pedido: string, pedido_id: int, total: float, vigente: bool, salio: bool, estado: EntregaFactura, nota: string|null}>,
+     *     facturas: list<array{id: int, numero: string, corto: string, cliente: string, municipio: string|null, vendio: string, ruta: string|null, pedido: string, pedido_id: int, total: float, vigente: bool, salio: bool, estado: EntregaFactura, nota: string|null, devoluciones: list<string>}>,
      *     cuantas: int,
      *     total: float,
      *     productos: list<array{codigo: string, descripcion: string, cajas: list<array{cantidad: int, sigla: string}>, unidades: int, suelta: string, regalo: string|null, cambio: string|null}>,
@@ -78,6 +78,15 @@ final class HojaDeCarga
         $facturas = [];
         $cuantas = 0;
 
+        // Las devoluciones que se registraron en la ruta, por factura: "DEV-000012 · Cambio".
+        $devueltas = [];
+
+        foreach ($carga->devoluciones->sortBy('id') as $devolucion) {
+            if ($devolucion->factura_id !== null) {
+                $devueltas[$devolucion->factura_id][] = $devolucion->numero.' · '.$devolucion->tipo->getLabel();
+            }
+        }
+
         /** @var CargaFactura $renglon */
         foreach ($carga->renglones as $renglon) {
             $factura = $renglon->factura;
@@ -87,20 +96,21 @@ final class HojaDeCarga
             $cuantas += $salio ? 1 : 0;
 
             $facturas[] = [
-                'id'        => $factura->id,
-                'numero'    => $factura->numero,
-                'corto'     => self::corto($factura->numero),
-                'cliente'   => $factura->cliente_nombre,
-                'municipio' => $pedido->cliente->municipio?->nombre,
-                'vendio'    => $pedido->vendedor->name,
-                'ruta'      => $pedido->ruta?->codigo(),
-                'pedido'    => (string) $pedido->numero,
-                'pedido_id' => $pedido->id,
-                'total'     => round($factura->total, 2),
-                'vigente'   => $vigente,
-                'salio'     => $salio,
-                'estado'    => $renglon->estado,
-                'nota'      => self::nota($renglon),
+                'id'           => $factura->id,
+                'numero'       => $factura->numero,
+                'corto'        => self::corto($factura->numero),
+                'cliente'      => $factura->cliente_nombre,
+                'municipio'    => $pedido->cliente->municipio?->nombre,
+                'vendio'       => $pedido->vendedor->name,
+                'ruta'         => $pedido->ruta?->codigo(),
+                'pedido'       => (string) $pedido->numero,
+                'pedido_id'    => $pedido->id,
+                'total'        => round($factura->total, 2),
+                'vigente'      => $vigente,
+                'salio'        => $salio,
+                'estado'       => $renglon->estado,
+                'nota'         => self::nota($renglon),
+                'devoluciones' => $devueltas[$factura->id] ?? [],
             ];
         }
 
@@ -279,7 +289,7 @@ final class HojaDeCarga
                         fn (array $fila): string => number_format($fila['cantidad']).' '.$fila['presentacion']->sigla().' '.$fila['presentacion']->producto->descripcion,
                         $cambio->productos(),
                     ),
-                    'devolucion' => (string) $cambio->devolucion->numero,
+                    'devolucion' => $cambio->numero.' · '.$cambio->devolucion->numero,
                     'factura'    => $factura !== null ? self::corto($factura->numero) : null,
                     'nota'       => $cambio->nota,
                     'estado'     => $renglon->estado,

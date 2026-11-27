@@ -87,7 +87,7 @@
                         <tr>
                             <th>Cliente</th>
                             <th>Qué se le llevaba</th>
-                            <th>Devolución</th>
+                            <th>Orden · devolución</th>
                             <th>Cómo terminó</th>
                         </tr>
                     </thead>

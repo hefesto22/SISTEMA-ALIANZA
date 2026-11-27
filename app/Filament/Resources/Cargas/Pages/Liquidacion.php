@@ -12,6 +12,7 @@ use App\Domain\Exceptions\ReglaNegocioException;
 use App\Enums\EntregaFactura;
 use App\Enums\TipoDevolucion;
 use App\Filament\Resources\Cargas\CargaResource;
+use App\Filament\Resources\Pedidos\Actions\DevolucionAction;
 use App\Filament\Support\Acceso;
 use App\Models\Carga;
 use App\Models\CargaFactura;
@@ -135,7 +136,7 @@ class Liquidacion extends Page
             ->components([
                 Group::make([
                     Section::make('Cada factura')
-                        ->description('Todas vienen como entregadas: cambie solo las que no se entregaron. Anular: la factura se anula y lo que llevaba regresa a la bodega. Otra carga: sale otro día. Si un cliente devolvió algo, regístrelo antes en su pedido (Devolución).')
+                        ->description('Todas vienen como entregadas: cambie solo las que no se entregaron. Anular: la factura se anula y lo que llevaba regresa a la bodega. Otra carga: sale otro día. Si un cliente devolvió algo, regístrelo con el botón de devolución de su fila: lo de crédito se descuenta del cuadre.')
                         ->icon(Heroicon::OutlinedDocumentText)
                         ->compact()
                         ->schema([
@@ -144,6 +145,20 @@ class Liquidacion extends Page
                                 ->addable(false)
                                 ->deletable(false)
                                 ->reorderable(false)
+                                ->extraItemActions([
+                                    // Lo que el cliente regresó: el modal de Devolución de esa factura.
+                                    Action::make('devolver')
+                                        ->label('Devolución')
+                                        ->tooltip('Registrar devolución')
+                                        ->icon(Heroicon::OutlinedArrowUturnLeft)
+                                        ->color('gray')
+                                        ->visible(fn (): bool => Acceso::usuario()?->can('create', Devolucion::class) ?? false)
+                                        ->action(function (array $arguments, Repeater $component): void {
+                                            $fila = $component->getRawItemState((string) ($arguments['item'] ?? ''));
+
+                                            $this->replaceMountedAction('devolucion', ['factura' => is_numeric($fila['id'] ?? null) ? (int) $fila['id'] : 0]);
+                                        }),
+                                ])
                                 ->table([
                                     TableColumn::make('Factura'),
                                     TableColumn::make('Cliente'),
@@ -155,6 +170,7 @@ class Liquidacion extends Page
                                     Hidden::make('corto'),
                                     Hidden::make('cliente'),
                                     Hidden::make('detalle'),
+                                    Hidden::make('devuelto'),
                                     Hidden::make('monto'),
                                     TextEntry::make('ver_numero')
                                         ->hiddenLabel()
@@ -163,7 +179,7 @@ class Liquidacion extends Page
                                     TextEntry::make('ver_cliente')
                                         ->hiddenLabel()
                                         ->state(fn (Get $get): string => (string) $get('cliente'))
-                                        ->helperText(fn (Get $get): string => (string) $get('detalle')),
+                                        ->helperText(fn (Get $get): string => trim((string) $get('detalle').' '.(string) $get('devuelto'))),
                                     TextEntry::make('ver_total')
                                         ->hiddenLabel()
                                         ->state(fn (Get $get): string => lempiras((float) $get('monto')))
@@ -274,6 +290,26 @@ class Liquidacion extends Page
                     ->extraAttributes(['style' => 'position: sticky; top: 5rem;'])
                     ->columnSpan(['default' => 1, 'xl' => 1]),
             ]);
+    }
+
+    /**
+     * "Devolución" de una factura de la carga (el botón de su fila). Lo de
+     * crédito se descuenta del cuadre y en la fila queda anotada.
+     */
+    public function devolucionAction(): Action
+    {
+        return DevolucionAction::deLaCarga($this->carga())
+            ->after(function (): void {
+                $this->cuenta = null;
+                $devueltas = $this->devueltas();
+                $facturas = is_array($this->data['facturas'] ?? null) ? $this->data['facturas'] : [];
+
+                foreach ($facturas as $clave => $fila) {
+                    if (is_array($fila) && is_numeric($fila['id'] ?? null)) {
+                        $this->data['facturas'][$clave]['devuelto'] = $devueltas[(int) $fila['id']] ?? '';
+                    }
+                }
+            });
     }
 
     /**
@@ -536,6 +572,7 @@ class Liquidacion extends Page
     {
         $carga = $this->carga();
         $carga->load(['renglones.factura.pedido.cliente.municipio', 'renglones.factura.pedido.vendedor', 'renglones.factura.pedido.ruta.bodega']);
+        $devueltas = $this->devueltas();
         $filas = [];
 
         /** @var CargaFactura $renglon */
@@ -550,16 +587,34 @@ class Liquidacion extends Page
             $ruta = $factura->pedido->ruta?->codigo();
 
             $filas[] = [
-                'id'      => $factura->id,
-                'corto'   => HojaDeCarga::corto($factura->numero),
-                'cliente' => $factura->cliente_nombre,
-                'detalle' => ($ruta !== null ? $ruta.' · ' : '').($municipio !== null ? $municipio.' · ' : '').'vendió '.$factura->pedido->vendedor->name,
-                'monto'   => $factura->total,
-                'entrega' => CuentaCarga::ENTREGADA,
+                'id'       => $factura->id,
+                'corto'    => HojaDeCarga::corto($factura->numero),
+                'cliente'  => $factura->cliente_nombre,
+                'detalle'  => ($ruta !== null ? $ruta.' · ' : '').($municipio !== null ? $municipio.' · ' : '').'vendió '.$factura->pedido->vendedor->name,
+                'devuelto' => $devueltas[$factura->id] ?? '',
+                'monto'    => $factura->total,
+                'entrega'  => CuentaCarga::ENTREGADA,
             ];
         }
 
         return $filas;
+    }
+
+    /**
+     * Las devoluciones registradas de cada factura de la carga:
+     * [factura_id => "· Devolución DEV-000012 (Crédito)"].
+     *
+     * @return array<int, string>
+     */
+    private function devueltas(): array
+    {
+        $porFactura = [];
+
+        foreach ($this->carga()->devoluciones()->whereNotNull('factura_id')->orderBy('id')->get() as $devolucion) {
+            $porFactura[(int) $devolucion->factura_id][] = $devolucion->numero.' ('.$devolucion->tipo->getLabel().')';
+        }
+
+        return array_map(fn (array $numeros): string => '· Devolución '.implode(', ', $numeros), $porFactura);
     }
 
     /**
@@ -579,7 +634,7 @@ class Liquidacion extends Page
             $filas[] = [
                 'id'      => $cambio->id,
                 'cliente' => $cambio->cliente->nombre,
-                'detalle' => implode(' · ', array_filter([$cambio->deRuta(), $municipio, $cambio->devolucion->numero])),
+                'detalle' => implode(' · ', array_filter([$cambio->deRuta(), $municipio, $cambio->numero, $cambio->devolucion->numero])),
                 'lleva'   => $cambio->texto(),
                 'entrega' => CuentaCarga::ENTREGADA,
             ];

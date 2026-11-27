@@ -22,6 +22,7 @@ declare(strict_types=1);
 use App\Http\Controllers\HojaDeAlistoController;
 use App\Http\Controllers\ImprimirCargaController;
 use App\Http\Controllers\ImprimirDevolucionController;
+use App\Http\Controllers\ImprimirOrdenDeCambioController;
 use App\Http\Controllers\ImprimirPedidoController;
 use App\Http\Controllers\ImprimirPedidosController;
 use App\Http\Controllers\ImprimirReporteController;
@@ -59,6 +60,10 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
     Route::get('devoluciones/{devolucion}/imprimir', ImprimirDevolucionController::class)
         ->name('devoluciones.imprimir');
 
+    // Órdenes de cambio (?ids=1,2,3): lo que se le lleva al cliente por un cambio por cambio.
+    Route::get('cambios/imprimir', ImprimirOrdenDeCambioController::class)
+        ->name('cambios.imprimir');
+
     // Hojas de una carga del camión (?hoja=carga|cobro|liquidacion).
     Route::get('cargas/{carga}/imprimir', ImprimirCargaController::class)
         ->name('cargas.imprimir');
@@ -76,4 +81,6 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
         ->name('reportes.inventario.imprimir');
     Route::get('reportes/devoluciones/imprimir', [ImprimirReporteController::class, 'devoluciones'])
         ->name('reportes.devoluciones.imprimir');
+    Route::get('reportes/devoluciones/acta', [ImprimirReporteController::class, 'actaDeBaja'])
+        ->name('reportes.devoluciones.acta');
 });

@@ -32,6 +32,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * regresó a la bodega y se le repuso al cliente) y cada devolución. Sale
  * igual en Excel y en PDF (vista de impresión en un modal).
  *
+ * "Acta de baja": lo dañado del periodo para darlo de baja del inventario
+ * con las firmas (una hoja por bodega; ImprimirReporteController::actaDeBaja).
+ *
  * Lo ven quienes ven las devoluciones (administración, de todas las bodegas
  * o de una; el encargado, de la suya). Las cuentas:
  * App\Domain\Reportes\DevolucionesDelPeriodo.
@@ -151,6 +154,11 @@ class ReporteDevoluciones extends Page
 
                     return Excel::download(new ReporteDevolucionesExcel($reporte, $ver), $reporte->nombreArchivo($ver).'.xlsx');
                 }),
+            VistaImpresion::accion('Acta de baja de inventario', fn (): string => route('reportes.devoluciones.acta', [...$this->parametros(), 'embebido' => 1]), 'acta', 'Acta de baja')
+                ->icon(Heroicon::OutlinedClipboardDocumentCheck)
+                ->color('gray')
+                ->tooltip('Lo que regresó dañado en el periodo, para darlo de baja del inventario con las firmas')
+                ->modalDescription('Lo dañado del periodo, a costo, con las firmas (una hoja por bodega). Lo que pida el SAR para deducir la pérdida, confírmelo con su contador.'),
             VistaImpresion::accion('Devoluciones y pérdidas', fn (): string => route('reportes.devoluciones.imprimir', [...$this->parametros(), 'embebido' => 1])),
         ];
     }

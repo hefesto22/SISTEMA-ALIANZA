@@ -26,6 +26,12 @@ use stdClass;
  *
  * Las cantidades van en la presentación en que regresaron (2 CJ12, 5 UN) y
  * los montos a costo, salvo el crédito, que es lo que se le devolvió (con ISV).
+ *
+ * Lo dañado se da de baja del inventario con el acta de baja del periodo
+ * (acta()): una por bodega, renglón por renglón, con las firmas.
+ *
+ * @phpstan-type ActaRenglon array{fecha: string, devolucion: string, tipo: string, factura: string|null, cliente: string, motivo: string|null, codigo: string, producto: string, proveedor: string, presentacion: string, cantidad: int, costo: float, perdida: float}
+ * @phpstan-type Acta array{bodega: string, direccion: string|null, renglones: list<ActaRenglon>, proveedores: list<array{proveedor: string, productos: int, perdida: float}>, total: float}
  */
 final class DevolucionesDelPeriodo
 {
@@ -268,6 +274,75 @@ final class DevolucionesDelPeriodo
                 'credito'  => $tipo === TipoDevolucion::Credito ? round(self::numero($f->total), 2) : null,
             ];
         }, $filas);
+    }
+
+    /**
+     * El acta de baja del periodo: lo que regresó dañado, renglón por renglón
+     * (cada devolución y cada producto en la presentación en que regresó),
+     * a costo. Una por bodega, porque cada una lo da de baja de su
+     * inventario; con lo de cada proveedor (para el reclamo) y el total.
+     * Sin nada dañado, ninguna.
+     *
+     * @return list<Acta>
+     */
+    public function acta(): array
+    {
+        $filas = $this->consultar(
+            'SELECT b.id AS bodega_id, b.nombre AS bodega, b.direccion, r.devolucion_id, r.numero, r.fecha, r.tipo, r.motivo,'
+            .' COALESCE(r.cliente_nombre, c.nombre) AS cliente, f.numero AS factura,'
+            .' p.id AS producto_id, p.codigo, p.descripcion AS producto, '.self::PROVEEDOR.' AS proveedor, '.self::PRESENTACION.' AS presentacion,'
+            .' SUM(r.cantidad) AS cantidad, SUM(r.cantidad * r.costo) AS perdida'
+            .' FROM renglones r JOIN bodegas b ON b.id = r.bodega_id JOIN clientes c ON c.id = r.cliente_id'
+            .' JOIN productos p ON p.id = r.producto_id JOIN proveedores pv ON pv.id = p.proveedor_id'
+            .' JOIN presentaciones pz ON pz.id = r.presentacion_id JOIN unidades_medida um ON um.id = pz.unidad_medida_id'
+            .' LEFT JOIN facturas f ON f.id = r.factura_id'
+            .' WHERE r.danado'
+            .' GROUP BY b.id, b.nombre, b.direccion, r.devolucion_id, r.numero, r.fecha, r.tipo, r.motivo, r.cliente_nombre, c.nombre, f.numero,'
+            .' p.id, p.codigo, p.descripcion, pv.id, pv.nombre, pv.nombre_corto, pz.id, pz.contenido, um.codigo'
+            .' ORDER BY b.nombre, b.id, r.fecha, r.devolucion_id, p.descripcion, pz.contenido DESC',
+        );
+
+        $actas = [];
+
+        foreach ($filas as $f) {
+            $id = (int) self::numero($f->bodega_id);
+            $cantidad = (int) self::numero($f->cantidad);
+            $perdida = round(self::numero($f->perdida), 2);
+            $factura = self::textoONulo($f->factura);
+            $proveedor = self::texto($f->proveedor);
+
+            $actas[$id] ??= ['bodega' => self::texto($f->bodega), 'direccion' => self::textoONulo($f->direccion), 'renglones' => [], 'proveedores' => [], 'productos' => [], 'total' => 0.0];
+            $actas[$id]['renglones'][] = [
+                'fecha'        => CarbonImmutable::parse(self::texto($f->fecha))->format('d/m/Y'),
+                'devolucion'   => self::textoONulo($f->numero) ?? sprintf('DEV-%06d', (int) self::numero($f->devolucion_id)),
+                'tipo'         => (TipoDevolucion::tryFrom(self::texto($f->tipo)) ?? TipoDevolucion::Cambio)->getLabel(),
+                'factura'      => $factura === null ? null : HojaDeCarga::corto($factura),
+                'cliente'      => self::texto($f->cliente),
+                'motivo'       => self::textoONulo($f->motivo),
+                'codigo'       => self::texto($f->codigo),
+                'producto'     => self::texto($f->producto),
+                'proveedor'    => $proveedor,
+                'presentacion' => self::texto($f->presentacion),
+                'cantidad'     => $cantidad,
+                'costo'        => $cantidad > 0 ? round($perdida / $cantidad, 2) : 0.0,
+                'perdida'      => $perdida,
+            ];
+            $actas[$id]['total'] = round($actas[$id]['total'] + $perdida, 2);
+            $actas[$id]['proveedores'][$proveedor] = round(($actas[$id]['proveedores'][$proveedor] ?? 0.0) + $perdida, 2);
+            $actas[$id]['productos'][$proveedor][(int) self::numero($f->producto_id)] = true;
+        }
+
+        return array_values(array_map(function (array $acta): array {
+            $proveedores = [];
+
+            foreach ($acta['proveedores'] as $nombre => $perdida) {
+                $proveedores[] = ['proveedor' => (string) $nombre, 'productos' => count($acta['productos'][$nombre] ?? []), 'perdida' => $perdida];
+            }
+
+            usort($proveedores, fn (array $a, array $b): int => [$b['perdida'], $a['proveedor']] <=> [$a['perdida'], $b['proveedor']]);
+
+            return ['bodega' => $acta['bodega'], 'direccion' => $acta['direccion'], 'renglones' => $acta['renglones'], 'proveedores' => $proveedores, 'total' => $acta['total']];
+        }, $actas));
     }
 
     /**

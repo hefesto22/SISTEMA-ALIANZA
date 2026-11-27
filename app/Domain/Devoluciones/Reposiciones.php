@@ -25,7 +25,9 @@ use Illuminate\Database\Eloquent\Collection;
  *
  *  - Al registrar el cambio (RegistrarDevolucion) queda Por entregar: al
  *    mismo cliente o, si a él ya se le dio con producto del pedido de otro
- *    cliente, a ese otro (el que se quedó esperando).
+ *    cliente, a ese otro (el que se quedó esperando). Es su orden de
+ *    cambio (CAM-000001, OrdenesDeCambio): se imprime en Pedidos → Por
+ *    imprimir y solo impresa se sube a una carga.
  *  - Al subirlo a una carga (ArmarCarga) sale de la bodega (kárdex
  *    "Reposición") y queda En ruta. Si se quita de la carga o la carga se
  *    borra, regresa a la bodega y vuelve a esperar.
@@ -64,9 +66,9 @@ final class Reposiciones
     }
 
     /**
-     * Los que puede llevar una carga de la bodega: los que esperan carga y,
-     * al cambiar la carga $cargaId, los que ya lleva. Del más viejo al más
-     * nuevo.
+     * Los que puede llevar una carga de la bodega: los que esperan carga con
+     * su orden de cambio ya impresa (OrdenesDeCambio) y, al cambiar la carga
+     * $cargaId, los que ya lleva. Del más viejo al más nuevo.
      *
      * @return Collection<int, Reposicion>
      */
@@ -75,7 +77,7 @@ final class Reposiciones
         return Reposicion::query()
             ->where('bodega_id', $bodegaId)
             ->where(fn (Builder $q): Builder => $q
-                ->where('estado', EstadoReposicion::PorEntregar->value)
+                ->where(fn (Builder $q): Builder => $q->where('estado', EstadoReposicion::PorEntregar->value)->whereNotNull('impresa_at'))
                 ->when($cargaId !== null, fn (Builder $q): Builder => $q->orWhereHas('renglones', fn (Builder $r): Builder => $r
                     ->where('carga_id', $cargaId)
                     ->where('estado', EntregaFactura::EnRuta->value))))
@@ -129,12 +131,17 @@ final class Reposiciones
 
     /**
      * Ya se le dio sin pasar por una carga (la operación de demostración):
-     * sale de la bodega y queda entregada.
+     * sale de la bodega y queda entregada (su orden, como impresa).
      */
     public function entregarSinCarga(Reposicion $reposicion, User $usuario): void
     {
         $this->mover($reposicion, -1, $usuario, 'ENTREGADO');
-        $reposicion->forceFill(['estado' => EstadoReposicion::Entregada, 'entregada_at' => now()])->save();
+        $reposicion->forceFill([
+            'estado'       => EstadoReposicion::Entregada,
+            'entregada_at' => now(),
+            'impresa_at'   => $reposicion->impresa_at ?? now(),
+            'impresiones'  => max(1, $reposicion->impresiones),
+        ])->save();
     }
 
     /**
