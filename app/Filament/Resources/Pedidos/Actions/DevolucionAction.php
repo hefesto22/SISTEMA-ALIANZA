@@ -29,26 +29,26 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\FusedGroup;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 
 /**
- * "Devolución" en un pedido ya entregado (impreso). Primero, qué pasó:
+ * "Devolución" en un pedido ya entregado (impreso), en tres pasos:
  *
- *  - Devolvió producto: de cada producto, cuántas regresan buenas (vuelven
- *    a la bodega) y cuántas dañadas (pérdida). En un cambio se dice cómo se
- *    le entrega: se le lleva en la próxima carga (orden de cambio) o ya se
- *    le dio en el momento con lo que llevaba el camión (no queda nada por
- *    entregarle; al cliente al que al final le falte se le registra el
- *    faltante).
- *  - Le faltó producto: no recibió todo lo de su factura. Por qué: se le dio
- *    a otro cliente en un cambio (ni regresa ni es pérdida), se dañó en el
- *    camión (pérdida) o no se subió (vuelve a contar en la bodega).
+ *  1. Qué pasó: devolvió producto, o le faltó producto de su factura (y
+ *     por qué: se le dio a otro cliente en un cambio, ni regresa ni es
+ *     pérdida; se dañó en el camión, pérdida; no se subió, vuelve a la
+ *     bodega).
+ *  2. Qué regresó (buenas y dañadas) o qué le faltó, producto por producto:
+ *     en la presentación de cada línea y, de una caja, en unidades sueltas.
+ *  3. Qué se le da: lo mismo en la próxima carga (orden de cambio), ya se le
+ *     cambió del camión (solo al devolver: no queda nada pendiente; al
+ *     cliente al que al final le faltó se le registra el faltante) o su
+ *     dinero (crédito, con nota de crédito si está encendida).
  *
- * Y qué se le da: lo mismo (cambio) o crédito (con nota de crédito si está
- * encendida en Configuración). Se anota en la presentación de cada línea y,
- * de una caja, también en unidades sueltas. Lo hace RegistrarDevolucion.
+ * Lo hace RegistrarDevolucion.
  *
  * Sale en Ver pedido; por cada factura, en Ver carga y en Liquidar
  * (deLaCarga()); y en la lista de cargas, al lado de Liquidar (enLaLista():
@@ -61,8 +61,7 @@ final class DevolucionAction
 
     public const FALTO = 'falto';
 
-    public const PROXIMA_CARGA = 'proxima';
-
+    /** Qué se le da: lo mismo pero ya se le dio en el momento con lo del camión (los otros: TipoDevolucion). */
     public const DEL_CAMION = 'camion';
 
     public const POR_OTRO = 'otro';
@@ -85,20 +84,21 @@ final class DevolucionAction
             ->icon(Heroicon::OutlinedArrowUturnLeft)
             ->color('gray')
             ->visible(fn (mixed $record): bool => $record instanceof Pedido && $record->estado === EstadoPedido::Impreso && (Acceso::usuario()?->can('create', Devolucion::class) ?? false))
-            ->modalHeading(fn (Pedido $record): string => "Devolución o faltante · {$record->numero} · {$record->cliente->nombre}")
-            ->modalDescription('Si el cliente regresó producto, «Devolvió producto». Si no recibió todo lo de su factura, «Le faltó producto». Se anota en cajas (CJ) o en unidades sueltas (UN).')
+            ->modalHeading('Devolución o faltante')
+            ->modalDescription(fn (Pedido $record): string => "{$record->cliente->nombre} · pedido {$record->numero}")
+            ->modalIcon(Heroicon::OutlinedArrowUturnLeft)
             ->modalWidth(Width::FiveExtraLarge)
             ->modalSubmitActionLabel('Registrar')
             ->fillForm(fn (Pedido $record): array => [
-                'que'     => self::DEVOLVIO,
-                'causa'   => self::POR_OTRO,
-                'tipo'    => TipoDevolucion::Cambio->value,
-                'entrega' => self::PROXIMA_CARGA,
-                'lineas'  => self::lineas($record),
+                'que'    => self::DEVOLVIO,
+                'causa'  => self::POR_OTRO,
+                'tipo'   => TipoDevolucion::Cambio->value,
+                'lineas' => self::lineas($record),
             ])
             ->schema([
+                // 1. Qué pasó (y, si le faltó, por qué).
                 ToggleButtons::make('que')
-                    ->label('Qué pasó')
+                    ->label('1. ¿Qué pasó?')
                     ->options([
                         self::DEVOLVIO => 'Devolvió producto',
                         self::FALTO    => 'Le faltó producto',
@@ -110,12 +110,19 @@ final class DevolucionAction
                     ->inline()
                     ->required()
                     ->live()
-                    ->helperText(fn (Get $get): string => $get('que') === self::FALTO
-                        ? 'No recibió todo lo que dice su factura.'
-                        : 'Regresó producto que ya se le había entregado.'),
+                    // "Ya se le cambió del camión" no aplica a lo que le faltó.
+                    ->afterStateUpdated(function (Get $get, Set $set): void {
+                        if ($get('que') === self::FALTO && $get('tipo') === self::DEL_CAMION) {
+                            $set('tipo', TipoDevolucion::Cambio->value);
+                        }
+                    }),
                 ToggleButtons::make('causa')
-                    ->label('Por qué le faltó')
-                    ->options(self::CAUSAS)
+                    ->label('¿Por qué le faltó?')
+                    ->options([
+                        self::POR_OTRO => 'Se le dio a otro cliente',
+                        self::SE_DANO  => 'Se dañó en el camión',
+                        self::NO_SALIO => 'No se subió al camión',
+                    ])
                     ->icons([
                         self::POR_OTRO => Heroicon::OutlinedUserGroup,
                         self::SE_DANO  => Heroicon::OutlinedExclamationCircle,
@@ -126,55 +133,28 @@ final class DevolucionAction
                     ->visible(fn (Get $get): bool => $get('que') === self::FALTO)
                     ->live()
                     ->helperText(fn (Get $get): string => match ($get('causa')) {
-                        self::SE_DANO  => 'Es pérdida: sale en el reporte de producto dañado y en el acta de baja. El que salió trae lo dañado de regreso.',
-                        self::NO_SALIO => 'Nunca salió de la bodega: vuelve a contar en la existencia.',
-                        default        => 'Lo que era de él se le dio a otro cliente en un cambio en la ruta: no regresa a la bodega ni es pérdida (eso ya quedó en el cambio del otro).',
+                        self::SE_DANO  => 'Es pérdida: el que salió trae lo dañado de regreso.',
+                        self::NO_SALIO => 'Nunca salió: vuelve a contar en la bodega.',
+                        default        => 'Se le dio en un cambio a otro cliente de la ruta: no regresa ni es pérdida.',
                     }),
-                ToggleButtons::make('tipo')
-                    ->label('Qué se le da al cliente')
-                    ->options(TipoDevolucion::class)
-                    ->icons([
-                        TipoDevolucion::Cambio->value  => Heroicon::OutlinedArrowsRightLeft,
-                        TipoDevolucion::Credito->value => Heroicon::OutlinedBanknotes,
-                    ])
-                    ->inline()
-                    ->required()
-                    ->live()
-                    ->helperText(fn (Get $get): string => match (true) {
-                        $get('que') === self::FALTO && self::esCambio($get) => 'Se le lleva lo que le faltó: sale su orden de cambio (CAM) en Pedidos → Por imprimir; impresa, se sube a la próxima carga. La factura no cambia.',
-                        Configuracion::actual()->notas_credito              => 'Con crédito se emite la nota de crédito (CAI tipo 07) con los datos de la factura.',
-                        default                                             => 'Con crédito queda como crédito interno: la nota de crédito se hace a mano (se enciende en Configuración).',
-                    }),
-                ToggleButtons::make('entrega')
-                    ->label('Cómo se le entrega el cambio')
-                    ->options([
-                        self::PROXIMA_CARGA => 'Se le lleva en la próxima carga',
-                        self::DEL_CAMION    => 'Se le dio en el momento, del camión',
-                    ])
-                    ->icons([
-                        self::PROXIMA_CARGA => Heroicon::OutlinedTruck,
-                        self::DEL_CAMION    => Heroicon::OutlinedCheckCircle,
-                    ])
-                    ->inline()
-                    ->required(fn (Get $get): bool => self::esCambio($get) && $get('que') !== self::FALTO)
-                    ->visible(fn (Get $get): bool => self::esCambio($get) && $get('que') !== self::FALTO)
-                    ->live()
-                    ->helperText(fn (Get $get): string => $get('entrega') === self::DEL_CAMION
-                        ? 'Ya se le dio con lo que llevaba el camión: no queda nada por entregarle. Al cliente al que al final le falte, regístrelo en su factura con «Le faltó producto» (se le dio a otro cliente).'
-                        : 'Se crea su orden de cambio (CAM): sale en Pedidos → Por imprimir; impresa, se sube a la próxima carga y sale de la bodega en ese momento.'),
+
+                // 2. Lo que regresó o lo que le faltó, producto por producto.
                 Repeater::make('lineas')
-                    ->label(fn (Get $get): string => $get('que') === self::FALTO ? 'Lo que le faltó' : 'Lo que regresa')
+                    ->label(fn (Get $get): string => $get('que') === self::FALTO ? '2. ¿Qué le faltó?' : '2. ¿Qué regresó?')
+                    ->helperText(fn (Get $get): string => $get('que') === self::FALTO
+                        ? 'Anote solo lo que no recibió: cajas a la izquierda, unidades sueltas a la derecha.'
+                        : 'Anote solo lo que regresó. Buenas: vuelven a la bodega. Dañadas: son pérdida. Cajas a la izquierda, unidades sueltas a la derecha.')
                     ->table(fn (Get $get): array => $get('que') === self::FALTO
                         ? [
                             TableColumn::make('Producto'),
-                            TableColumn::make('Salió')->width('150px'),
-                            TableColumn::make('Le faltó')->width('230px'),
+                            TableColumn::make('Salió')->width('140px'),
+                            TableColumn::make('Le faltó')->width('220px'),
                         ]
                         : [
                             TableColumn::make('Producto'),
-                            TableColumn::make('Salió')->width('150px'),
-                            TableColumn::make('Buenas (regresan a la bodega)')->width('230px'),
-                            TableColumn::make('Dañadas (pérdida)')->width('230px'),
+                            TableColumn::make('Salió')->width('140px'),
+                            TableColumn::make('Buenas')->width('220px'),
+                            TableColumn::make('Dañadas')->width('220px'),
                         ])
                     ->schema([
                         Hidden::make('id'),
@@ -209,8 +189,38 @@ final class DevolucionAction
                     ->addable(false)
                     ->deletable(false)
                     ->reorderable(false),
+
+                // 3. Qué se le da: una sola decisión (lo mismo después, ya se le dio del camión o su dinero).
+                ToggleButtons::make('tipo')
+                    ->label('3. ¿Qué se le da?')
+                    ->options(fn (Get $get): array => $get('que') === self::FALTO
+                        ? [
+                            TipoDevolucion::Cambio->value  => 'Se le lleva en la próxima carga',
+                            TipoDevolucion::Credito->value => self::dinero(),
+                        ]
+                        : [
+                            TipoDevolucion::Cambio->value  => 'Lo mismo, en la próxima carga',
+                            self::DEL_CAMION               => 'Ya se le cambió del camión',
+                            TipoDevolucion::Credito->value => self::dinero(),
+                        ])
+                    ->icons([
+                        TipoDevolucion::Cambio->value  => Heroicon::OutlinedTruck,
+                        self::DEL_CAMION               => Heroicon::OutlinedCheckCircle,
+                        TipoDevolucion::Credito->value => Heroicon::OutlinedBanknotes,
+                    ])
+                    ->inline()
+                    ->required()
+                    ->live()
+                    ->helperText(fn (Get $get): string => match ($get('tipo')) {
+                        self::DEL_CAMION               => 'Ya lo recibió: no queda nada pendiente. Al cliente al que al final le faltó, regístrelo con «Le faltó producto».',
+                        TipoDevolucion::Credito->value => Configuracion::actual()->notas_credito
+                            ? 'Sale la nota de crédito por lo que pagó; si va en una carga, se descuenta del cuadre.'
+                            : 'Queda como crédito interno por lo que pagó; si va en una carga, se descuenta del cuadre.',
+                        default => 'Sale una orden de cambio en Pedidos → Por imprimir; impresa, se sube a la próxima carga. La factura no cambia.',
+                    }),
+
                 TextInput::make('motivo')
-                    ->label('Motivo')
+                    ->label('Motivo (opcional)')
                     ->placeholder(fn (Get $get): string => $get('que') === self::FALTO ? 'Si no escribe nada, queda el porqué de arriba' : 'Ej. venían golpeados')
                     ->maxLength(200),
             ])
@@ -241,8 +251,9 @@ final class DevolucionAction
                     };
                 }
 
-                $tipo = self::tipo($data['tipo'] ?? null);
-                $delCamion = ! $falto && $tipo === TipoDevolucion::Cambio && ($data['entrega'] ?? null) === self::DEL_CAMION;
+                // "Ya se le cambió del camión" es un cambio que no deja nada por entregar.
+                $delCamion = ! $falto && ($data['tipo'] ?? null) === self::DEL_CAMION;
+                $tipo = $delCamion ? TipoDevolucion::Cambio : self::tipo($data['tipo'] ?? null);
                 $motivo = trim(is_string($data['motivo'] ?? null) ? $data['motivo'] : '');
 
                 try {
@@ -394,6 +405,15 @@ final class DevolucionAction
     }
 
     /**
+     * La opción de crédito: "Su dinero (nota de crédito)" o, con las notas
+     * apagadas en Configuración, "Su dinero (crédito interno)".
+     */
+    private static function dinero(): string
+    {
+        return Configuracion::actual()->notas_credito ? 'Su dinero (nota de crédito)' : 'Su dinero (crédito interno)';
+    }
+
+    /**
      * Lo que se escogió en "Qué se le da al cliente": el campo entrega el
      * enum (TipoDevolucion), no el texto.
      */
@@ -404,16 +424,6 @@ final class DevolucionAction
         }
 
         return TipoDevolucion::tryFrom(is_string($valor) ? $valor : '') ?? TipoDevolucion::Cambio;
-    }
-
-    /**
-     * Si en el formulario se escogió cambio.
-     */
-    private static function esCambio(Get $get): bool
-    {
-        $tipo = $get('tipo');
-
-        return ($tipo instanceof TipoDevolucion ? $tipo->value : $tipo) === TipoDevolucion::Cambio->value;
     }
 
     /**
@@ -484,7 +494,6 @@ final class DevolucionAction
                 ->numeric()
                 ->integer()
                 ->minValue(0)
-                ->placeholder('0')
                 ->suffix(fn (Get $get): string => (string) $get('sigla'))
                 ->visible($visible),
             TextInput::make($campo.'_un')
@@ -492,7 +501,6 @@ final class DevolucionAction
                 ->numeric()
                 ->integer()
                 ->minValue(0)
-                ->placeholder('0')
                 ->suffix(fn (Get $get): string => (string) $get('base'))
                 ->visible(fn (Get $get): bool => (bool) $get('caja') && $visible($get)),
         ];

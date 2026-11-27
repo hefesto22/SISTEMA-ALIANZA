@@ -267,9 +267,8 @@ test('en la ruta, a uno se le cambia con lo del camión y al que al final le fal
     // A la Bendición se le cambió 1 dañada con lo del camión: no queda nada por entregarle.
     Livewire::test(ViewPedido::class, ['record' => $bendicion->getRouteKey()])
         ->callAction('devolucion', data: [
-            'tipo'    => TipoDevolucion::Cambio->value,
-            'entrega' => DevolucionAction::DEL_CAMION,
-            'lineas'  => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
+            'tipo'   => DevolucionAction::DEL_CAMION,
+            'lineas' => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
         ])
         ->assertHasNoActionErrors()
         ->assertNotified();
@@ -371,9 +370,8 @@ test('la devolución se registra desde la carga, por factura: en Ver carga y en 
         ->assertActionVisible('devolucion', ['factura' => $facturaDe($bendicion)->id])
         ->assertActionHidden('devolucion', ['factura' => 999999])
         ->callAction('devolucion', data: [
-            'tipo'    => TipoDevolucion::Cambio->value,
-            'entrega' => DevolucionAction::PROXIMA_CARGA,
-            'lineas'  => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
+            'tipo'   => TipoDevolucion::Cambio->value,
+            'lineas' => [['id' => $bendicion->items()->sole()->id, 'buenas' => 0, 'danadas' => 1]],
         ], arguments: ['factura' => $facturaDe($bendicion)->id])
         ->assertHasNoActionErrors()
         ->assertNotified();
