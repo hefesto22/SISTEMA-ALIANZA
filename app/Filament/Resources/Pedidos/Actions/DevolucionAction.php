@@ -17,22 +17,23 @@ use App\Models\CargaFactura;
 use App\Models\Configuracion;
 use App\Models\Devolucion;
 use App\Models\Pedido;
-use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\ToggleButtons;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\FusedGroup;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Contracts\View\View as ViewContract;
 
 /**
  * "Devolución" en un pedido ya entregado (impreso), en tres pasos:
@@ -64,6 +65,11 @@ final class DevolucionAction
     /** Qué se le da: lo mismo pero ya se le dio en el momento con lo del camión (los otros: TipoDevolucion). */
     public const DEL_CAMION = 'camion';
 
+    /** La cantidad va en unidades sueltas (si no, en la presentación de la línea). */
+    public const SUELTAS = 'un';
+
+    public const CAJAS = 'caja';
+
     public const POR_OTRO = 'otro';
 
     public const SE_DANO = 'danado';
@@ -89,6 +95,8 @@ final class DevolucionAction
             ->modalIcon(Heroicon::OutlinedArrowUturnLeft)
             ->modalWidth(Width::FiveExtraLarge)
             ->modalSubmitActionLabel('Registrar')
+            // Estilo de las opciones (tarjetas) y de las cantidades.
+            ->modalContentFooter(fn (): ViewContract => view('filament.devoluciones.formulario'))
             ->fillForm(fn (Pedido $record): array => [
                 'que'    => self::DEVOLVIO,
                 'causa'  => self::POR_OTRO,
@@ -96,18 +104,18 @@ final class DevolucionAction
                 'lineas' => self::lineas($record),
             ])
             ->schema([
-                // 1. Qué pasó (y, si le faltó, por qué).
-                ToggleButtons::make('que')
-                    ->label('1. ¿Qué pasó?')
+                // Qué pasó (y, si le faltó, por qué).
+                Radio::make('que')
+                    ->label('¿Qué pasó?')
                     ->options([
                         self::DEVOLVIO => 'Devolvió producto',
                         self::FALTO    => 'Le faltó producto',
                     ])
-                    ->icons([
-                        self::DEVOLVIO => Heroicon::OutlinedArrowUturnLeft,
-                        self::FALTO    => Heroicon::OutlinedExclamationTriangle,
+                    ->descriptions([
+                        self::DEVOLVIO => 'Regresó algo que ya había recibido: dañado, vencido o que no quiso.',
+                        self::FALTO    => 'No recibió todo lo que dice su factura.',
                     ])
-                    ->inline()
+                    ->extraAttributes(['class' => 'dev-tarjetas'])
                     ->required()
                     ->live()
                     // "Ya se le cambió del camión" no aplica a lo que le faltó.
@@ -116,45 +124,39 @@ final class DevolucionAction
                             $set('tipo', TipoDevolucion::Cambio->value);
                         }
                     }),
-                ToggleButtons::make('causa')
+                Radio::make('causa')
                     ->label('¿Por qué le faltó?')
                     ->options([
                         self::POR_OTRO => 'Se le dio a otro cliente',
                         self::SE_DANO  => 'Se dañó en el camión',
                         self::NO_SALIO => 'No se subió al camión',
                     ])
-                    ->icons([
-                        self::POR_OTRO => Heroicon::OutlinedUserGroup,
-                        self::SE_DANO  => Heroicon::OutlinedExclamationCircle,
-                        self::NO_SALIO => Heroicon::OutlinedHomeModern,
-                    ])
-                    ->inline()
-                    ->required(fn (Get $get): bool => $get('que') === self::FALTO)
-                    ->visible(fn (Get $get): bool => $get('que') === self::FALTO)
-                    ->live()
-                    ->helperText(fn (Get $get): string => match ($get('causa')) {
-                        self::SE_DANO  => 'Es pérdida: el que salió trae lo dañado de regreso.',
+                    ->descriptions([
+                        self::POR_OTRO => 'Se usó en la ruta para un cambio. No regresa ni es pérdida.',
+                        self::SE_DANO  => 'Es pérdida. Lo dañado regresa con el camión.',
                         self::NO_SALIO => 'Nunca salió: vuelve a contar en la bodega.',
-                        default        => 'Se le dio en un cambio a otro cliente de la ruta: no regresa ni es pérdida.',
-                    }),
+                    ])
+                    ->extraAttributes(['class' => 'dev-tarjetas'])
+                    ->required(fn (Get $get): bool => $get('que') === self::FALTO)
+                    ->visible(fn (Get $get): bool => $get('que') === self::FALTO),
 
-                // 2. Lo que regresó o lo que le faltó, producto por producto.
+                // Lo que regresó o lo que le faltó, producto por producto.
                 Repeater::make('lineas')
-                    ->label(fn (Get $get): string => $get('que') === self::FALTO ? '2. ¿Qué le faltó?' : '2. ¿Qué regresó?')
+                    ->label(fn (Get $get): string => $get('que') === self::FALTO ? '¿Qué le faltó?' : '¿Qué regresó?')
                     ->helperText(fn (Get $get): string => $get('que') === self::FALTO
-                        ? 'Anote solo lo que no recibió: cajas a la izquierda, unidades sueltas a la derecha.'
-                        : 'Anote solo lo que regresó. Buenas: vuelven a la bodega. Dañadas: son pérdida. Cajas a la izquierda, unidades sueltas a la derecha.')
+                        ? 'Deje en blanco lo que sí recibió.'
+                        : 'Deje en blanco lo que no regresó.')
                     ->table(fn (Get $get): array => $get('que') === self::FALTO
                         ? [
                             TableColumn::make('Producto'),
-                            TableColumn::make('Salió')->width('140px'),
-                            TableColumn::make('Le faltó')->width('220px'),
+                            TableColumn::make('Salió')->width('130px'),
+                            TableColumn::make('Le faltó')->width('210px'),
                         ]
                         : [
                             TableColumn::make('Producto'),
-                            TableColumn::make('Salió')->width('140px'),
-                            TableColumn::make('Buenas')->width('220px'),
-                            TableColumn::make('Dañadas')->width('220px'),
+                            TableColumn::make('Salió')->width('130px'),
+                            TableColumn::make('Buenas')->width('210px'),
+                            TableColumn::make('Dañadas')->width('210px'),
                         ])
                     ->schema([
                         Hidden::make('id'),
@@ -174,50 +176,43 @@ final class DevolucionAction
                             ->hiddenLabel()
                             ->state(fn (Get $get): string => (string) $get('salio'))
                             ->helperText(fn (Get $get): string => (string) $get('puede')),
-                        // La tercera columna: buenas o, en un faltante, lo que le faltó.
-                        FusedGroup::make([
-                            ...self::cantidades('buenas', fn (Get $get): bool => $get('../../que') !== self::FALTO),
-                            ...self::cantidades('falto', fn (Get $get): bool => $get('../../que') === self::FALTO),
-                        ])
-                            ->hiddenLabel()
-                            ->columns(fn (Get $get): int => $get('caja') ? 2 : 1),
-                        FusedGroup::make(self::cantidades('danadas', fn (): bool => true))
-                            ->hiddenLabel()
-                            ->columns(fn (Get $get): int => $get('caja') ? 2 : 1)
+                        // La tercera columna: buenas o, en un faltante, lo que le faltó (una sola celda).
+                        Group::make([
+                            self::cantidad('buenas')
+                                ->visible(fn (Get $get): bool => $get('../../que') !== self::FALTO),
+                            self::cantidad('falto')
+                                ->visible(fn (Get $get): bool => $get('../../que') === self::FALTO),
+                        ]),
+                        self::cantidad('danadas')
                             ->visible(fn (Get $get): bool => $get('../../que') !== self::FALTO),
                     ])
                     ->addable(false)
                     ->deletable(false)
                     ->reorderable(false),
 
-                // 3. Qué se le da: una sola decisión (lo mismo después, ya se le dio del camión o su dinero).
-                ToggleButtons::make('tipo')
-                    ->label('3. ¿Qué se le da?')
+                // Qué se le da: una sola decisión.
+                Radio::make('tipo')
+                    ->label('¿Qué se le da?')
                     ->options(fn (Get $get): array => $get('que') === self::FALTO
                         ? [
                             TipoDevolucion::Cambio->value  => 'Se le lleva en la próxima carga',
-                            TipoDevolucion::Credito->value => self::dinero(),
+                            TipoDevolucion::Credito->value => 'Su dinero',
                         ]
                         : [
                             TipoDevolucion::Cambio->value  => 'Lo mismo, en la próxima carga',
                             self::DEL_CAMION               => 'Ya se le cambió del camión',
-                            TipoDevolucion::Credito->value => self::dinero(),
+                            TipoDevolucion::Credito->value => 'Su dinero',
                         ])
-                    ->icons([
-                        TipoDevolucion::Cambio->value  => Heroicon::OutlinedTruck,
-                        self::DEL_CAMION               => Heroicon::OutlinedCheckCircle,
-                        TipoDevolucion::Credito->value => Heroicon::OutlinedBanknotes,
-                    ])
-                    ->inline()
-                    ->required()
-                    ->live()
-                    ->helperText(fn (Get $get): string => match ($get('tipo')) {
-                        self::DEL_CAMION               => 'Ya lo recibió: no queda nada pendiente. Al cliente al que al final le faltó, regístrelo con «Le faltó producto».',
+                    ->descriptions(fn (): array => [
+                        TipoDevolucion::Cambio->value  => 'Sale una orden de cambio para imprimir y subir al camión. La factura no cambia.',
+                        self::DEL_CAMION               => 'Ya lo recibió: no queda nada pendiente.',
                         TipoDevolucion::Credito->value => Configuracion::actual()->notas_credito
-                            ? 'Sale la nota de crédito por lo que pagó; si va en una carga, se descuenta del cuadre.'
-                            : 'Queda como crédito interno por lo que pagó; si va en una carga, se descuenta del cuadre.',
-                        default => 'Sale una orden de cambio en Pedidos → Por imprimir; impresa, se sube a la próxima carga. La factura no cambia.',
-                    }),
+                            ? 'Nota de crédito por lo que pagó.'
+                            : 'Crédito interno por lo que pagó.',
+                    ])
+                    ->extraAttributes(['class' => 'dev-tarjetas'])
+                    ->required()
+                    ->live(),
 
                 TextInput::make('motivo')
                     ->label('Motivo (opcional)')
@@ -240,14 +235,22 @@ final class DevolucionAction
                         continue;
                     }
 
-                    $cuantas = fn (string $campo): int => is_numeric($fila[$campo] ?? null) ? (int) $fila[$campo] : 0;
+                    // Cada cantidad va en la presentación de la línea (CJ12) o en unidades sueltas (UN), según lo escogido a su lado.
+                    $partes = function (string $campo) use ($fila): array {
+                        $cuantas = is_numeric($fila[$campo] ?? null) ? (int) $fila[$campo] : 0;
+
+                        return ($fila[$campo.'_en'] ?? null) === self::SUELTAS ? [0, $cuantas] : [$cuantas, 0];
+                    };
+                    [$buenas, $buenasSueltas] = $partes('buenas');
+                    [$danadas, $danadasSueltas] = $partes('danadas');
+                    [$falta, $faltaSueltas] = $partes('falto');
 
                     // En un faltante, lo que le faltó va como dañado, como bueno (no salió) o como que se le dio a otro.
                     $lineas[(int) $fila['id']] = match (true) {
-                        ! $falto                  => ['buenas' => $cuantas('buenas'), 'danadas' => $cuantas('danadas'), 'buenas_un' => $cuantas('buenas_un'), 'danadas_un' => $cuantas('danadas_un')],
-                        $causa === self::SE_DANO  => ['danadas' => $cuantas('falto'), 'danadas_un' => $cuantas('falto_un')],
-                        $causa === self::NO_SALIO => ['buenas' => $cuantas('falto'), 'buenas_un' => $cuantas('falto_un')],
-                        default                   => ['faltan' => $cuantas('falto'), 'faltan_un' => $cuantas('falto_un')],
+                        ! $falto                  => ['buenas' => $buenas, 'danadas' => $danadas, 'buenas_un' => $buenasSueltas, 'danadas_un' => $danadasSueltas],
+                        $causa === self::SE_DANO  => ['danadas' => $falta, 'danadas_un' => $faltaSueltas],
+                        $causa === self::NO_SALIO => ['buenas' => $falta, 'buenas_un' => $faltaSueltas],
+                        default                   => ['faltan' => $falta, 'faltan_un' => $faltaSueltas],
                     };
                 }
 
@@ -433,7 +436,7 @@ final class DevolucionAction
      * anota: la presentación de la línea (sigla) y, de una caja, las
      * unidades sueltas (base).
      *
-     * @return list<array{id: int, producto: string, codigo: string, salio: string, puede: string, sigla: string, base: string, caja: bool, buenas: null, danadas: null, falto: null, buenas_un: null, danadas_un: null, falto_un: null}>
+     * @return list<array{id: int, producto: string, codigo: string, salio: string, puede: string, sigla: string, base: string, caja: bool, buenas: null, danadas: null, falto: null, buenas_en: string, danadas_en: string, falto_en: string}>
      */
     public static function lineas(Pedido $pedido): array
     {
@@ -468,9 +471,9 @@ final class DevolucionAction
                 'buenas'     => null,
                 'danadas'    => null,
                 'falto'      => null,
-                'buenas_un'  => null,
-                'danadas_un' => null,
-                'falto_un'   => null,
+                'buenas_en'  => self::CAJAS,
+                'danadas_en' => self::CAJAS,
+                'falto_en'   => self::CAJAS,
             ];
         }
 
@@ -478,31 +481,31 @@ final class DevolucionAction
     }
 
     /**
-     * Buenas, dañadas o lo que le faltó de una línea: en su presentación
-     * (CJ12, UN…) y, si es una caja, también unidades sueltas (UN); van
-     * juntas en la misma celda (FusedGroup).
-     *
-     * @param Closure(Get): bool $visible
-     *
-     * @return list<TextInput>
+     * Una cantidad de la línea (buenas, dañadas o lo que le faltó): el número
+     * y, si la línea es una caja, en qué se cuenta (la caja, CJ12, o unidades
+     * sueltas, UN), juntos en la misma celda. En una línea en unidades, solo
+     * el número con su unidad.
      */
-    private static function cantidades(string $campo, Closure $visible): array
+    private static function cantidad(string $campo): FusedGroup
     {
-        return [
+        return FusedGroup::make([
             TextInput::make($campo)
                 ->hiddenLabel()
                 ->numeric()
                 ->integer()
                 ->minValue(0)
-                ->suffix(fn (Get $get): string => (string) $get('sigla'))
-                ->visible($visible),
-            TextInput::make($campo.'_un')
+                ->extraInputAttributes(['class' => 'dev-numero'])
+                ->suffix(fn (Get $get): ?string => $get('caja') ? null : (string) $get('sigla'))
+                ->columnSpan(fn (Get $get): int => $get('caja') ? 1 : 2),
+            Select::make($campo.'_en')
                 ->hiddenLabel()
-                ->numeric()
-                ->integer()
-                ->minValue(0)
-                ->suffix(fn (Get $get): string => (string) $get('base'))
-                ->visible(fn (Get $get): bool => (bool) $get('caja') && $visible($get)),
-        ];
+                ->native()
+                ->selectablePlaceholder(false)
+                ->options(fn (Get $get): array => [self::CAJAS => (string) $get('sigla'), self::SUELTAS => (string) $get('base')])
+                ->visible(fn (Get $get): bool => (bool) $get('caja'))
+                ->columnSpan(1),
+        ])
+            ->hiddenLabel()
+            ->columns(2);
     }
 }

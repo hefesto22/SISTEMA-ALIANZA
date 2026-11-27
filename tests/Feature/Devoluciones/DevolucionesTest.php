@@ -224,10 +224,10 @@ test('el formulario dice en qué salió cada producto y la caja se anota en caja
 
     Livewire::test(ViewPedido::class, ['record' => $this->pedido->getRouteKey()])
         ->mountAction('devolucion')
-        ->assertMountedActionModalSee(['1. ¿Qué pasó?', '2. ¿Qué regresó?', '3. ¿Qué se le da?', '10 UN', '1 CJ12', 'son 12 UN', 'Buenas: vuelven a la bodega'])
+        ->assertMountedActionModalSee(['¿Qué pasó?', '¿Qué regresó?', '¿Qué se le da?', 'Lo mismo, en la próxima carga', '10 UN', '1 CJ12', 'son 12 UN'])
         ->fillForm([
             'tipo'   => TipoDevolucion::Credito->value,
-            'lineas' => [1 => ['danadas_un' => 3]],
+            'lineas' => [1 => ['danadas' => 3, 'danadas_en' => DevolucionAction::SUELTAS]],
         ])
         ->callMountedAction()
         ->assertHasNoActionErrors()
