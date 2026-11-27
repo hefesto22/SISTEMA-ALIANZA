@@ -9,7 +9,9 @@
     // La ruta en que se vendió (fija desde la primera factura); sin facturar, la de hoy.
     $ruta = $pedido->ruta ?? \App\Models\Ruta::delPedido($pedido);
     $cliente = $pedido->cliente;
-    $lineas = $pedido->items()->count();
+    // Los regalos de promoción no cuentan como productos: van aparte.
+    $lineas = $pedido->items()->where('bonificacion', false)->count();
+    $regalos = $pedido->items()->where('bonificacion', true)->count();
     $porSustituir = $pedido->esReimpresion() ? $pedido->facturaPorSustituir() : null;
     $telefono = filled($cliente->telefono) ? (string) preg_replace('/^(\d{4})(\d{4})$/', '$1-$2', $cliente->telefono) : null;
     $lugar = collect([
@@ -114,7 +116,7 @@
 
     <div class="vp-pie">
         <div class="vp-pie-izq">
-            <span class="vp-tenue">{{ $lineas }} {{ $lineas === 1 ? 'producto' : 'productos' }}</span>
+            <span class="vp-tenue">{{ $lineas }} {{ $lineas === 1 ? 'producto' : 'productos' }}{{ $regalos > 0 ? ' + '.$regalos.($regalos === 1 ? ' regalo' : ' regalos') : '' }}</span>
             @if ($pedido->factura)
                 <span class="vp-tenue">Factura {{ $pedido->factura->numero }}</span>
             @endif

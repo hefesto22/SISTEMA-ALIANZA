@@ -95,6 +95,28 @@
         .vp-totales-total dt { color: inherit; font-weight: 700; }
         .vp-totales-total dd { font-size: 1.125rem; font-weight: 800; }
 
+        /* Regalos de promoción: "Gratis" en la fila y aparte, abajo de los totales. */
+        .vp-linea-total.vp-gratis { color: var(--success-600); }
+        .dark .vp-linea-total.vp-gratis { color: var(--success-400); }
+        .vp-linea.vp-regalo .vp-cant { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 14%, transparent); outline-color: color-mix(in oklab, var(--success-500) 45%, transparent); }
+        .dark .vp-linea.vp-regalo .vp-cant { color: var(--success-300); }
+        .vp-regalos { display: grid; gap: 0.4rem; width: 100%; max-width: 20rem; margin: 0.9rem 0 0 auto; padding: 0.65rem 0.75rem; border-radius: 0.625rem; background: color-mix(in oklab, var(--success-500) 9%, transparent); outline: 1px solid color-mix(in oklab, var(--success-500) 30%, transparent); }
+        .vp-regalos-titulo { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; font-weight: 700; color: var(--success-700); }
+        .dark .vp-regalos-titulo { color: var(--success-400); }
+        .vp-regalos-titulo svg { width: 1rem; height: 1rem; }
+        .vp-regalos ul { display: grid; gap: 0.3rem; list-style: none; }
+        .vp-regalos li { display: grid; gap: 0.05rem; font-size: 0.8rem; line-height: 1.35; overflow-wrap: anywhere; }
+
+        /* Botones de arriba (Cambiar, Anular, Más…): en el teléfono, parejos y a todo lo ancho. */
+        @media (max-width: 639.98px) {
+            .fi-resource-pedidos.fi-resource-view-record-page .fi-header-actions-ctn,
+            .fi-resource-pedidos.fi-resource-view-record-page .fi-header-actions-ctn > .fi-ac { width: 100%; }
+            .fi-resource-pedidos.fi-resource-view-record-page .fi-header-actions-ctn > .fi-ac { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+            .fi-resource-pedidos.fi-resource-view-record-page .fi-header-actions-ctn > .fi-ac > .fi-btn { flex: 1 1 auto; justify-content: center; padding-block: 0.6rem; white-space: nowrap; }
+            .fi-resource-pedidos.fi-resource-view-record-page .fi-header-actions-ctn > .fi-ac > .fi-dropdown { flex: 0 0 auto; }
+            .fi-resource-pedidos.fi-resource-view-record-page .fi-header-actions-ctn > .fi-ac > .fi-dropdown .fi-btn { padding-block: 0.6rem; white-space: nowrap; }
+        }
+
         /* ── Facturas ── */
         .vp-factura { display: grid; gap: 0.2rem; padding: 0.7rem 0.875rem; border-bottom: 1px solid var(--vp-linea); }
         .vp-factura:last-child { border-bottom: 0; }
@@ -109,6 +131,7 @@
             .fi-main .pv > .fi-section:not(.fi-section-not-contained):not(.fi-divided) > .fi-section-content-ctn > .fi-section-content { padding: 1rem; }
             .vp-linea, .vp-factura { padding: 0.65rem 0.75rem; }
             .vp-totales { max-width: none; padding: 0 0.75rem; }
+            .vp-regalos { max-width: none; }
         }
     </style>
 @endonce

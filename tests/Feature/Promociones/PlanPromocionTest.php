@@ -10,6 +10,7 @@ use App\Domain\Promociones\UsoDePromociones;
 use App\Enums\EstadoPedido;
 use App\Enums\Rol;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
+use App\Filament\Resources\Pedidos\Pages\ViewPedido;
 use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
 use App\Filament\Resources\PlanesPromocion\Pages\CreatePlanPromocion;
 use App\Filament\Resources\PlanesPromocion\Pages\ListPlanesPromocion;
@@ -220,6 +221,30 @@ test('una línea con 0 autorizadas no se ofrece en la preventa ni da regalo', fu
     expect($hoy['promos'])->toBe([])
         ->and($resumen['promociones'])->not->toContain('agotada')
         ->and(regaloDe(preventaNectar($this, [[caja($this->manzana), 1]])))->toBe(0);
+});
+
+test('el pedido con regalo cuadra: el regalo sale gratis y aparte, y el resumen dice cuánto lleva y cuánto queda', function (): void {
+    $linea = planNectar($this, 5)->promociones()->sole();
+    $pedido = preventaNectar($this, [[caja($this->manzana), 1]]);
+    $cobrado = round((float) $pedido->items()->where('bonificacion', false)->sum('subtotal'), 2);
+
+    $this->actingAs($this->admin);
+
+    Livewire::test(ViewPedido::class, ['record' => $pedido->getRouteKey()])
+        ->assertSee('Productos (sin ISV)')
+        ->assertSee(lempiras($cobrado))
+        ->assertSee('Total a cobrar')
+        ->assertSee('Gratis')
+        ->assertSee('Regalo de la promoción 24+1: no se cobra')
+        ->assertSee('Regalos de promoción')
+        ->assertSee('1 producto + 1 regalo')
+        ->assertDontSee('Descuento por promociones');
+
+    // Con 2 cajas este pedido lleva 2 de regalo; al tope le quedan 4 sin contar este pedido.
+    $resumen = PedidoForm::resumenDe([['id' => null, 'producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 2]], $this->bodega->id);
+
+    expect($resumen['regalos'])->toBe([$linea->id => 2])
+        ->and($resumen['quedan'])->toBe([$linea->id => 4]);
 });
 
 test('no se regala más de lo autorizado: se aparta desde la preventa y al anular regresa', function (): void {

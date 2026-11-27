@@ -199,7 +199,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      *
      * @param array<mixed> $lineas
      *
-     * @return array{total: float, ahorro: float, rebaja: float, promociones: string, descuentos: array<int, float>}
+     * @return array{total: float, ahorro: float, rebaja: float, promociones: string, descuentos: array<int, float>, regalos: array<int, int>, quedan: array<int, int>}
      */
     #[ExposedLivewireMethod]
     #[Renderless]

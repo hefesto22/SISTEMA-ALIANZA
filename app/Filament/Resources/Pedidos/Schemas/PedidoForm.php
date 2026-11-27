@@ -229,14 +229,24 @@ class PedidoForm
      * producto sin promoción lleva el descuento, sin bajar del costo;
      * "rebaja" es lo que suma (sin ISV), aparte de las promociones.
      *
+     * Para que la hoja de promociones diga cuánto queda al momento:
+     * "regalos" es lo que este pedido lleva de cada promoción y "quedan" lo
+     * que le queda a cada una con tope sin contar este pedido (con los
+     * pedidos que otros guardaron mientras tanto).
+     *
      * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      *
-     * @return array{total: float, ahorro: float, rebaja: float, promociones: string, descuentos: array<int, float>}
+     * @return array{total: float, ahorro: float, rebaja: float, promociones: string, descuentos: array<int, float>, regalos: array<int, int>, quedan: array<int, int>}
      */
     public static function resumenDe(array $lineas, ?int $bodegaId = null, ?int $sinPedido = null, float $porcentaje = 0.0): array
     {
-        [$conProducto, $promociones] = self::calcular($lineas, $bodegaId, $sinPedido);
+        [$conProducto, $promociones, $quedan] = self::calcular($lineas, $bodegaId, $sinPedido);
         $tasaIsv = CalculadoraPrecio::tasaIsv();
+        $regalos = [];
+
+        foreach ($promociones->regalos as $regalo) {
+            $regalos[$regalo->promocion->id] = ($regalos[$regalo->promocion->id] ?? 0) + $regalo->cantidad;
+        }
         $total = 0.0;
         $ahorro = 0.0;
         $rebaja = 0.0;
@@ -277,6 +287,8 @@ class PedidoForm
             'rebaja'      => round($rebaja, 2),
             'promociones' => Promocion::query()->vigentes()->paraBodega($bodegaId)->exists() ? self::promocionesAplicadas($promociones) : '',
             'descuentos'  => $descuentos,
+            'regalos'     => $regalos,
+            'quedan'      => $quedan,
         ];
     }
 
@@ -433,12 +445,12 @@ class PedidoForm
      *
      * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      *
-     * @return array{0: array<int, array{producto: Producto, presentacion: Presentacion, cantidad: int}>, 1: ResultadoPromociones}
+     * @return array{0: array<int, array{producto: Producto, presentacion: Presentacion, cantidad: int}>, 1: ResultadoPromociones, 2: array<int, int>} [líneas, promociones, lo que le queda a cada una con tope]
      */
     private static function calcular(array $lineas, ?int $bodegaId, ?int $sinPedido = null): array
     {
         if ($lineas === []) {
-            return [[], new ResultadoPromociones];
+            return [[], new ResultadoPromociones, []];
         }
 
         $presentaciones = Presentacion::query()->with('producto')->whereKey(array_column($lineas, 'presentacion_id'))->get()->keyBy('id');
@@ -459,8 +471,9 @@ class PedidoForm
         }
 
         $vigentes = Promocion::query()->vigentes()->paraBodega($bodegaId)->with([...Promocion::PARA_CALCULAR, 'condiciones.producto'])->orderBy('id')->get();
+        $disponibles = UsoDePromociones::disponibles($vigentes, $sinPedido);
 
-        return [$conProducto, app(MotorPromociones::class)->calcular($paraMotor, $vigentes, UsoDePromociones::disponibles($vigentes, $sinPedido))];
+        return [$conProducto, app(MotorPromociones::class)->calcular($paraMotor, $vigentes, $disponibles), $disponibles];
     }
 
     private static function promocionesAplicadas(ResultadoPromociones $resultado): string

@@ -6,7 +6,8 @@
     /** @var \App\Models\Pedido $pedido */
     $pedido = $getRecord();
     $cliente = $pedido->cliente;
-    $lineas = (int) ($pedido->items_count ?? $pedido->items()->count());
+    // Sin los regalos de promoción (PedidoResource cuenta solo lo que se cobra).
+    $lineas = (int) ($pedido->items_count ?? $pedido->items()->where('bonificacion', false)->count());
     $ubicacion = collect([$pedido->numero, $cliente->codigo, $cliente->municipio?->nombre])->filter()->implode(' · ');
     $factura = $pedido->factura;
     // La carga en que va (o en que se entregó): la pestaña Cargado.

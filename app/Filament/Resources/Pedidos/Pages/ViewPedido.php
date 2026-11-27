@@ -39,15 +39,20 @@ class ViewPedido extends ViewRecord
             ImprimirPedidoAction::make(),
             DevolucionAction::make(),
             ImprimirPedidoAction::copia(),
-            EditAction::make(),
-            AnularPedidoAction::make(),
+            EditAction::make()
+                ->label('Cambiar')
+                ->icon(Heroicon::OutlinedPencilSquare),
+            AnularPedidoAction::make()
+                ->outlined(),
             ActionGroup::make([
                 ImprimirPedidoAction::vistaPrevia(),
                 ImprimirPedidoAction::noSalio(),
             ])
+                ->label('Más')
                 ->icon(Heroicon::EllipsisHorizontal)
-                ->color('gray')
-                ->tooltip('Más'),
+                ->button()
+                ->outlined()
+                ->color('gray'),
         ];
     }
 

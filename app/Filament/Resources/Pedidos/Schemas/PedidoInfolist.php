@@ -37,8 +37,8 @@ class PedidoInfolist
                 Section::make('Productos')
                     ->icon(Heroicon::OutlinedShoppingCart)
                     ->description(fn (Pedido $record): string => $record->estaPendiente()
-                        ? 'Precios de hoy, sin ISV. Bodega confirma cantidades y precios al validar.'
-                        : 'Lo que confirmó bodega. Precios sin ISV.')
+                        ? 'Precio de cada uno sin ISV; el monto de la derecha ya lleva ISV. Bodega confirma cantidades y precios al validar.'
+                        : 'Lo que confirmó bodega. Precio de cada uno sin ISV; el monto de la derecha ya lleva ISV.')
                     ->columnSpanFull()
                     ->extraAttributes(['class' => 'pv'])
                     ->schema([

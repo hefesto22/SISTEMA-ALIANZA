@@ -59,6 +59,7 @@
         'ahorro'     => $resumen['ahorro'],
         'rebaja'     => $resumen['rebaja'],
         'promos'     => $resumen['promociones'],
+        'regalos'    => (object) $resumen['regalos'],
         'tasa'       => CalculadoraPrecio::tasaIsv(),
         'simbolo'    => (string) config('honduras.moneda.simbolo', 'L.'),
         'maximo'     => LineasPedido::MAXIMO_CANTIDAD,
@@ -360,6 +361,7 @@
             ahorro: @js($config['ahorro']),
             rebaja: @js($config['rebaja']),
             promociones: @js($config['promos']),
+            regalosPedido: @js($config['regalos']),
 
             init() {
                 if (! Array.isArray(this.lineas)) {
@@ -688,6 +690,7 @@
                     this.rebaja = 0
                     this.promociones = ''
                     this.descuentos = {}
+                    this.regalosPedido = {}
 
                     return
                 }
@@ -710,6 +713,14 @@
                     this.rebaja = r.rebaja ?? 0
                     this.promociones = r.promociones
                     this.descuentos = r.descuentos ?? {}
+                    this.regalosPedido = r.regalos ?? {}
+
+                    {{-- Lo que queda de cada tope, al momento (con lo que otros guardaron). --}}
+                    for (const pr of this.promosHoy) {
+                        if (r.quedan && r.quedan[pr.id] !== undefined) {
+                            pr.quedan = r.quedan[pr.id]
+                        }
+                    }
                 } catch (e) {}
             },
 
@@ -856,10 +867,12 @@
                 return this.promosHoy.filter((pr) => ! this.agotada(pr) && (pr.compra.includes(Number(id)) || ((pr.opciones ?? []).length === 0 && Number(pr.regalo) === Number(id))))
             },
 
+            {{-- Al abrir la hoja se piden otra vez: lo que queda de cada tope, con los pedidos que otros guardaron. --}}
             abrirPromos() {
                 this.buscarPromo = ''
                 this.avisoPromo = ''
                 this.verPromos = true
+                this.pedirPromos()
             },
 
             {{-- Las de la hoja que tienen el producto buscado (sin importar tildes ni mayúsculas). --}}
@@ -881,23 +894,45 @@
                 return op ? { ...pr, lineas: op.lineas, solo: op } : pr
             },
 
-            {{-- Con tope (plan del proveedor): ya se regaló todo lo autorizado. --}}
+            {{-- Lo que este pedido ya lleva de regalo de esa promoción (lo dice el servidor en cada resumen). --}}
+            llevaDe(pr) {
+                return Math.max(0, Number(this.regalosPedido?.[pr.id] ?? 0))
+            },
+
+            {{-- Lo que le queda al tope contando lo de este pedido (null = sin tope). --}}
+            quedanAhora(pr) {
+                if (pr.quedan === null || pr.quedan === undefined) return null
+
+                return Math.max(0, Number(pr.quedan) - this.llevaDe(pr))
+            },
+
+            {{-- Con tope (plan del proveedor): ya no queda regalo para dar. --}}
             agotada(pr) {
-                return pr.quedan !== null && pr.quedan !== undefined && Number(pr.quedan) <= 0
+                const queda = this.quedanAhora(pr)
+
+                return queda !== null && queda <= 0
             },
 
             {{-- Lo que queda del tope, de 0 a 100 (la barra de la tarjeta). --}}
             quedaPct(pr) {
-                return Number(pr.tope) > 0 ? Math.max(0, Math.min(100, Math.round(Number(pr.quedan ?? 0) / Number(pr.tope) * 100))) : 0
+                return Number(pr.tope) > 0 ? Math.max(0, Math.min(100, Math.round(Number(this.quedanAhora(pr) ?? 0) / Number(pr.tope) * 100))) : 0
             },
 
-            {{-- "Quedan 140 de 500 UN de regalo" / "Agotada: ya se regalaron las 500 UN autorizadas". --}}
+            {{-- "Quedan 139 de 500 UN de regalo · este pedido lleva 1" / "Agotada: ya se regalaron las 500 UN autorizadas". --}}
             topeTexto(pr) {
-                if (pr.quedan === null || pr.quedan === undefined) return ''
+                const queda = this.quedanAhora(pr)
 
-                return this.agotada(pr)
-                    ? 'Agotada: ya se regalaron las ' + pr.tope + ' ' + pr.sigla + ' autorizadas.'
-                    : 'Quedan ' + pr.quedan + ' de ' + pr.tope + ' ' + pr.sigla + ' de regalo.'
+                if (queda === null) return ''
+
+                const lleva = this.llevaDe(pr)
+
+                if (queda <= 0) {
+                    return lleva > 0
+                        ? 'Este pedido lleva las últimas ' + lleva + ' ' + pr.sigla + ' de regalo autorizadas.'
+                        : 'Agotada: ya se regalaron las ' + pr.tope + ' ' + pr.sigla + ' autorizadas.'
+                }
+
+                return 'Quedan ' + queda + ' de ' + pr.tope + ' ' + pr.sigla + ' de regalo' + (lleva > 0 ? ' · este pedido lleva ' + lleva : '') + '.'
             },
 
             enPromo(id) {
@@ -1012,9 +1047,9 @@
                 const ganadas = this.armar.mezcla
                     ? Math.floor(this.totalArmar() / n) * m
                     : this.armar.filas.reduce((t, f) => t + Math.floor(this.unidadesArmar(f) / n) * m, 0)
-                const quedan = this.armar.pr.quedan
+                const quedan = this.quedanAhora(this.armar.pr)
 
-                return quedan === null || quedan === undefined ? ganadas : Math.min(ganadas, Math.max(0, Number(quedan)))
+                return quedan === null ? ganadas : Math.min(ganadas, quedan)
             },
 
             {{-- "Lleva 18 UN · le faltan 6 para otro regalo", "Lleva 24 UN · regalo: 2" … --}}
@@ -1042,9 +1077,9 @@
                 }
 
                 const ganadas = this.armar.mezcla ? Math.floor(total / n) : this.armar.filas.reduce((t, f) => t + Math.floor(this.unidadesArmar(f) / n), 0)
-                const quedan = this.armar.pr.quedan
+                const quedan = this.quedanAhora(this.armar.pr)
 
-                if (quedan !== null && quedan !== undefined && ganadas * Math.max(1, Number(this.armar.pr.regala ?? 1)) > Number(quedan)) {
+                if (quedan !== null && ganadas * Math.max(1, Number(this.armar.pr.regala ?? 1)) > quedan) {
                     texto += ' (solo quedan ' + quedan + ' de regalo)'
                 }
 
