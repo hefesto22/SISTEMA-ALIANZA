@@ -17,7 +17,8 @@
       un poco más grande y los importes al pie de la hoja.
     Emisor arriba; factura y cliente a la izquierda, CAI, fecha y forma de
     pago a la derecha; datos del adquiriente exonerado; el detalle (CJ y UN,
-    Código, Descripción, Precio Unit., Desc., I.S.V. y Total con ISV, G
+    Código, Descripción, Precio Unit. (lo que sale cada unidad, uno solo
+    aunque vayan cajas y sueltas), Desc., I.S.V. y Total con ISV, G
     gravado / E exento; renglones de App\Domain\Facturacion\RenglonFactura)
     hasta "Fin del Detalle de la Factura"; abajo observaciones, total en
     letras, rango autorizado, fecha límite, firma y los importes (Acuerdo
@@ -112,8 +113,6 @@
         .detalle .letra { width: 1.4em; padding-left: 3px; padding-right: 1px; text-align: left; }
         .detalle tr { break-inside: avoid; }
         .detalle .nota { display: block; font-size: var(--nota); }
-        .detalle .precio { display: block; }
-        .detalle .precio small { font-size: var(--nota); margin-right: 3px; }
         .regalo .nota { font-weight: 700; }
         .tachado td { text-decoration: line-through; }
         .tachado td .nota { text-decoration: none; }
@@ -304,7 +303,6 @@
                 @php
                     $cajas = $renglon->cajas();
                     $unidades = $renglon->unidades();
-                    $precios = $renglon->precios();
                 @endphp
                 <tr @class(['regalo' => $renglon->esRegalo(), 'tachado' => $renglon->noSale()])>
                     <td class="cant">
@@ -324,11 +322,7 @@
                             <span class="nota">{{ $nota }}</span>
                         @endforeach
                     </td>
-                    <td class="num">
-                        @foreach ($precios as [$medida, $precio])
-                            <span class="precio">@if (count($precios) > 1)<small>{{ $medida }}</small>@endif{{ number_format($precio, 2) }}</span>
-                        @endforeach
-                    </td>
+                    <td class="num">{{ number_format($renglon->precioUnidad(), 2) }}</td>
                     <td class="num">{{ number_format($renglon->descuento(), 2) }}</td>
                     <td class="num">{{ number_format($renglon->isv(), 2) }}</td>
                     <td class="num">{{ number_format($renglon->total(), 2) }}</td>

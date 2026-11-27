@@ -128,17 +128,29 @@ final class RenglonFactura
     }
 
     /**
-     * Precio sin ISV de cada presentación del renglón, con su medida ("CJ",
-     * "UN") para saber cuál es cuál si van las dos: primero el de la caja.
-     *
-     * @return list<array{0: string, 1: float}>
+     * Lo que sale cada unidad, sin ISV (columna Precio Unit.): lo del
+     * renglón entre las unidades que lleva, contando lo de las cajas (1
+     * CJ48 + 2 UN son 50 unidades). Un solo precio aunque vayan cajas y
+     * sueltas. Si no sale nada (tachado), el de la línea entre lo que trae.
      */
-    public function precios(): array
+    public function precioUnidad(): float
     {
-        return array_map(
-            fn (PedidoItem $item): array => [$item->presentacion->unidadMedida->codigo, $item->precio],
-            $this->items(),
-        );
+        $unidades = 0;
+        $monto = 0.0;
+
+        foreach ($this->items() as $item) {
+            $cantidad = $this->cantidad($item);
+            $unidades += $cantidad * max(1, $item->contenido);
+            $monto += $cantidad * $item->precio;
+        }
+
+        if ($unidades === 0) {
+            $item = $this->item();
+
+            return round($item->precio / max(1, $item->contenido), 2);
+        }
+
+        return round($monto / $unidades, 2);
     }
 
     public function descuento(): float

@@ -511,9 +511,10 @@ test('en la factura las cajas y las unidades de un producto van en un renglón (
         [$this->exento->id, null, 2, true],
         [$this->gravado->id, null, 1, false],
     ])
-        ->and(array_column($renglones[0]->precios(), 0))->toBe(['CJ', 'UN'])
+        // Un solo precio por unidad: 3 CJ10 + 4 UN son 34 unidades a 50.
+        ->and($renglones[0]->precioUnidad())->toBe(50.0)
         ->and($renglones[0]->total())->toBe(1700.0)
-        ->and($renglones[1]->precios())->toBe([['UN', 25.0]])
+        ->and($renglones[1]->precioUnidad())->toBe(25.0)
         ->and($renglones[2]->total())->toBe(0.0)
         ->and($renglones[2]->notas())->toBe(["Gratis por la promoción {$promo->codigo}"]);
 
