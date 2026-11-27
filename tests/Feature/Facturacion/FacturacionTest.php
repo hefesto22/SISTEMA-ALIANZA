@@ -367,7 +367,7 @@ test('los datos fiscales se guardan desde la pantalla de CAI', function (): void
 test('la pantalla de CAI muestra los datos fiscales y avisa del CAI de prueba y de las bodegas sin CAI; el CAI ya usado no se borra', function (): void {
     $propio = Cai::factory()->para($this->cop)->create(['punto_emision' => '001']);
     $prueba = Cai::factory()->create(['cai' => Cai::PRUEBA, 'punto_emision' => '999']);
-    $prueba->update(['siguiente' => $prueba->rango_desde + 3]);
+    $prueba->forceFill(['siguiente' => $prueba->rango_desde + 3])->save();
 
     $this->actingAs($this->admin);
 
