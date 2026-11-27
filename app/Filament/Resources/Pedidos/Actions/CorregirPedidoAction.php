@@ -35,9 +35,9 @@ final class CorregirPedidoAction
             ->authorize('corregir')
             ->modalHeading(fn (Pedido $record): string => "Corregir · {$record->numero} · {$record->cliente->nombre}")
             ->modalDescription(fn (Pedido $record): string => $record->factura !== null
-                ? "Se imprimió hoy con la factura N° {$record->factura->numero}: al guardar queda ANULADA (retírela al cliente) y al reimprimir sale otra. Solo se corrige hoy; desde mañana lo que devuelvan va como devolución. Toque un producto para cambiar lo que sale."
-                : 'Toque un producto para cambiar lo que sale, o agregue uno. Sigue Por imprimir.')
-            ->modalWidth(Width::ThreeExtraLarge)
+                ? "Se imprimió hoy con la factura N° {$record->factura->numero}: al guardar queda ANULADA (retírela al cliente) y al reimprimir sale otra. Solo se corrige hoy; desde mañana lo que devuelvan va como devolución. Cambie lo que sale con − y + o «No hay»."
+                : 'Cambie lo que sale con − y + o «No hay», o agregue un producto. Sigue Por imprimir.')
+            ->modalWidth(Width::FourExtraLarge)
             ->modalSubmitActionLabel('Guardar corrección')
             ->fillForm(fn (Pedido $record): array => LineasPedido::datos($record))
             ->schema(fn (Pedido $record): array => [

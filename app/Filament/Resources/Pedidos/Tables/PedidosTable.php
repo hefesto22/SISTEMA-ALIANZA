@@ -9,6 +9,7 @@ use App\Filament\Resources\Pedidos\Actions\AnularPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\CorregirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ValidarDespachoAction;
+use App\Filament\Resources\Pedidos\Actions\ValidarVariosAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
 use App\Models\Cliente;
@@ -29,6 +30,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
+use Livewire\Component;
 
 /**
  * Pedidos en tarjetas (como Cuentas abiertas): cliente, estado, hace cuánto,
@@ -43,6 +45,8 @@ use Illuminate\Support\Facades\Gate;
  *
  * Bodega puede marcar varias (ya validadas) e imprimirlas de un solo, por
  * ejemplo para reimprimir las de un cliente o un vendedor con los filtros.
+ * En la pestaña Pendiente marca los pendientes y los valida de un solo
+ * (ValidarVariosAction::seleccionados).
  */
 class PedidosTable
 {
@@ -71,9 +75,10 @@ class PedidosTable
             ->defaultPaginationPageOption(12)
             ->filtersLayout(FiltersLayout::AboveContentCollapsible)
             ->filtersFormColumns(['md' => 2, 'xl' => 4])
-            ->checkIfRecordIsSelectableUsing(fn (Pedido $record): bool => $record->estaValidado())
+            ->checkIfRecordIsSelectableUsing(fn (Pedido $record, Component $livewire): bool => self::seMarca($record, $livewire))
             ->toolbarActions([
                 ImprimirPedidoAction::seleccionados(),
+                ValidarVariosAction::seleccionados(),
             ])
             ->filters([
                 SelectFilter::make('cliente_id')
@@ -146,6 +151,19 @@ class PedidosTable
                     ->color('gray')
                     ->tooltip('Más'),
             ]);
+    }
+
+    /**
+     * Las validadas se marcan para imprimirlas; en la pestaña Pendiente, los
+     * pendientes que le toca validar.
+     */
+    private static function seMarca(Pedido $pedido, Component $livewire): bool
+    {
+        if (data_get($livewire, 'activeTab') === EstadoPedido::Pendiente->value) {
+            return Gate::allows('validar', $pedido);
+        }
+
+        return $pedido->estaValidado();
     }
 
     /**

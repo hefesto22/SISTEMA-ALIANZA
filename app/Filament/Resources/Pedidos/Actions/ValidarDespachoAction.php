@@ -36,7 +36,7 @@ final class ValidarDespachoAction
             ->authorize('validar')
             ->modalHeading(fn (Pedido $record): string => "Validar · {$record->numero} · {$record->cliente->nombre}")
             ->modalDescription(fn (): string => self::descripcion())
-            ->modalWidth(Width::ThreeExtraLarge)
+            ->modalWidth(Width::FourExtraLarge)
             ->modalSubmitActionLabel('Validar')
             ->fillForm(fn (Pedido $record): array => LineasPedido::datos($record, segunExistencia: true))
             ->schema(LineasPedido::schema(paraValidar: true))
@@ -78,6 +78,6 @@ final class ValidarDespachoAction
             ? ' Ya viene ajustado a lo que hay.'
             : '';
 
-        return "Revise lo que sale de cada producto; si algo no hay o no alcanza, tóquelo y cámbielo.{$existencia} {$precio}. Al validar se descuenta de la bodega y el pedido pasa a Por imprimir.";
+        return "Revise lo que sale de cada producto; si algo no hay o no alcanza, cámbielo ahí mismo con − y + o «No hay».{$existencia} {$precio}. Al validar se descuenta de la bodega y el pedido pasa a Por imprimir.";
     }
 }

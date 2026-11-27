@@ -1,7 +1,9 @@
 {{--
-    Por imprimir, Impreso y Cargado de Pedidos (App\Filament\Resources\Pedidos\Pages\ListPedidos):
+    Pendiente, Por imprimir, Impreso y Cargado de Pedidos (App\Filament\Resources\Pedidos\Pages\ListPedidos):
     arriba el cambio de vista (Por día / Uno por uno); por día, un cuadro por día y
     bodega (App\Domain\Facturacion\DiaDeFacturacion), del más reciente al más viejo.
+      - Pendiente: Ver (las tarjetas de ese día) · Validar los N (todos de un solo,
+        del más viejo al más nuevo; ListPedidos::validarDiaAction).
       - Por imprimir: Ver (las tarjetas de ese día) · Imprimir las N (modal con la vista previa).
       - Impreso (los días con facturas por cargar): Ver · Resumen del día (la hoja
         para cuadrar) · Cargar camión (las facturas de ese día que todavía se pueden
@@ -17,6 +19,8 @@
     /** @var list<\App\Domain\Facturacion\DiaDeFacturacion> $dias */
     $dias ??= [];
     $porDia ??= true;
+    $porValidar ??= false;
+    $valida ??= false;
     $impresos ??= false;
     $hayMas ??= false;
     $veTodo ??= false;
@@ -138,6 +142,7 @@
                 {{ match (true) {
                     $cargados => 'Los días que ya tienen facturas en una carga del camión (o ya entregadas), por el día en que se emitieron.',
                     $impresos => 'Los días que tienen facturas por cargar en el camión, por el día en que se emitieron: cuántas, por cuánto y con qué números.'.($cargar ? ' Marque uno o varios días para cargar el camión de un solo.' : ''),
+                    $porValidar => 'Los pedidos por validar, por el día del pedido: valide todos los de un día de un solo. Para revisar o cambiar uno, use Uno por uno.',
                     default => 'Los pedidos listos para imprimir, por el día del pedido: imprima todas las de un día de un solo.',
                 } }}
             </p>
@@ -149,6 +154,7 @@
             <div class="pd-vacio">{{ match (true) {
                 $cargados => 'Todavía no hay facturas en una carga del camión.',
                 $impresos => 'No hay facturas por cargar: todas las impresas ya van en una carga.',
+                $porValidar => 'No hay pedidos por validar.',
                 default => 'No hay pedidos por imprimir.',
             } }}</div>
         @else
@@ -202,7 +208,11 @@
                         <div class="pd-cifras">
                             <div class="pd-cuantas">
                                 <strong>{{ number_format($d->cuantas) }}</strong>
-                                <span>{{ $impresos ? ($d->cuantas === 1 ? 'factura' : 'facturas') : 'por imprimir' }}</span>
+                                <span>{{ match (true) {
+                                    $impresos => $d->cuantas === 1 ? 'factura' : 'facturas',
+                                    $porValidar => 'por validar',
+                                    default => 'por imprimir',
+                                } }}</span>
                             </div>
                             <div class="pd-total">{{ lempiras($d->total) }}</div>
                         </div>
@@ -252,7 +262,11 @@
                                 <x-filament::button size="sm" icon="heroicon-o-truck" wire:click="mountAction('cargarDias', {{ \Illuminate\Support\Js::from(['dias' => [$d->dia->format('Y-m-d')], 'bodega' => $d->bodegaId]) }})">
                                     Cargar camión
                                 </x-filament::button>
-                            @elseif (! $impresos && $imprime)
+                            @elseif ($porValidar && $valida)
+                                <x-filament::button size="sm" color="success" icon="heroicon-o-clipboard-document-check" wire:click="mountAction('validarDia', {{ $argumentos }})">
+                                    {{ $d->cuantas === 1 ? 'Validar' : 'Validar los '.number_format($d->cuantas) }}
+                                </x-filament::button>
+                            @elseif (! $impresos && ! $porValidar && $imprime)
                                 <x-filament::button size="sm" icon="heroicon-o-printer" wire:click="mountAction('imprimirDia', {{ $argumentos }})">
                                     {{ $d->cuantas === 1 ? 'Imprimir' : 'Imprimir las '.number_format($d->cuantas) }}
                                 </x-filament::button>
@@ -288,7 +302,7 @@
             @endif
         @endif
 
-        {{-- Por día no se dibuja la tabla, que es la que trae los modales de las acciones (Imprimir, Resumen del día). --}}
+        {{-- Por día no se dibuja la tabla, que es la que trae los modales de las acciones (Validar, Imprimir, Resumen del día). --}}
         <x-filament-actions::modals />
     @endif
 </div>

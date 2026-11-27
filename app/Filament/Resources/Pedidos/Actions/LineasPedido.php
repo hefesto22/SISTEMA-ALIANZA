@@ -6,9 +6,9 @@ namespace App\Filament\Resources\Pedidos\Actions;
 
 use App\Domain\Inventario\Disponible;
 use App\Domain\Inventario\SalidaDePedido as SalidaDeBodega;
+use App\Domain\Pedidos\LoQueAlcanza;
 use App\Filament\Schemas\Components\SalidaDePedido;
 use App\Models\Configuracion;
-use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Presentacion;
@@ -95,7 +95,7 @@ final class LineasPedido
     public static function datos(Pedido $pedido, bool $segunExistencia = false): array
     {
         $items = $pedido->items()->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida'])->where('bonificacion', false)->orderBy('id')->get();
-        $existencias = self::existencias($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all());
+        $existencias = LoQueAlcanza::existencias($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all());
         [$mueve, $salio] = self::movimiento($pedido);
 
         $sale = [];
@@ -105,7 +105,7 @@ final class LineasPedido
         }
 
         if ($segunExistencia && Configuracion::actual()->controlar_existencias) {
-            $sale = self::loQueAlcanza(array_values($items->all()), $sale, $existencias);
+            $sale = LoQueAlcanza::deLasLineas(array_values($items->all()), $sale, $existencias);
         }
 
         $filas = [];
@@ -162,7 +162,7 @@ final class LineasPedido
             ->get();
 
         [$mueve, $salio] = self::movimiento($pedido);
-        $existencias = self::existencias($pedido->bodega_id, $productos->modelKeys());
+        $existencias = LoQueAlcanza::existencias($pedido->bodega_id, $productos->modelKeys());
         $resultados = [];
 
         foreach ($productos as $producto) {
@@ -207,78 +207,6 @@ final class LineasPedido
         }
 
         return $activas[0] ?? null;
-    }
-
-    /**
-     * Con "controlar existencias": lo que alcanza a salir de cada línea.
-     * Primero las cajas (cada una de sus cajas, en orden de línea) y después
-     * las sueltas: de las sueltas y, si no alcanzan, de las cajas que
-     * sobraron (se abren al validar).
-     *
-     * @param list<PedidoItem> $items
-     * @param array<int, int> $sale [id de línea => lo que pidió]
-     * @param array<int, int> $existencias [presentacion_id => lo que hay en la bodega]
-     *
-     * @return array<int, int>
-     */
-    private static function loQueAlcanza(array $items, array $sale, array $existencias): array
-    {
-        $quedan = $existencias;
-
-        foreach ($items as $item) {
-            if (! $item->presentacion->es_base) {
-                $sale[$item->id] = min($sale[$item->id], max(0, $quedan[$item->presentacion_id] ?? 0));
-                $quedan[$item->presentacion_id] = ($quedan[$item->presentacion_id] ?? 0) - $sale[$item->id];
-            }
-        }
-
-        foreach ($items as $item) {
-            if ($item->presentacion->es_base) {
-                $sueltas = max(0, $quedan[$item->presentacion_id] ?? 0) + (int) $item->producto->presentaciones
-                    ->filter(fn (Presentacion $caja): bool => ! $caja->es_base)
-                    ->sum(fn (Presentacion $caja): int => max(0, $quedan[$caja->id] ?? 0) * $caja->contenido);
-
-                $sale[$item->id] = min($sale[$item->id], $sueltas);
-                $quedan[$item->presentacion_id] = ($quedan[$item->presentacion_id] ?? 0) - $sale[$item->id];
-
-                // Lo que no hubo suelto sale de abrir cajas: ya no quedan para otra línea.
-                $falta = max(0, -($quedan[$item->presentacion_id] ?? 0));
-
-                foreach ($item->producto->presentaciones->filter(fn (Presentacion $caja): bool => ! $caja->es_base)->sortBy('contenido') as $caja) {
-                    while ($falta > 0 && ($quedan[$caja->id] ?? 0) > 0) {
-                        $quedan[$caja->id]--;
-                        $quedan[$item->presentacion_id] += $caja->contenido;
-                        $falta = max(0, -$quedan[$item->presentacion_id]);
-                    }
-                }
-            }
-        }
-
-        return $sale;
-    }
-
-    /**
-     * [presentacion_id => lo que hay en la bodega] de esos productos.
-     *
-     * @param array<mixed> $productoIds
-     *
-     * @return array<int, int>
-     */
-    private static function existencias(int $bodegaId, array $productoIds): array
-    {
-        if ($productoIds === []) {
-            return [];
-        }
-
-        /** @var array<int, int> $hay */
-        $hay = Existencia::query()
-            ->where('bodega_id', $bodegaId)
-            ->whereIn('producto_id', $productoIds)
-            ->pluck('cantidad', 'presentacion_id')
-            ->map(fn (mixed $cantidad): int => (int) $cantidad)
-            ->all();
-
-        return $hay;
     }
 
     /**

@@ -60,7 +60,9 @@ test('los pedidos se ven en tarjetas, sin texto de resumen arriba, y se buscan p
     $fuera = Pedido::query()->with('cliente')->where('fuera_de_ruta', true)->firstOrFail();
     $otro = Pedido::query()->where('cliente_id', '!=', $fuera->cliente_id)->firstOrFail();
 
+    // Pendiente se ve de entrada por día; las tarjetas, en "Uno por uno".
     Livewire::test(ListPedidos::class)
+        ->set('vista', 'lista')
         ->assertOk()
         ->assertDontSee('10 pendientes')
         ->assertDontSee('por validar')
@@ -116,6 +118,7 @@ test('el encargado ve solo los pedidos de los vendedores de su bodega; administr
     $this->actingAs(encargadoDeCop());
 
     Livewire::test(ListPedidos::class)
+        ->set('vista', 'lista')
         ->assertCanSeeTableRecords($deCop)
         ->assertCanNotSeeTableRecords($deOtras);
 
@@ -137,6 +140,7 @@ test('al despachar desde la tarjeta se quita lo que no hay y se baja lo que no a
     $undoRepeaterFake = Repeater::fake();
 
     Livewire::test(ListPedidos::class)
+        ->set('vista', 'lista')
         ->callTableAction('validarDespacho', $pedido, data: ['items' => $filas])
         ->assertHasNoTableActionErrors();
 
@@ -157,6 +161,7 @@ test('no se puede despachar quitando todo: para eso se anula', function (): void
     $undoRepeaterFake = Repeater::fake();
 
     Livewire::test(ListPedidos::class)
+        ->set('vista', 'lista')
         ->callTableAction('validarDespacho', $pedido, data: ['items' => []])
         ->assertHasTableActionErrors(['items']);
 

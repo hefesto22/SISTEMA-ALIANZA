@@ -18,11 +18,11 @@ use Illuminate\Support\Facades\DB;
 use stdClass;
 
 /**
- * Las pestañas Por imprimir e Impresos de Pedidos, por día: un cuadro por
- * día y bodega (cada bodega imprime en su impresora), del más reciente al
- * más viejo, solo con lo que el usuario ve.
+ * Las pestañas Pendiente, Por imprimir e Impresos de Pedidos, por día: un
+ * cuadro por día y bodega (cada bodega imprime en su impresora), del más
+ * reciente al más viejo, solo con lo que el usuario ve.
  *
- *  - porImprimir(): por la fecha del pedido.
+ *  - porImprimir() y pendientes(): por la fecha del pedido.
  *  - impresas(): por la fecha de emisión de la factura (la que va impresa);
  *    cuenta también las que se anularon después, porque sus números ya se
  *    usaron ese día. La que sustituye a una anulada cuenta el día en que se
@@ -30,7 +30,8 @@ use stdClass;
  *    sea de un día antes. Dice cuántas quedan sin cargar en un camión y,
  *    para las pestañas Impreso y Cargado, solo trae los días que tienen
  *    facturas sin cargar ($cargadas = false) o ya cargadas (true).
- *  - idsPorImprimir(): los pedidos de un cuadro, para imprimirlos de un solo.
+ *  - idsPorImprimir() e idsPendientes(): los pedidos de un cuadro, para
+ *    imprimirlos o validarlos de un solo.
  */
 final class DiasDeFacturacion
 {
@@ -39,9 +40,27 @@ final class DiasDeFacturacion
      */
     public static function porImprimir(User $usuario, int $limite): array
     {
+        return self::pedidosPorDia($usuario, $limite, EstadoPedido::PorImprimir);
+    }
+
+    /**
+     * Los pendientes de validar, por la fecha del pedido.
+     *
+     * @return array{dias: list<DiaDeFacturacion>, hayMas: bool}
+     */
+    public static function pendientes(User $usuario, int $limite): array
+    {
+        return self::pedidosPorDia($usuario, $limite, EstadoPedido::Pendiente);
+    }
+
+    /**
+     * @return array{dias: list<DiaDeFacturacion>, hayMas: bool}
+     */
+    private static function pedidosPorDia(User $usuario, int $limite, EstadoPedido $estado): array
+    {
         $filas = Pedido::query()
             ->visiblePara($usuario)
-            ->where('pedidos.estado', EstadoPedido::PorImprimir)
+            ->where('pedidos.estado', $estado)
             ->toBase()
             ->selectRaw('DATE(pedidos.fecha) AS dia, pedidos.bodega_id, COUNT(*) AS cuantas, COALESCE(SUM(pedidos.total), 0) AS total, COUNT(DISTINCT pedidos.vendedor_id) AS vendedores, SUM(CASE WHEN pedidos.impresiones > 0 THEN 1 ELSE 0 END) AS reimpresiones')
             ->groupByRaw('DATE(pedidos.fecha), pedidos.bodega_id')
@@ -132,11 +151,30 @@ final class DiasDeFacturacion
      */
     public static function idsPorImprimir(User $usuario, string $dia, int $bodegaId): array
     {
+        return self::ids($usuario, $dia, $bodegaId, EstadoPedido::PorImprimir);
+    }
+
+    /**
+     * Los pendientes de un día y una bodega, para validarlos de un solo
+     * (ValidarVarios los toma del más viejo al más nuevo).
+     *
+     * @return list<int>
+     */
+    public static function idsPendientes(User $usuario, string $dia, int $bodegaId): array
+    {
+        return self::ids($usuario, $dia, $bodegaId, EstadoPedido::Pendiente);
+    }
+
+    /**
+     * @return list<int>
+     */
+    private static function ids(User $usuario, string $dia, int $bodegaId, EstadoPedido $estado): array
+    {
         return array_values(array_map(
             intval(...),
             Pedido::query()
                 ->visiblePara($usuario)
-                ->where('pedidos.estado', EstadoPedido::PorImprimir)
+                ->where('pedidos.estado', $estado)
                 ->whereDate('pedidos.fecha', $dia)
                 ->where('pedidos.bodega_id', $bodegaId)
                 ->orderBy('pedidos.id')

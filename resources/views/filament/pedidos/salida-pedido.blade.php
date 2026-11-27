@@ -1,17 +1,20 @@
 {{--
     Validar y Corregir: cuánto sale de cada producto (App\Filament\Schemas\Components\SalidaDePedido).
 
-    Pensado para leerse rápido, también en pedidos largos (30 productos o más):
-    una lista en tres columnas con encabezado, Sale | Producto | Bodega.
-      - Sale: lo que sale ("2 CJ12", "3 UN").
+    Pensado para leerse y cambiarse rápido, también en pedidos largos (30
+    productos o más), sin abrir cada fila: una lista con encabezado,
+    Sale | Producto | Bodega, y en cada fila "No hay" / "Sí hay".
+      - Sale: un contador con − y + por cada presentación que pidió (o que
+        ya sale), con su sigla ("CJ12", "UN"): se cambia ahí mismo.
       - Producto: el nombre, el código y lo que pidió; si cambió, en palabras
         debajo ("Falta 1 CJ12", "3 UN de más", "No sale", "Agregado").
       - Bodega: si alcanza (verde), si hay que abrir una caja (ámbar, "Abrir 1
         CJ12"), si falta (rojo, "Faltan 3 UN") o, al corregir, si regresa; y
         debajo lo que hay. En el teléfono va debajo del nombre.
-    Al tocar una fila se abre: si cambió, en palabras; un contador con − y + por cada
-    presentación que se vende (CJ12, CJ8, UN…; se puede mandar menos, más o
-    en otra presentación), con lo que pidió debajo, y "No hay" / "Sí hay"; si las sueltas no alcanzan,
+      - "No hay" lo deja en 0; "Sí hay", como se pidió; "Quitar", uno agregado.
+    Al tocar el nombre (o la flecha) se abre el detalle: si cambió, en palabras; un contador por cada
+    presentación que se vende (CJ12, CJ8, UN…; para mandar en otra
+    presentación), con lo que pidió debajo; si las sueltas no alcanzan,
     un aviso "Se abre 1 caja de 12" con el porqué (bodega puede escoger otra
     caja; viene la más chica que alcanza); si no alcanza, un aviso en rojo; y
     la bodega en palabras: lo que hay, lo que mueve al guardar (corregir) y lo
@@ -106,21 +109,34 @@
             .sp-fila.sp-fila-nuevo { background: color-mix(in oklab, var(--success-500) 6%, transparent); }
             .sp-fila.sp-abierta { background: color-mix(in oklab, var(--primary-500) 6%, transparent); }
 
-            /* Encabezado de la lista y fila corta, en tres columnas: Sale | Producto | Bodega. Al tocar la fila se abre. */
-            .sp-cabeza, .sp-corta { display: grid; grid-template-columns: 4.75rem minmax(0, 1fr) 9.5rem 1rem; grid-template-areas: "cant texto bodega flecha"; align-items: center; column-gap: 0.75rem; padding: 0.6rem 0.875rem; }
+            /* Encabezado de la lista y fila corta: Sale (contadores) | Producto | Bodega | No hay | flecha. Al tocar el nombre se abre. */
+            .sp-cabeza, .sp-corta { display: grid; grid-template-columns: 9.75rem minmax(0, 1fr) 8.5rem 4.75rem 1.5rem; grid-template-areas: "cant texto bodega accion flecha"; align-items: center; column-gap: 0.75rem; padding: 0.55rem 0.875rem; }
             .sp-cabeza { padding-block: 0.45rem; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--sp-tenue); background: var(--sp-suave); border-bottom: 1px solid var(--sp-linea); }
             .sp-cabeza-cant { grid-area: cant; }
             .sp-cabeza-texto { grid-area: texto; }
             .sp-cabeza-bodega { grid-area: bodega; text-align: end; }
-            .sp-corta { width: 100%; text-align: start; cursor: pointer; }
-            .sp-corta:hover { background: var(--sp-suave); }
-            .sp-corta:focus-visible { outline: 2px solid var(--primary-600); outline-offset: -2px; }
-            .sp-cants { grid-area: cant; display: grid; gap: 0.2rem; }
-            .sp-cant { padding: 0.25rem 0.4rem; border-radius: 0.5rem; text-align: center; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.02em; line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--primary-700); background: color-mix(in oklab, var(--primary-500) 14%, transparent); outline: 1px solid color-mix(in oklab, var(--primary-500) 45%, transparent); }
-            .dark .sp-cant { color: var(--primary-200); }
-            .sp-cant.sp-cant-caja, .dark .sp-cant.sp-cant-caja { color: #fff; background: var(--primary-600); outline-color: var(--primary-600); }
-            .sp-cant.sp-cant-cero, .dark .sp-cant.sp-cant-cero { color: var(--sp-tenue); background: transparent; outline: 1px dashed var(--sp-borde); }
-            .sp-corta-texto { grid-area: texto; min-width: 0; display: grid; justify-items: start; gap: 0.15rem; }
+            .sp-cabeza-accion { grid-area: accion; }
+
+            /* Sale, en la misma fila: la sigla y un contador por presentación (las cajas en el color del panel). */
+            .sp-rapidos { grid-area: cant; display: grid; gap: 0.3rem; }
+            .sp-rapido { display: grid; grid-template-columns: 2.6rem auto; align-items: center; gap: 0.35rem; }
+            .sp-rapido-sigla { justify-self: end; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.02em; color: var(--primary-700); }
+            .dark .sp-rapido-sigla { color: var(--primary-300); }
+            .sp-rapido .sp-stepper { justify-self: start; }
+            .sp-rapido .sp-paso { width: 2.1rem; height: 2.1rem; }
+            .sp-rapido .sp-paso svg { width: 1rem; height: 1rem; }
+            .sp-rapido .sp-stepper input { width: 2.6rem; font-size: 0.95rem; }
+            .sp-rapido.sp-cambiada .sp-stepper { outline: 2px solid color-mix(in oklab, var(--warning-500) 70%, transparent); }
+            .sp-rapido.sp-cero .sp-stepper input { color: var(--danger-600); }
+            .dark .sp-rapido.sp-cero .sp-stepper input { color: var(--danger-400); }
+
+            .sp-corta-texto { grid-area: texto; min-width: 0; display: grid; justify-items: start; gap: 0.15rem; width: 100%; padding: 0.2rem 0.3rem; margin: -0.2rem -0.3rem; border-radius: 0.4rem; text-align: start; cursor: pointer; }
+            .sp-corta-texto:hover { background: var(--sp-suave); }
+            .sp-corta-texto:focus-visible, .sp-flecha-boton:focus-visible { outline: 2px solid var(--primary-600); outline-offset: 1px; }
+            .sp-corta-accion { grid-area: accion; display: flex; justify-content: flex-end; }
+            .sp-corta-accion .sp-boton { min-width: 0; width: 100%; padding: 0.4rem 0.5rem; font-size: 0.76rem; }
+            .sp-flecha-boton { grid-area: flecha; display: grid; place-items: center; width: 1.5rem; height: 2rem; border-radius: 0.4rem; }
+            .sp-flecha-boton:hover { background: var(--sp-suave); }
             .sp-corta-nombre { font-size: 0.85rem; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
             .sp-fila-nada .sp-corta-nombre { text-decoration: line-through; color: var(--sp-tenue); }
             .sp-corta-meta { font-size: 0.72rem; color: var(--sp-tenue); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -146,7 +162,7 @@
             .sp-b-regresa { color: var(--info-600); }
             .dark .sp-b-regresa { color: var(--info-400); }
             .sp-b-hay { max-width: 100%; font-size: 0.7rem; color: var(--sp-tenue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-            .sp-flecha { grid-area: flecha; width: 1rem; height: 1rem; color: var(--sp-tenue); transition: transform 0.15s ease; }
+            .sp-flecha { width: 1rem; height: 1rem; color: var(--sp-tenue); transition: transform 0.15s ease; }
             .sp-abierta .sp-flecha { transform: rotate(180deg); }
 
             /* Fila abierta: lo que pidió, los contadores, la bodega en palabras y los avisos. */
@@ -228,11 +244,13 @@
             .sp-incompletas.sp-agregados { color: var(--success-800); background: color-mix(in oklab, var(--success-500) 10%, transparent); outline-color: color-mix(in oklab, var(--success-500) 40%, transparent); }
             .dark .sp-incompletas.sp-agregados { color: var(--success-300); }
 
-            /* Teléfono: la bodega va debajo del nombre (no cabe la tercera columna). */
+            /* Teléfono: arriba el nombre y la bodega; abajo los contadores y "No hay". */
             @media (max-width: 639.98px) {
-                .sp-cabeza, .sp-corta { grid-template-columns: 4.25rem minmax(0, 1fr) 1rem; grid-template-areas: "cant texto flecha" "cant bodega flecha"; column-gap: 0.6rem; row-gap: 0.2rem; padding-inline: 0.75rem; }
-                .sp-cabeza-bodega { display: none; }
+                .sp-cabeza { display: none !important; }
+                .sp-corta { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "texto flecha" "bodega bodega" "cant accion"; column-gap: 0.6rem; row-gap: 0.45rem; padding-inline: 0.75rem; }
                 .sp-corta-bodega { display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.5rem; text-align: start; }
+                .sp-corta-accion { align-self: end; }
+                .sp-corta-accion .sp-boton { width: auto; min-width: 5.25rem; }
                 .sp-detalle { padding: 0.15rem 0.75rem 0.8rem; }
             }
         </style>
@@ -443,6 +461,14 @@
 
             abrir(grupo) {
                 this.abierta = this.abierta === grupo.id ? null : grupo.id
+            },
+
+            {{-- Los contadores de la fila: las presentaciones que pidió o que ya salen (la más grande primero); si no hay ninguna, la más grande. --}}
+            rapidas(grupo) {
+                const filas = this.filasDe(grupo)
+                const suyas = filas.filter((fila) => this.n(fila.cantidad) > 0 || this.n(fila.sale) > 0)
+
+                return suyas.length > 0 ? suyas : filas.slice(0, 1)
             },
 
             {{-- La más grande primero (CJ12, CJ8, UN). --}}
@@ -840,7 +866,7 @@
         }"
     >
         <div class="sp-resumen">
-            <span x-text="(grupos().length === 1 ? '1 producto' : grupos().length + ' productos') + ' · toque uno para cambiar lo que sale'">{{ $productos === 1 ? '1 producto' : $productos.' productos' }} · toque uno para cambiar lo que sale</span>
+            <span x-text="(grupos().length === 1 ? '1 producto' : grupos().length + ' productos') + ' · cambie lo que sale con − y +'">{{ $productos === 1 ? '1 producto' : $productos.' productos' }} · cambie lo que sale con − y +</span>
             <span
                 x-bind:class="incompletas().length === 0 && deMas().length === 0 && agregados().length === 0 ? 'sp-resumen-ok' : 'sp-resumen-falta'"
                 x-text="textoResumen()"
@@ -922,24 +948,41 @@
                 <span class="sp-cabeza-cant">Sale</span>
                 <span class="sp-cabeza-texto">Producto</span>
                 <span class="sp-cabeza-bodega" x-show="grupos().some((grupo) => grupo.info.mueve)">Bodega</span>
+                <span class="sp-cabeza-accion"></span>
             </li>
 
             <template x-for="grupo in gruposVisibles()" x-bind:key="grupo.id">
                 <li class="sp-fila" x-bind:class="claseGrupo(grupo)" x-bind:data-producto="grupo.id">
-                    {{-- Fila corta: lo que sale | el producto (y si cambió) | si alcanza en la bodega. --}}
-                    <button type="button" class="sp-corta" x-on:click="abrir(grupo)" x-bind:aria-expanded="abierta === grupo.id">
-                        <span class="sp-cants">
-                            <template x-for="fila in filasDe(grupo).filter((fila) => n(fila.sale) > 0)" x-bind:key="'cant-' + fila.presentacion_id">
-                                <span class="sp-cant" x-bind:class="{ 'sp-cant-caja': ! fila.es_base }" x-text="n(fila.sale) + ' ' + sigla(fila)"></span>
+                    {{-- Fila corta: lo que sale (contadores, se cambia aquí mismo) | el producto (y si cambió) | si alcanza en la bodega | No hay. --}}
+                    <div class="sp-corta">
+                        <div class="sp-rapidos">
+                            <template x-for="fila in rapidas(grupo)" x-bind:key="'rapido-' + fila.presentacion_id">
+                                <div class="sp-rapido" x-bind:class="{ 'sp-cambiada': n(fila.sale) !== n(fila.cantidad), 'sp-cero': n(fila.sale) === 0 }">
+                                    <span class="sp-rapido-sigla" x-text="sigla(fila)" x-bind:title="titulo(fila)"></span>
+                                    <div class="sp-stepper" x-bind:class="{ 'sp-stepper-caja': ! fila.es_base }">
+                                        <button type="button" class="sp-paso" x-bind:aria-label="'Una menos: ' + fila.nombre" x-on:click="mover(fila, -1)" x-bind:disabled="n(fila.sale) <= 0">{{ svg('heroicon-m-minus') }}</button>
+                                        <input
+                                            type="number"
+                                            inputmode="numeric"
+                                            min="0"
+                                            x-bind:max="maximo"
+                                            x-bind:aria-label="titulo(fila) + ' que salen'"
+                                            x-bind:value="fila.sale"
+                                            x-on:focus="$event.target.select()"
+                                            x-on:change="poner(fila, $event.target.value); $event.target.value = fila.sale"
+                                            x-on:keydown.enter.prevent="poner(fila, $event.target.value); $event.target.value = fila.sale; $event.target.blur()"
+                                        >
+                                        <button type="button" class="sp-paso" x-bind:aria-label="'Una más: ' + fila.nombre" x-on:click="mover(fila, 1)" x-bind:disabled="n(fila.sale) >= maximo">{{ svg('heroicon-m-plus') }}</button>
+                                    </div>
+                                </div>
                             </template>
-                            <span class="sp-cant sp-cant-cero" x-show="total(grupo) === 0">0</span>
-                        </span>
+                        </div>
 
-                        <span class="sp-corta-texto">
+                        <button type="button" class="sp-corta-texto" x-on:click="abrir(grupo)" x-bind:aria-expanded="abierta === grupo.id">
                             <span class="sp-corta-nombre" x-text="grupo.info.descripcion ?? grupo.info.producto"></span>
                             <span class="sp-corta-meta" x-text="(grupo.info.codigo ? grupo.info.codigo + ' · ' : '') + (nuevo(grupo) ? 'no venía en el pedido' : 'pidió ' + pidioCorto(grupo))"></span>
                             <span class="sp-chip" x-show="cambioCorto(grupo) !== ''" x-bind:class="claseCambio(grupo)" x-text="cambioCorto(grupo)"></span>
-                        </span>
+                        </button>
 
                         <span class="sp-corta-bodega" x-show="grupo.info.mueve">
                             <span class="sp-b" x-show="bodegaClase(grupo) !== ''" x-bind:class="bodegaClase(grupo)">
@@ -952,8 +995,16 @@
                             <span class="sp-b-hay" x-text="hayCorto(grupo)" x-bind:title="'En bodega: ' + enPalabras(grupo, (fila) => n(fila.hay_pres))"></span>
                         </span>
 
-                        <svg class="sp-flecha" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
-                    </button>
+                        <div class="sp-corta-accion">
+                            <button type="button" class="sp-boton sp-no" x-show="! nuevo(grupo) && total(grupo) > 0" x-on:click="noHay(grupo)">No hay</button>
+                            <button type="button" class="sp-boton sp-si" x-show="! nuevo(grupo) && total(grupo) === 0" x-on:click="comoSePidio(grupo)">Sí hay</button>
+                            <button type="button" class="sp-boton sp-no" x-show="nuevo(grupo)" x-on:click="quitar(grupo)">Quitar</button>
+                        </div>
+
+                        <button type="button" class="sp-flecha-boton" x-on:click="abrir(grupo)" x-bind:aria-expanded="abierta === grupo.id" x-bind:aria-label="'Más de ' + (grupo.info.descripcion ?? grupo.info.producto) + ': otra presentación, qué caja se abre, la bodega'">
+                            <svg class="sp-flecha" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+                        </button>
+                    </div>
 
                     {{-- Fila abierta: si cambió (en palabras), cuánto sale (contadores, con lo que pidió), los avisos y la bodega en palabras. --}}
                     <div class="sp-detalle" x-show="abierta === grupo.id">
@@ -988,11 +1039,9 @@
                                 </div>
                             </template>
 
+                            {{-- No hay / Sí hay / Quitar están en la fila. --}}
                             <div class="sp-acciones">
                                 <button type="button" class="sp-enlace sp-subrayado" x-show="! nuevo(grupo) && total(grupo) > 0 && difiere(grupo)" x-on:click="comoSePidio(grupo)">Volver a lo pedido</button>
-                                <button type="button" class="sp-boton sp-no" x-show="! nuevo(grupo) && total(grupo) > 0" x-on:click="noHay(grupo)">No hay</button>
-                                <button type="button" class="sp-boton sp-si" x-show="! nuevo(grupo) && total(grupo) === 0" x-on:click="comoSePidio(grupo)">Sí hay</button>
-                                <button type="button" class="sp-boton sp-no" x-show="nuevo(grupo)" x-on:click="quitar(grupo)">Quitar</button>
                                 <button type="button" class="sp-enlace" x-show="grupos().length > 1" x-on:click="abierta = null">Listo</button>
                             </div>
                         </div>

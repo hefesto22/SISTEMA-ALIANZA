@@ -17,6 +17,7 @@ use App\Enums\ModoImpresion;
 use App\Filament\Resources\Cargas\CargaResource;
 use App\Filament\Resources\Cargas\Schemas\CargaForm;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
+use App\Filament\Resources\Pedidos\Actions\ValidarVariosAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
 use App\Filament\Support\VistaImpresion;
@@ -51,19 +52,20 @@ use Livewire\Attributes\Url;
 
 /**
  * Pedidos en tarjetas, con una pestaña por estado (Impreso, los que faltan
- * de cargar en el camión; Cargado, los que ya van en una carga). Por
- * imprimir, Impreso y Cargado se ven de entrada por día (resources/views/filament/pedidos/por-dia.blade.php):
- * un cuadro por día y bodega (DiasDeFacturacion) para imprimir de un solo
- * todas las de un día, o ver cuántas facturas salieron, con qué números y
- * por cuánto, y sacar el resumen del día. En Impresos se escogen uno o
- * varios días de una bodega y se carga el camión con ellos de un solo
+ * de cargar en el camión; Cargado, los que ya van en una carga). Pendiente,
+ * Por imprimir, Impreso y Cargado se ven de entrada por día (resources/views/filament/pedidos/por-dia.blade.php):
+ * un cuadro por día y bodega (DiasDeFacturacion) para validar de un solo
+ * todos los pendientes de un día (validarDia), imprimir de un solo todas
+ * las de un día, o ver cuántas facturas salieron, con qué números y por
+ * cuánto, y sacar el resumen del día. En Impresos se escogen uno o varios
+ * días de una bodega y se carga el camión con ellos de un solo
  * (cargarDias). "Uno por uno" vuelve a las tarjetas de cada pedido
  * (?vista=lista).
  */
 class ListPedidos extends ListRecords
 {
     /** Pestañas que se ven por día. */
-    private const POR_DIA = [EstadoPedido::PorImprimir->value, EstadoPedido::Impreso->value, self::CARGADO];
+    private const POR_DIA = [EstadoPedido::Pendiente->value, EstadoPedido::PorImprimir->value, EstadoPedido::Impreso->value, self::CARGADO];
 
     /**
      * Pestaña de los impresos que ya van en una carga del camión (o ya se
@@ -77,7 +79,7 @@ class ListPedidos extends ListRecords
 
     protected static string $resource = PedidoResource::class;
 
-    /** Por imprimir e Impresos: null = por día; 'lista' = una tarjeta por pedido. */
+    /** Pendiente, Por imprimir, Impreso y Cargado: null = por día; 'lista' = una tarjeta por pedido. */
     #[Url(as: 'vista')]
     public ?string $vista = null;
 
@@ -85,6 +87,9 @@ class ListPedidos extends ListRecords
 
     /** @var list<int>|null */
     private ?array $idsPorImprimir = null;
+
+    /** @var list<int>|null */
+    private ?array $idsPendientes = null;
 
     /**
      * Lo de paraCargar() por días y bodega, para no buscarlo varias veces en la misma petición.
@@ -112,6 +117,18 @@ class ListPedidos extends ListRecords
                     ImprimirPedidoAction::ejecutar($this, $this->idsPorImprimir(), ModoImpresion::Originales, ImprimirPedidoAction::papel($data['papel'] ?? null));
                 })
                 ->visible(fn (): bool => $this->activeTab === EstadoPedido::PorImprimir->value && $this->idsPorImprimir() !== []),
+            // En la pestaña Pendiente: todos los que se ven (con filtros y búsqueda), del más viejo al más nuevo.
+            ValidarVariosAction::modal(Action::make('validarTodos'))
+                ->label(fn (): string => 'Validar todos ('.count($this->idsPendientes()).')')
+                ->icon(Heroicon::OutlinedClipboardDocumentCheck)
+                ->color('success')
+                ->modalHeading(fn (): string => 'Validar los '.count($this->idsPendientes()).' pendientes')
+                ->modalDescription(fn (): string => ValidarVariosAction::descripcion($this->idsPendientes()).' Van los que se ven, con los filtros y la búsqueda que tiene puestos.')
+                ->schema(fn (): array => ValidarVariosAction::schema($this->idsPendientes()))
+                ->action(function (array $data): void {
+                    ValidarVariosAction::ejecutar($this->idsPendientes(), $data);
+                })
+                ->visible(fn (): bool => $this->activeTab === EstadoPedido::Pendiente->value && $this->idsPendientes() !== []),
             CreateAction::make()->label('Nueva preventa'),
         ];
     }
@@ -200,6 +217,23 @@ class ListPedidos extends ListRecords
                     ImprimirPedidoAction::ejecutar($this, $this->idsDelDia($arguments), ModoImpresion::Originales, ImprimirPedidoAction::papel($data['papel'] ?? null));
                 }),
         );
+    }
+
+    /**
+     * "Validar las N" de un cuadro de Pendiente: todos los de ese día y esa
+     * bodega, del más viejo al más nuevo, como si se validara cada uno sin
+     * cambiar nada (ValidarVariosAction).
+     */
+    public function validarDiaAction(): Action
+    {
+        return ValidarVariosAction::modal(Action::make('validarDia'))
+            ->visible(fn (): bool => Acceso::puede('Validar:Pedido'))
+            ->modalHeading(fn (array $arguments): string => $this->tituloDeValidar($arguments))
+            ->modalDescription(fn (array $arguments): string => ValidarVariosAction::descripcion($this->pendientesDelDia($arguments)))
+            ->schema(fn (array $arguments): array => ValidarVariosAction::schema($this->pendientesDelDia($arguments)))
+            ->action(function (array $data, array $arguments): void {
+                ValidarVariosAction::ejecutar($this->pendientesDelDia($arguments), $data);
+            });
     }
 
     /**
@@ -416,6 +450,7 @@ class ListPedidos extends ListRecords
     {
         unset($this->cachedTabs);
         $this->idsPorImprimir = null;
+        $this->idsPendientes = null;
     }
 
     /**
@@ -447,6 +482,7 @@ class ListPedidos extends ListRecords
     private function datosPorDia(): array
     {
         $usuario = Acceso::usuario();
+        $porValidar = $this->activeTab === EstadoPedido::Pendiente->value;
         $cargados = $this->activeTab === self::CARGADO;
         $impresos = $cargados || $this->activeTab === EstadoPedido::Impreso->value;
         $porDia = $this->esPorDia();
@@ -455,21 +491,25 @@ class ListPedidos extends ListRecords
 
         // Impreso: los días que tienen facturas por cargar; Cargado: los que tienen cargadas.
         if ($porDia && $usuario !== null) {
-            $cuadros = $impresos
-                ? DiasDeFacturacion::impresas($usuario, $this->cuadros, $cargados)
-                : DiasDeFacturacion::porImprimir($usuario, $this->cuadros);
+            $cuadros = match (true) {
+                $impresos   => DiasDeFacturacion::impresas($usuario, $this->cuadros, $cargados),
+                $porValidar => DiasDeFacturacion::pendientes($usuario, $this->cuadros),
+                default     => DiasDeFacturacion::porImprimir($usuario, $this->cuadros),
+            };
         }
 
         return [
-            'porDia'   => $porDia,
-            'impresos' => $impresos,
-            'cargados' => $cargados,
-            'dias'     => $cuadros['dias'],
-            'hayMas'   => $cuadros['hayMas'],
-            'veTodo'   => Acceso::veTodo(),
-            'imprime'  => Acceso::puede('Validar:Pedido'),
-            'resumen'  => Gate::allows('viewAny', Factura::class),
-            'cargar'   => $cargar,
+            'porDia'     => $porDia,
+            'porValidar' => $porValidar,
+            'impresos'   => $impresos,
+            'cargados'   => $cargados,
+            'dias'       => $cuadros['dias'],
+            'hayMas'     => $cuadros['hayMas'],
+            'veTodo'     => Acceso::veTodo(),
+            'imprime'    => Acceso::puede('Validar:Pedido'),
+            'resumen'    => Gate::allows('viewAny', Factura::class),
+            'cargar'     => $cargar,
+            'valida'     => Acceso::puede('Validar:Pedido'),
         ];
     }
 
@@ -626,5 +666,64 @@ class ListPedidos extends ListRecords
                 ->pluck('pedidos.id')
                 ->all(),
         ));
+    }
+
+    /**
+     * Los pendientes de la tabla (con filtros y búsqueda) que puede validar.
+     *
+     * @return list<int>
+     */
+    private function idsPendientes(): array
+    {
+        if (! Acceso::puede('Validar:Pedido')) {
+            return $this->idsPendientes = [];
+        }
+
+        return $this->idsPendientes ??= array_values(array_map(
+            intval(...),
+            ($this->getFilteredTableQuery() ?? PedidoResource::getEloquentQuery())
+                ->where('pedidos.estado', EstadoPedido::Pendiente)
+                ->reorder()
+                ->orderBy('pedidos.id')
+                ->pluck('pedidos.id')
+                ->all(),
+        ));
+    }
+
+    /**
+     * Los pendientes de un cuadro (argumentos dia y bodega).
+     *
+     * @param array<string, mixed> $arguments
+     *
+     * @return list<int>
+     */
+    private function pendientesDelDia(array $arguments): array
+    {
+        $usuario = Acceso::usuario();
+        $dia = Periodo::dia($arguments['dia'] ?? null);
+        $bodega = $arguments['bodega'] ?? null;
+
+        if ($usuario === null || $dia === null || ! is_numeric($bodega)) {
+            return [];
+        }
+
+        return DiasDeFacturacion::idsPendientes($usuario, $dia, (int) $bodega);
+    }
+
+    /**
+     * "Validar los 45 pedidos del jueves 26 de noviembre de 2026" (y la
+     * bodega, para administración).
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function tituloDeValidar(array $arguments): string
+    {
+        $cuantos = count($this->pendientesDelDia($arguments));
+        $dia = Periodo::dia($arguments['dia'] ?? null);
+        $bodega = $arguments['bodega'] ?? null;
+
+        return ($cuantos === 1 ? 'Validar el pedido' : "Validar los {$cuantos} pedidos")
+            .($dia === null ? '' : ' del '.ResumenDelDia::fechaLarga($dia))
+            .(Acceso::veTodo() && is_numeric($bodega) ? ' · '.(string) Bodega::query()->whereKey((int) $bodega)->value('nombre') : '');
     }
 }
