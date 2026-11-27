@@ -11,23 +11,29 @@ use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Presentacion;
 use App\Models\Producto;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 /**
  * Hoja de alisto: lo que hay que sacar de la bodega para unos pedidos
  * pendientes (los de un día, o los marcados), para ir apartándolo antes de
- * validar. Por bodega, un renglón por producto con el total a sacar de cada
- * presentación (con los regalos de las promociones) y a qué pedido va cada
- * parte. "falta" (si según el sistema no alcanza) es para el aviso del modal
- * de validar; en papel no va: allá se revisa en físico. En papel lleva una
- * casilla "Apartado" y un espacio "Faltó": lo que faltó se anota al validar
- * (ValidarVarios, $faltaron) y a los últimos pedidos les sale menos.
+ * validar. Por bodega, un renglón por producto con lo que se cobra de cada
+ * presentación y a qué pedido va cada parte; los regalos de las promociones
+ * van aparte ("regalos"), con a quién va cada uno y de qué promoción. En
+ * papel lleva una casilla "Apartado" y, en lo que se cobra, un espacio
+ * "Faltó": lo que faltó se anota al validar (ValidarVarios, $faltaron) y a
+ * los últimos pedidos les sale menos; los regalos salen solos con lo que se
+ * cobra. "faltan" (lo que según el sistema no alcanza, contando los
+ * regalos) es para el aviso del modal de validar; en papel no va: allá se
+ * revisa en físico.
  *
  * Los pedidos van del más viejo al más nuevo, como al validar.
  *
- * @phpstan-type HojaVenta array{presentacionId: int, sigla: string, cantidad: int, cobra: int}
- * @phpstan-type HojaRenglon array{productoId: int, codigo: string, descripcion: string, sale: list<HojaVenta>, regalo: string|null, falta: string|null, para: list<string>}
- * @phpstan-type HojaBodega array{bodegaId: int, bodega: string, pedidos: list<array{numero: string, cliente: string, fecha: string, total: float}>, total: float, desde: string, hasta: string, productos: list<HojaRenglon>}
+ * @phpstan-type HojaVenta array{presentacionId: int, sigla: string, cantidad: int}
+ * @phpstan-type HojaRenglon array{productoId: int, codigo: string, descripcion: string, sale: list<HojaVenta>, para: list<string>}
+ * @phpstan-type HojaBodega array{bodegaId: int, bodega: string, pedidos: list<array{numero: string, cliente: string, fecha: string, total: float}>, total: float, desde: string, hasta: string, productos: list<HojaRenglon>, regalos: list<HojaRenglon>, faltan: list<string>}
+ * @phpstan-type HojaParte array<int, list<array{0: int, 1: int, 2: string}>>
+ * @phpstan-type HojaProducto array{producto: Producto, cobra: array<int, int>, regalo: array<int, int>, paraCobra: HojaParte, paraRegalo: HojaParte}
  */
 final class HojaDeAlisto
 {
@@ -58,7 +64,7 @@ final class HojaDeAlisto
         }
 
         $items = PedidoItem::query()
-            ->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida'])
+            ->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida', 'promocion'])
             ->whereIn('pedido_id', $pedidos->modelKeys())
             ->orderBy('id')
             ->get()
@@ -69,7 +75,7 @@ final class HojaDeAlisto
         $hoja = [];
 
         foreach ($pedidos->groupBy('bodega_id') as $bodegaId => $deLaBodega) {
-            /** @var array<int, array{producto: Producto, pide: array<int, int>, cobra: array<int, int>, regalo: array<int, int>, para: array<int, list<array{0: int, 1: int, 2: bool}>>}> $productos */
+            /** @var array<int, HojaProducto> $productos */
             $productos = [];
             $filas = [];
 
@@ -89,28 +95,44 @@ final class HojaDeAlisto
                     }
 
                     $id = $item->producto_id;
-                    $productos[$id] ??= ['producto' => $item->producto, 'pide' => [], 'cobra' => [], 'regalo' => [], 'para' => []];
-                    $productos[$id]['pide'][$item->presentacion_id] = ($productos[$id]['pide'][$item->presentacion_id] ?? 0) + $cantidad;
+                    $presentacion = $item->presentacion_id;
+                    $productos[$id] ??= ['producto' => $item->producto, 'cobra' => [], 'regalo' => [], 'paraCobra' => [], 'paraRegalo' => []];
 
                     if ($item->bonificacion) {
-                        $productos[$id]['regalo'][$item->presentacion_id] = ($productos[$id]['regalo'][$item->presentacion_id] ?? 0) + $cantidad;
+                        $productos[$id]['regalo'][$presentacion] = ($productos[$id]['regalo'][$presentacion] ?? 0) + $cantidad;
+                        $productos[$id]['paraRegalo'][$pedido->id][] = [$presentacion, $cantidad, $item->promocion?->mecanica() ?? ''];
                     } else {
-                        $productos[$id]['cobra'][$item->presentacion_id] = ($productos[$id]['cobra'][$item->presentacion_id] ?? 0) + $cantidad;
+                        $productos[$id]['cobra'][$presentacion] = ($productos[$id]['cobra'][$presentacion] ?? 0) + $cantidad;
+                        $productos[$id]['paraCobra'][$pedido->id][] = [$presentacion, $cantidad, ''];
                     }
-
-                    $productos[$id]['para'][$pedido->id][] = [$item->presentacion_id, $cantidad, $item->bonificacion];
                 }
             }
 
+            uasort($productos, fn (array $a, array $b): int => [$a['producto']->descripcion, $a['producto']->codigo] <=> [$b['producto']->descripcion, $b['producto']->codigo]);
+
             $hay = LoQueAlcanza::existencias((int) $bodegaId, array_keys($productos));
             $porId = $deLaBodega->keyBy('id')->all();
-            $renglones = [];
+            $cobra = [];
+            $regalos = [];
+            $faltan = [];
 
             foreach ($productos as $producto) {
-                $renglones[] = self::renglon($producto, $hay, $porId);
-            }
+                $presentaciones = $producto['producto']->presentaciones->sortByDesc('contenido')->values();
 
-            usort($renglones, fn (array $a, array $b): int => [$a['descripcion'], $a['codigo']] <=> [$b['descripcion'], $b['codigo']]);
+                if ($producto['cobra'] !== []) {
+                    $cobra[] = self::renglon($producto['producto'], $presentaciones, $producto['cobra'], $producto['paraCobra'], $porId);
+                }
+
+                if ($producto['regalo'] !== []) {
+                    $regalos[] = self::renglon($producto['producto'], $presentaciones, $producto['regalo'], $producto['paraRegalo'], $porId);
+                }
+
+                $falta = self::falta($producto, $presentaciones, $hay);
+
+                if ($falta !== null) {
+                    $faltan[] = $producto['producto']->descripcion.' ('.$falta.')';
+                }
+            }
 
             $hoja[] = [
                 'bodegaId'  => (int) $bodegaId,
@@ -119,7 +141,9 @@ final class HojaDeAlisto
                 'total'     => round((float) $deLaBodega->sum('total'), 2),
                 'desde'     => (string) $deLaBodega->min(fn (Pedido $pedido): string => $pedido->fecha->toDateString()),
                 'hasta'     => (string) $deLaBodega->max(fn (Pedido $pedido): string => $pedido->fecha->toDateString()),
-                'productos' => $renglones,
+                'productos' => $cobra,
+                'regalos'   => $regalos,
+                'faltan'    => $faltan,
             ];
         }
 
@@ -142,10 +166,8 @@ final class HojaDeAlisto
         foreach ($hoja as $bodega) {
             foreach ($bodega['productos'] as $producto) {
                 foreach ($producto['sale'] as $sale) {
-                    if ($sale['cobra'] > 0) {
-                        $opciones[$bodega['bodegaId'].':'.$sale['presentacionId']] = (count($hoja) > 1 ? $bodega['bodega'].' · ' : '')
-                            .$producto['descripcion'].' · '.$sale['sigla'].' (salen '.number_format($sale['cobra']).')';
-                    }
+                    $opciones[$bodega['bodegaId'].':'.$sale['presentacionId']] = (count($hoja) > 1 ? $bodega['bodega'].' · ' : '')
+                        .$producto['descripcion'].' · '.$sale['sigla'].' (salen '.number_format($sale['cantidad']).')';
                 }
             }
         }
@@ -168,9 +190,7 @@ final class HojaDeAlisto
         foreach ($hoja as $bodega) {
             foreach ($bodega['productos'] as $producto) {
                 foreach ($producto['sale'] as $sale) {
-                    if ($sale['cobra'] > 0) {
-                        $cobrado[$bodega['bodegaId']][$sale['presentacionId']] = $sale['cobra'];
-                    }
+                    $cobrado[$bodega['bodegaId']][$sale['presentacionId']] = $sale['cantidad'];
                 }
             }
         }
@@ -179,40 +199,59 @@ final class HojaDeAlisto
     }
 
     /**
-     * @param array{producto: Producto, pide: array<int, int>, cobra: array<int, int>, regalo: array<int, int>, para: array<int, list<array{0: int, 1: int, 2: bool}>>} $producto
-     * @param array<int, int> $hay [presentacion_id => lo que hay en la bodega]
+     * Un renglón de lo que se cobra o de los regalos: cuánto sale de cada
+     * presentación (de la más grande a la más chica) y a qué pedido va.
+     *
+     * @param Collection<int, Presentacion> $presentaciones del producto, de la más grande a la más chica
+     * @param array<int, int> $cantidades [presentacion_id => cantidad]
+     * @param HojaParte $para
      * @param array<array-key, Pedido> $pedidos
      *
      * @return HojaRenglon
      */
-    private static function renglon(array $producto, array $hay, array $pedidos): array
+    private static function renglon(Producto $producto, Collection $presentaciones, array $cantidades, array $para, array $pedidos): array
     {
-        $modelo = $producto['producto'];
-        $presentaciones = $modelo->presentaciones->sortByDesc('contenido')->values();
         $sale = [];
-        $regalo = [];
-        $falta = [];
 
         foreach ($presentaciones as $presentacion) {
-            $cantidad = $producto['pide'][$presentacion->id] ?? 0;
-
-            if ($cantidad > 0) {
+            if (($cantidades[$presentacion->id] ?? 0) > 0) {
                 $sale[] = [
                     'presentacionId' => $presentacion->id,
                     'sigla'          => $presentacion->sigla(),
-                    'cantidad'       => $cantidad,
-                    'cobra'          => $producto['cobra'][$presentacion->id] ?? 0,
+                    'cantidad'       => $cantidades[$presentacion->id],
                 ];
-            }
-
-            if (($producto['regalo'][$presentacion->id] ?? 0) > 0) {
-                $regalo[] = number_format($producto['regalo'][$presentacion->id]).' '.$presentacion->sigla();
             }
         }
 
-        $contenido = $presentaciones->mapWithKeys(fn (Presentacion $presentacion): array => [$presentacion->id => $presentacion->contenido])->all();
+        return [
+            'productoId'  => $producto->id,
+            'codigo'      => $producto->codigo,
+            'descripcion' => $producto->descripcion,
+            'sale'        => $sale,
+            'para'        => self::para($para, $presentaciones->keyBy('id')->all(), $pedidos),
+        ];
+    }
 
-        foreach (Disponible::faltantes($producto['pide'], $hay, $contenido, $modelo->presentacionBase()->id) as $presentacionId => $cuantas) {
+    /**
+     * "faltan 2 cajas de 12, falta 1 unidad": lo que no alcanza de todo lo
+     * que sale del producto (lo que se cobra y los regalos); null si alcanza.
+     *
+     * @param HojaProducto $producto
+     * @param Collection<int, Presentacion> $presentaciones
+     * @param array<int, int> $hay [presentacion_id => lo que hay en la bodega]
+     */
+    private static function falta(array $producto, Collection $presentaciones, array $hay): ?string
+    {
+        $pide = $producto['cobra'];
+
+        foreach ($producto['regalo'] as $presentacionId => $cantidad) {
+            $pide[$presentacionId] = ($pide[$presentacionId] ?? 0) + $cantidad;
+        }
+
+        $contenido = $presentaciones->mapWithKeys(fn (Presentacion $presentacion): array => [$presentacion->id => $presentacion->contenido])->all();
+        $falta = [];
+
+        foreach (Disponible::faltantes($pide, $hay, $contenido, $producto['producto']->presentacionBase()->id) as $presentacionId => $cuantas) {
             $presentacion = $presentaciones->firstWhere('id', $presentacionId);
 
             if ($presentacion instanceof Presentacion) {
@@ -220,22 +259,15 @@ final class HojaDeAlisto
             }
         }
 
-        return [
-            'productoId'  => $modelo->id,
-            'codigo'      => $modelo->codigo,
-            'descripcion' => $modelo->descripcion,
-            'sale'        => $sale,
-            'regalo'      => $regalo === [] ? null : implode(' y ', $regalo),
-            'falta'       => $falta === [] ? null : implode(', ', $falta),
-            'para'        => self::para($producto['para'], $presentaciones->keyBy('id')->all(), $pedidos),
-        ];
+        return $falta === [] ? null : implode(', ', $falta);
     }
 
     /**
-     * "COP-004211 SUPERMERCADO BETESDA: 1 CJ12 + 2 UN (1 UN de regalo)",
-     * uno por pedido, del más viejo al más nuevo.
+     * "COP-004211 SUPERMERCADO BETESDA: 1 CJ12 + 2 UN", uno por pedido, del
+     * más viejo al más nuevo; en los regalos, con la promoción: "…: 1 UN
+     * (12+1)".
      *
-     * @param array<int, list<array{0: int, 1: int, 2: bool}>> $para [pedido => [[presentación, cantidad, regalo]]]
+     * @param HojaParte $para [pedido => [[presentación, cantidad, mecánica]]]
      * @param array<array-key, Presentacion> $presentaciones
      * @param array<array-key, Pedido> $pedidos
      *
@@ -250,28 +282,21 @@ final class HojaDeAlisto
                 continue;
             }
 
-            $cobra = [];
-            $regala = [];
+            $cantidades = [];
+            $promociones = [];
 
-            foreach ($para[$id] as [$presentacionId, $cantidad, $esRegalo]) {
+            foreach ($para[$id] as [$presentacionId, $cantidad, $mecanica]) {
                 $sigla = isset($presentaciones[$presentacionId]) ? $presentaciones[$presentacionId]->sigla() : '';
+                $cantidades[$sigla] = ($cantidades[$sigla] ?? 0) + $cantidad;
 
-                if ($esRegalo) {
-                    $regala[$sigla] = ($regala[$sigla] ?? 0) + $cantidad;
-                } else {
-                    $cobra[$sigla] = ($cobra[$sigla] ?? 0) + $cantidad;
+                if ($mecanica !== '' && ! in_array($mecanica, $promociones, true)) {
+                    $promociones[] = $mecanica;
                 }
             }
 
-            $texto = self::cantidades($cobra);
-            $deRegalo = self::cantidades($regala);
-
             $textos[] = (string) $pedido->numero.' '.Str::limit($pedido->cliente->nombre, self::CLIENTE, '…').': '
-                .match (true) {
-                    $texto === ''    => $deRegalo.' de regalo',
-                    $deRegalo === '' => $texto,
-                    default          => "{$texto} ({$deRegalo} de regalo)",
-                };
+                .self::cantidades($cantidades)
+                .($promociones === [] ? '' : ' ('.implode(' y ', $promociones).')');
         }
 
         return $textos;

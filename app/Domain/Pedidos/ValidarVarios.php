@@ -151,11 +151,7 @@ final class ValidarVarios
         $faltan = [];
 
         foreach ($hoja as $bodega) {
-            foreach ($bodega['productos'] as $producto) {
-                if ($producto['falta'] !== null) {
-                    $faltan[] = $producto['descripcion'].' ('.$producto['falta'].')';
-                }
-            }
+            $faltan = [...$faltan, ...$bodega['faltan']];
         }
 
         return $faltan;

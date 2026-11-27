@@ -17,6 +17,7 @@ use App\Models\Existencia;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Producto;
+use App\Models\Promocion;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
@@ -188,7 +189,8 @@ test('la hoja de alisto dice lo que se saca de cada producto y a qué pedido va;
     expect($hoja)->toHaveCount(1)
         ->and(array_column($hoja[0]['pedidos'], 'numero'))->toBe([$uno->numero, $dos->numero])
         ->and(array_map(fn (array $sale): array => [$sale['sigla'], $sale['cantidad']], $jabon['sale']))->toBe([['CJ12', 3], ['UN', 3]])
-        ->and($jabon['falta'])->toBeNull()
+        ->and($hoja[0]['regalos'])->toBe([])
+        ->and($hoja[0]['faltan'])->toBe([])
         ->and($jabon['para'])->toHaveCount(2)
         ->and($jabon['para'][0])->toStartWith($uno->numero.' ')->toEndWith(': 1 CJ12 + 3 UN')
         ->and(HojaDeAlisto::paraAnotar($hoja))->toBe([
@@ -226,6 +228,38 @@ test('la hoja de alisto dice lo que se saca de cada producto y a qué pedido va;
     $this->actingAs($this->vendedor);
 
     $this->get(route('pedidos.alisto', ['ids' => implode(',', $ids)]))->assertForbidden();
+});
+
+test('en la hoja de alisto los regalos de las promociones van aparte: a quién va cada uno y de qué promoción', function (): void {
+    // 12+1: por cada 12 unidades de jabón, 1 de suavizante gratis.
+    $suave = Producto::factory()->precio(5.0, 7.0)->create(['descripcion' => 'SUAVIZANTE DE PRUEBA']);
+    Promocion::factory()->para($this->jabon, $suave)->state(['compra_unidades' => 12])->create();
+    $uno = pendienteParaValidar($this, [[$this->cj12->id, 1], [$this->un->id, 2]], today()->toDateString());
+    $dos = pendienteParaValidar($this, [[$this->un->id, 3]], today()->toDateString());
+
+    $hoja = HojaDeAlisto::datos([$uno->id, $dos->id]);
+    $jabon = $hoja[0]['productos'][0];
+    $regalo = $hoja[0]['regalos'][0];
+
+    expect($hoja[0]['productos'])->toHaveCount(1)
+        ->and(array_map(fn (array $sale): array => [$sale['sigla'], $sale['cantidad']], $jabon['sale']))->toBe([['CJ12', 1], ['UN', 5]])
+        ->and($jabon['para'][0])->toEndWith(': 1 CJ12 + 2 UN')
+        ->and($hoja[0]['regalos'])->toHaveCount(1)
+        ->and($regalo['descripcion'])->toBe('SUAVIZANTE DE PRUEBA')
+        ->and(array_map(fn (array $sale): array => [$sale['sigla'], $sale['cantidad']], $regalo['sale']))->toBe([['UN', 1]])
+        ->and($regalo['para'])->toHaveCount(1)
+        ->and($regalo['para'][0])->toStartWith($uno->numero.' ')->toEndWith(': 1 UN (12+1)')
+        // Lo que faltó se anota de lo que se cobra; el suavizante no hay, y el aviso lo cuenta.
+        ->and(array_keys(HojaDeAlisto::paraAnotar($hoja)))->toBe(["{$this->bodega->id}:{$this->cj12->id}", "{$this->bodega->id}:{$this->un->id}"])
+        ->and($hoja[0]['faltan'])->toHaveCount(1)
+        ->and($hoja[0]['faltan'][0])->toStartWith('SUAVIZANTE DE PRUEBA (falta');
+
+    $this->actingAs($this->encargado);
+
+    $this->get(route('pedidos.alisto', ['ids' => $uno->id.','.$dos->id]))
+        ->assertOk()
+        ->assertSeeInOrder(['Lo que se saca de la bodega', $this->jabon->descripcion, 'Regalos de promoción', 'SUAVIZANTE DE PRUEBA', '1 UN (12+1)', 'Pedidos'])
+        ->assertDontSee('Incluye de regalo');
 });
 
 test('al validar se anota lo que faltó al alistar: a los primeros les sale completo y a los últimos menos', function (): void {
