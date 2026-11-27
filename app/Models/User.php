@@ -52,6 +52,7 @@ class User extends Authenticatable implements FilamentUser
         'codigo',
         'avatar_url',
         'is_active',
+        'descuento_maximo',
         'last_login_at',
         'last_login_ip',
         'created_by',
@@ -75,6 +76,7 @@ class User extends Authenticatable implements FilamentUser
             'password'          => 'hashed',
             'is_active'         => 'boolean',
             'last_login_at'     => 'datetime',
+            'descuento_maximo'  => 'float',
         ];
     }
 
@@ -227,6 +229,17 @@ class User extends Authenticatable implements FilamentUser
     public function esVendedor(): bool
     {
         return $this->hasRole(Rol::Vendedor->value) && ! $this->veTodasLasBodegas();
+    }
+
+    /**
+     * Vende en la bodega (mayoreo): usuario de bodega con bodega asignada que
+     * no es vendedor de ruta. Puede dar descuento hasta `descuento_maximo`.
+     */
+    public function vendeEnBodega(): bool
+    {
+        return $this->bodega_id !== null
+            && $this->hasRole(Rol::Bodega->value)
+            && ! $this->hasRole(Rol::Vendedor->value);
     }
 
     // ─── Relaciones jerárquicas ───────────────────────────────

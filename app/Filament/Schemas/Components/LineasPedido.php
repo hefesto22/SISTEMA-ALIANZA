@@ -196,7 +196,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
      *
      * @param array<mixed> $lineas
      *
-     * @return array{total: float, ahorro: float, promociones: string, descuentos: array<int, float>}
+     * @return array{total: float, ahorro: float, rebaja: float, promociones: string, descuentos: array<int, float>}
      */
     #[ExposedLivewireMethod]
     #[Renderless]
@@ -204,7 +204,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     {
         $this->sinRedibujar();
 
-        return PedidoForm::resumenDe(self::normalizar($lineas), $this->bodegaDelPedido(), $this->pedidoQueSeEdita());
+        return PedidoForm::resumenDe(self::normalizar($lineas), $this->bodegaDelPedido(), $this->pedidoQueSeEdita(), $this->porcentajeMayoreo());
     }
 
     /**
@@ -498,6 +498,17 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $bodega = $this->makeGetUtility()('bodega_id');
 
         return is_numeric($bodega) ? (int) $bodega : null;
+    }
+
+    /**
+     * El descuento de venta en bodega que vale con el vendedor y el %
+     * escogidos (0 si el vendedor no vende en bodega).
+     */
+    public function porcentajeMayoreo(): float
+    {
+        $get = $this->makeGetUtility();
+
+        return PedidoForm::porcentajeDe($get('vendedor_id'), $get('descuento_mayoreo_porcentaje'));
     }
 
     /**

@@ -39,7 +39,9 @@
                             <div class="vp-mas">{{ $mas }}</div>
                         @endif
 
-                        @if ($item->descuento > 0)
+                        @if ($item->descuento_mayoreo > 0)
+                            <div class="vp-ahorro">Descuento −{{ lempiras($item->descuento_mayoreo) }}</div>
+                        @elseif ($item->descuento > 0)
                             <div class="vp-ahorro">{{ $item->bonificacion ? 'Regalo · ' : '' }}−{{ lempiras($item->descuento) }}{{ $item->promocion ? ' · '.$item->promocion->codigo : '' }}</div>
                         @endif
                     </div>
@@ -55,10 +57,16 @@
             <dt>Subtotal</dt>
             <dd>{{ lempiras($pedido->subtotal) }}</dd>
         </div>
-        @if ($pedido->descuento > 0)
+        @if ($pedido->descuentoPromociones() > 0)
             <div class="vp-ahorro">
                 <dt>Descuento promociones</dt>
-                <dd>−{{ lempiras($pedido->descuento) }}</dd>
+                <dd>−{{ lempiras($pedido->descuentoPromociones()) }}</dd>
+            </div>
+        @endif
+        @if ($pedido->descuento_mayoreo > 0)
+            <div class="vp-ahorro">
+                <dt>Descuento venta en bodega ({{ \App\Filament\Resources\Pedidos\Schemas\PedidoForm::porcentajeTexto($pedido->descuento_mayoreo_porcentaje) }})</dt>
+                <dd>−{{ lempiras($pedido->descuento_mayoreo) }}</dd>
             </div>
         @endif
         <div>

@@ -151,6 +151,24 @@ class UserForm
                             ->placeholder('Escoja sus rutas'),
                     ]),
 
+                Section::make('Venta en bodega (mayoreo)')
+                    ->description('El usuario de bodega le vende al cliente que llega a la bodega y le puede dar un descuento a todo el pedido. Los vendedores de ruta no dan descuento.')
+                    ->icon('heroicon-o-receipt-percent')
+                    ->aside()
+                    ->visible(fn (Get $get): bool => self::tieneRol($get('roles'), Rol::Bodega) && ! self::tieneRol($get('roles'), Rol::Vendedor))
+                    ->schema([
+                        TextInput::make('descuento_maximo')
+                            ->label('Descuento máximo')
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(100)
+                            ->step(0.5)
+                            ->suffix('%')
+                            ->default(0)
+                            ->required()
+                            ->helperText('Hasta cuánto puede rebajar a un pedido cuando vende en la bodega. 0 = no da descuento. Nunca se vende por debajo del costo: si el % lo dejaría abajo, se rebaja solo hasta el costo.'),
+                    ]),
+
                 Section::make('Estado de la Cuenta')
                     ->description('Controla si el usuario puede acceder al sistema.')
                     ->icon('heroicon-o-power')
@@ -197,12 +215,20 @@ class UserForm
      */
     private static function esVendedor(mixed $roles): bool
     {
+        return self::tieneRol($roles, Rol::Vendedor);
+    }
+
+    /**
+     * Si entre los roles escogidos (ids) está $rol.
+     */
+    private static function tieneRol(mixed $roles, Rol $rol): bool
+    {
         if (! is_array($roles) || $roles === []) {
             return false;
         }
 
-        $vendedor = Role::query()->where('name', Rol::Vendedor->value)->value('id');
+        $id = Role::query()->where('name', $rol->value)->value('id');
 
-        return $vendedor !== null && in_array((string) $vendedor, array_map(strval(...), $roles), true);
+        return $id !== null && in_array((string) $id, array_map(strval(...), $roles), true);
     }
 }

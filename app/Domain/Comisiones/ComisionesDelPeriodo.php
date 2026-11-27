@@ -25,7 +25,8 @@ use stdClass;
  *
  * Es venta lo FACTURADO: las facturas vigentes con fecha del periodo. Un
  * pedido corregido después de impreso anula su factura y saca otra: cuenta
- * la nueva, en su fecha.
+ * la nueva, en su fecha. Las ventas en bodega (mayoreo, Pedido::en_bodega)
+ * no cuentan.
  *
  * Abierto, se calcula al momento ("así va"). Cerrado (ComisionPeriodo), se
  * lee lo que se pagó y ya no cambia. Al cerrar el siguiente entran también:
@@ -244,6 +245,7 @@ final class ComisionesDelPeriodo
             LEFT JOIN categorias c ON c.id = pr.categoria_id
             LEFT JOIN comision_grupos g ON g.id = c.comision_grupo_id
             WHERE fa.estado = ?
+                AND NOT p.en_bodega
                 AND fa.fecha_emision < ?
                 AND (
                     fa.fecha_emision >= ?

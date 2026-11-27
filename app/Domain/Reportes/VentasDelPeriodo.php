@@ -19,7 +19,10 @@ use stdClass;
  * Es venta lo que bodega ya despachó (pedidos Por imprimir e Impresos), en
  * el día en que se validó el despacho. Pendientes y anulados no cuentan.
  *
- *  - Venta: lo cobrado sin ISV, ya con los descuentos de promociones.
+ *  - Venta: lo cobrado sin ISV, ya con las promociones y los descuentos.
+ *  - Promociones: lo que quitaron las promociones (con los regalos a su
+ *    precio). Descuentos: lo que se rebajó en las ventas en bodega
+ *    (mayoreo). Son cosas distintas y van aparte.
  *  - Total: lo facturado, con ISV.
  *  - Costo: lo que costó lo que salió, con el costo promedio que tenía el
  *    producto ese día (el kárdex lo guarda en cada salida y corrección).
@@ -44,7 +47,7 @@ final class VentasDelPeriodo
         'clientes'   => 'Por cliente',
     ];
 
-    private const SUMAS = 'COALESCE(SUM(l.neta), 0) AS venta, COALESCE(SUM(l.descuento), 0) AS descuento, '
+    private const SUMAS = 'COALESCE(SUM(l.neta), 0) AS venta, COALESCE(SUM(l.promociones), 0) AS promociones, COALESCE(SUM(l.descuentos), 0) AS descuentos, '
         .'COALESCE(SUM(l.isv), 0) AS isv, COALESCE(SUM(l.total), 0) AS total, COALESCE(SUM(l.costo), 0) AS costo';
 
     private const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -338,7 +341,7 @@ final class VentasDelPeriodo
             ),
             it AS (
                 SELECT i.pedido_id, i.producto_id,
-                    SUM(i.subtotal) AS bruto, SUM(i.descuento) AS descuento, SUM(i.isv) AS isv, SUM(i.total) AS total,
+                    SUM(i.subtotal) AS bruto, SUM(i.descuento) AS descuento, SUM(i.descuento_mayoreo) AS mayoreo, SUM(i.isv) AS isv, SUM(i.total) AS total,
                     SUM(COALESCE(i.cantidad_despachada, i.cantidad) * GREATEST(i.contenido, 1)) AS unidades,
                     SUM(COALESCE(i.cantidad_despachada, i.cantidad) * ps.costo) AS costo_hoy
                 FROM pedido_items i
@@ -356,7 +359,7 @@ final class VentasDelPeriodo
             ),
             lineas AS (
                 SELECT ped.id AS pedido_id, ped.bodega_id, ped.cliente_id, ped.vendedor_id, ped.validado_at, it.producto_id,
-                    it.descuento, it.bruto - it.descuento AS neta, it.isv, it.total, it.unidades,
+                    it.descuento - it.mayoreo AS promociones, it.mayoreo AS descuentos, it.bruto - it.descuento AS neta, it.isv, it.total, it.unidades,
                     COALESCE(k.costo, it.costo_hoy) AS costo,
                     (k.pedido_id IS NULL AND it.unidades <> 0) AS estimado
                 FROM it
@@ -379,7 +382,8 @@ final class VentasDelPeriodo
             unidades: (int) self::numero($f->unidades ?? 0),
             cantidad: $cantidad,
             venta: round(self::numero($f->venta ?? 0), 2),
-            descuento: round(self::numero($f->descuento ?? 0), 2),
+            promociones: round(self::numero($f->promociones ?? 0), 2),
+            descuentos: round(self::numero($f->descuentos ?? 0), 2),
             isv: round(self::numero($f->isv ?? 0), 2),
             total: round(self::numero($f->total ?? 0), 2),
             costo: round(self::numero($f->costo ?? 0), 2),

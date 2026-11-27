@@ -78,6 +78,12 @@ class UsersTable
                     ->expandableLimitedList()
                     ->placeholder('—')
                     ->toggleable(),
+                TextColumn::make('descuento_maximo')
+                    ->label('Descuento máx.')
+                    ->formatStateUsing(fn (mixed $state): string => is_numeric($state) && (float) $state > 0 ? rtrim(rtrim(number_format((float) $state, 2), '0'), '.').' %' : '—')
+                    ->tooltip('Hasta cuánto puede rebajar a un pedido cuando vende en la bodega (mayoreo).')
+                    ->alignEnd()
+                    ->toggleable(),
                 ToggleColumn::make('is_active')
                     ->label('Activo')
                     ->onColor('success')

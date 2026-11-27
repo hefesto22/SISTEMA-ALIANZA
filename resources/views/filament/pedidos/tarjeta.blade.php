@@ -77,6 +77,8 @@
     <div class="pt-meta">
         @if ($pedido->esReimpresion())
             <span class="pt-pill reimprimir" title="Se corrigió después de impreso{{ $pedido->corregido_at ? ' · '.$pedido->corregido_at->format('d/m/Y H:i') : '' }}{{ $porSustituir ? '. Sale factura nueva; retire la N° '.$porSustituir->numero.' (anulada).' : '' }}">Por reimprimir</span>
+        @elseif ($pedido->estado === \App\Enums\EstadoPedido::Impreso && $pedido->se_lo_lleva)
+            <span class="pt-pill cargado" title="Venta en bodega: el cliente se lo llevó (no va en camión)">Se lo llevó</span>
         @elseif ($enCarga !== null)
             <span class="pt-pill cargado" title="Carga {{ $enCarga->carga->numero() }} · sale el {{ $enCarga->carga->fecha->format('d/m/Y') }}">{{ $enCarga->estado === \App\Enums\EntregaFactura::Entregada ? 'Entregado' : 'Cargado' }}</span>
         @elseif ($pedido->estado === \App\Enums\EstadoPedido::Impreso)
@@ -87,6 +89,10 @@
 
         @if ($pedido->fuera_de_ruta)
             <span class="pt-pill fuera" title="{{ $pedido->motivo_fuera_ruta }}">Fuera de ruta</span>
+        @endif
+
+        @if ($pedido->en_bodega)
+            <span class="pt-pill por_imprimir" title="La vendió un usuario de bodega{{ $pedido->descuento_mayoreo > 0 ? ' con '.lempiras($pedido->descuento_mayoreo).' de descuento' : '' }}">En bodega</span>
         @endif
 
         <span class="pt-tiempo" title="{{ $pedido->created_at?->format('d/m/Y H:i') }}">

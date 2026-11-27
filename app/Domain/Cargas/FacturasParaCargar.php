@@ -15,7 +15,8 @@ use Illuminate\Support\Carbon;
 
 /**
  * Las facturas que se pueden subir a un camión: vigentes, de la bodega, de
- * pedidos impresos, que no van en otra carga ni se entregaron ya, emitidas
+ * pedidos impresos (no las de una venta en bodega que el cliente se llevó),
+ * que no van en otra carga ni se entregaron ya, emitidas
  * desde un día hasta la fecha de la carga. Si no se dice desde cuándo, los
  * últimos DIAS días (las de antes casi siempre ya se entregaron); en la
  * pantalla se puede ir más atrás con "Impresas desde".
@@ -115,7 +116,7 @@ final class FacturasParaCargar
         return Factura::query()
             ->when($bodegaId !== null, fn (Builder $q): Builder => $q->where('facturas.bodega_id', $bodegaId))
             ->where('facturas.estado', EstadoFactura::Vigente)
-            ->whereHas('pedido', fn (Builder $q): Builder => $q->where('estado', EstadoPedido::Impreso))
+            ->whereHas('pedido', fn (Builder $q): Builder => $q->where('estado', EstadoPedido::Impreso)->where('se_lo_lleva', false))
             ->whereNotExists(function (QueryBuilder $q) use ($carga): void {
                 $q->selectRaw('1')
                     ->from('carga_factura')

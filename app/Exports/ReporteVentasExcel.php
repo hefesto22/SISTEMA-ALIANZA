@@ -65,19 +65,20 @@ final class ReporteVentasExcel implements Export, WithMultipleSheets
         $filas = [
             ['Pedidos despachados', $t->pedidos],
             ['Clientes', $t->clientes],
-            ['Venta (sin ISV, ya con descuentos)', $t->venta],
-            ['Descuentos por promociones', $t->descuento],
+            ['Venta (sin ISV, ya con promociones y descuentos)', $t->venta],
+            ['Promociones (con los regalos a su precio)', $t->promociones],
+            ['Descuentos de venta en bodega', $t->descuentos],
             ['ISV', $t->isv],
             ['Total facturado (con ISV)', $t->total],
             ['Costo de lo vendido', $t->costo],
             ['Ganancia', $t->ganancia()],
             ['Margen (ganancia ÷ venta)', $t->margen()],
         ];
-        $tipos = [0 => HojaReporte::ENTERO, 1 => HojaReporte::ENTERO, 8 => HojaReporte::PORCENTAJE];
+        $tipos = [0 => HojaReporte::ENTERO, 1 => HojaReporte::ENTERO, 9 => HojaReporte::PORCENTAJE];
 
         if ($estimados > 0) {
             $filas[] = ['Pedidos con costo estimado (sin salida en el kárdex)', $estimados];
-            $tipos[9] = HojaReporte::ENTERO;
+            $tipos[10] = HojaReporte::ENTERO;
         }
 
         return new HojaReporte('Resumen', $this->encabezado(), [
@@ -97,13 +98,14 @@ final class ReporteVentasExcel implements Export, WithMultipleSheets
             ...($conDetalle === null ? [] : [$conDetalle => HojaReporte::TEXTO]),
             'Pedidos' => HojaReporte::ENTERO,
             ...($conClientes ? ['Clientes' => HojaReporte::ENTERO] : []),
-            'Venta'      => HojaReporte::DINERO,
-            'Descuentos' => HojaReporte::DINERO,
-            'ISV'        => HojaReporte::DINERO,
-            'Total'      => HojaReporte::DINERO,
-            'Costo'      => HojaReporte::DINERO,
-            'Ganancia'   => HojaReporte::DINERO,
-            'Margen'     => HojaReporte::PORCENTAJE,
+            'Venta'       => HojaReporte::DINERO,
+            'Promociones' => HojaReporte::DINERO,
+            'Descuentos'  => HojaReporte::DINERO,
+            'ISV'         => HojaReporte::DINERO,
+            'Total'       => HojaReporte::DINERO,
+            'Costo'       => HojaReporte::DINERO,
+            'Ganancia'    => HojaReporte::DINERO,
+            'Margen'      => HojaReporte::PORCENTAJE,
         ];
 
         $renglon = fn (FilaVenta $f, bool $esTotal = false): array => [
@@ -113,7 +115,8 @@ final class ReporteVentasExcel implements Export, WithMultipleSheets
             $f->pedidos,
             ...($conClientes ? [$f->clientes] : []),
             $f->venta,
-            $f->descuento,
+            $f->promociones,
+            $f->descuentos,
             $f->isv,
             $f->total,
             $f->costo,
@@ -133,18 +136,19 @@ final class ReporteVentasExcel implements Export, WithMultipleSheets
     private function productos(): HojaReporte
     {
         $columnas = [
-            'Código'     => HojaReporte::TEXTO,
-            'Producto'   => HojaReporte::TEXTO,
-            'Proveedor'  => HojaReporte::TEXTO,
-            'Salió'      => HojaReporte::TEXTO,
-            'Unidades'   => HojaReporte::ENTERO,
-            'Pedidos'    => HojaReporte::ENTERO,
-            'Clientes'   => HojaReporte::ENTERO,
-            'Venta'      => HojaReporte::DINERO,
-            'Descuentos' => HojaReporte::DINERO,
-            'Costo'      => HojaReporte::DINERO,
-            'Ganancia'   => HojaReporte::DINERO,
-            'Margen'     => HojaReporte::PORCENTAJE,
+            'Código'      => HojaReporte::TEXTO,
+            'Producto'    => HojaReporte::TEXTO,
+            'Proveedor'   => HojaReporte::TEXTO,
+            'Salió'       => HojaReporte::TEXTO,
+            'Unidades'    => HojaReporte::ENTERO,
+            'Pedidos'     => HojaReporte::ENTERO,
+            'Clientes'    => HojaReporte::ENTERO,
+            'Venta'       => HojaReporte::DINERO,
+            'Promociones' => HojaReporte::DINERO,
+            'Descuentos'  => HojaReporte::DINERO,
+            'Costo'       => HojaReporte::DINERO,
+            'Ganancia'    => HojaReporte::DINERO,
+            'Margen'      => HojaReporte::PORCENTAJE,
         ];
 
         $renglon = fn (FilaVenta $f, bool $esTotal = false): array => [
@@ -156,7 +160,8 @@ final class ReporteVentasExcel implements Export, WithMultipleSheets
             $f->pedidos,
             $f->clientes,
             $f->venta,
-            $f->descuento,
+            $f->promociones,
+            $f->descuentos,
             $f->costo,
             $f->ganancia(),
             $f->margen(),

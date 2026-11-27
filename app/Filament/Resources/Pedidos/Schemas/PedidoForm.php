@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Schemas;
 
+use App\Domain\Pedidos\RecalcularPedido;
+use App\Domain\Pedidos\VentaEnBodega;
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Domain\Promociones\LineaPromocion;
 use App\Domain\Promociones\MotorPromociones;
@@ -25,6 +27,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -47,6 +50,12 @@ use Illuminate\Database\Eloquent\Model;
  * al vendedor si la agrega) y el total estimado ya trae el descuento. El
  * regalo de las gratis no se escribe: se avisa y se agrega solo al guardar
  * (bonificación). Si no hay promociones, el formulario queda como siempre.
+ *
+ * Venta en bodega (mayoreo): el usuario de bodega puede quedar como
+ * vendedor (él le vende al cliente que llega a la bodega). Entonces sale
+ * "Venta en bodega": un descuento a todo el pedido hasta su tope (Usuarios)
+ * y si el cliente se lo lleva o va en camión. Al guardar queda validada
+ * (VentaEnBodega).
  */
 class PedidoForm
 {
@@ -117,12 +126,15 @@ class PedidoForm
                                 'name',
                                 fn (Builder $query): Builder => self::vendedoresQuePuedeEscoger($query),
                             )
-                            ->getOptionLabelFromRecordUsing(fn (User $record): string => collect([$record->codigo, $record->name])->filter()->implode(' · '))
+                            ->getOptionLabelFromRecordUsing(fn (User $record): string => collect([$record->codigo, $record->name, $record->vendeEnBodega() ? 'venta en bodega' : null])->filter()->implode(' · '))
                             ->searchable(['name', 'codigo'])
                             ->preload()
                             ->required()
-                            ->live(condition: $veTodo)
+                            ->live()
                             ->afterStateUpdated(function (mixed $state, Set $set) use ($veTodo): void {
+                                // Otro vendedor: el descuento se vuelve a escribir (cada quien tiene su tope).
+                                $set('descuento_mayoreo_porcentaje', 0);
+
                                 if (! $veTodo || ! is_numeric($state)) {
                                     return;
                                 }
@@ -145,6 +157,37 @@ class PedidoForm
                             ->label('Fecha')
                             ->default(now())
                             ->required(),
+                    ]),
+
+                Section::make('Venta en bodega')
+                    ->description('El cliente está en la bodega. Al guardar, la venta queda validada (sale de la bodega) y lista para imprimir.')
+                    ->icon(Heroicon::OutlinedBuildingStorefront)
+                    ->columns(['default' => 1, 'md' => 2])
+                    ->columnSpanFull()
+                    ->extraAttributes(['class' => 'pv'])
+                    ->visible(fn (Get $get): bool => self::vendedorEnBodega($get) instanceof User)
+                    ->schema([
+                        TextInput::make('descuento_mayoreo_porcentaje')
+                            ->label('Descuento a todo el pedido')
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(fn (Get $get): float => self::topeDe($get))
+                            ->step(0.5)
+                            ->suffix('%')
+                            ->default(0)
+                            ->disabled(fn (Get $get): bool => self::topeDe($get) <= 0)
+                            ->helperText(fn (Get $get): string => self::topeDe($get) <= 0
+                                ? 'Este usuario no tiene descuento autorizado (se pone en Usuarios).'
+                                : 'Hasta '.self::porcentajeTexto(self::topeDe($get)).'. Va a todos los productos que no traen promoción, sin bajar del costo.'),
+                        ToggleButtons::make('se_lo_lleva')
+                            ->label('Entrega')
+                            ->boolean('Se lo lleva', 'Va en camión')
+                            ->icons([1 => Heroicon::OutlinedShoppingBag, 0 => Heroicon::OutlinedTruck])
+                            ->colors([1 => 'primary', 0 => 'gray'])
+                            ->default(true)
+                            ->required()
+                            ->inline()
+                            ->helperText('Se lo lleva: no pasa por Cargar camión. Va en camión: queda en Impreso para cargarlo.'),
                     ]),
 
                 Section::make('Productos')
@@ -181,16 +224,21 @@ class PedidoForm
      * con ISV, para mostrarlo en su fila. Las promociones con tope cuentan
      * lo que les queda sin $sinPedido (el que se está editando).
      *
+     * Venta en bodega: con $porcentaje (ya revisado contra el tope) cada
+     * producto sin promoción lleva el descuento, sin bajar del costo;
+     * "rebaja" es lo que suma (sin ISV), aparte de las promociones.
+     *
      * @param list<array{id: int|null, producto_id: int, presentacion_id: int, cantidad: int}> $lineas
      *
-     * @return array{total: float, ahorro: float, promociones: string, descuentos: array<int, float>}
+     * @return array{total: float, ahorro: float, rebaja: float, promociones: string, descuentos: array<int, float>}
      */
-    public static function resumenDe(array $lineas, ?int $bodegaId = null, ?int $sinPedido = null): array
+    public static function resumenDe(array $lineas, ?int $bodegaId = null, ?int $sinPedido = null, float $porcentaje = 0.0): array
     {
         [$conProducto, $promociones] = self::calcular($lineas, $bodegaId, $sinPedido);
         $tasaIsv = CalculadoraPrecio::tasaIsv();
         $total = 0.0;
         $ahorro = 0.0;
+        $rebaja = 0.0;
         $descuentos = [];
 
         // Bruto − descuento = neto, ISV sobre el neto.
@@ -199,6 +247,17 @@ class PedidoForm
             $bruto = round($linea['presentacion']->precio * $linea['cantidad'], 2);
             $aplicado = $promociones->descuentoDe($clave);
             $descuento = round(min($bruto, $aplicado->monto ?? 0.0), 2);
+
+            // Sin promoción: el descuento de venta en bodega (como RecalcularPedido).
+            if ($porcentaje > 0 && $descuento <= 0) {
+                $mayoreo = RecalcularPedido::descuentoHastaElCosto($bruto, $linea['presentacion']->costo * $linea['cantidad'], $porcentaje);
+                $rebaja += $mayoreo;
+                $neto = round($bruto - $mayoreo, 2);
+                $total += $neto + ($gravado ? round($neto * $tasaIsv, 2) : 0.0);
+
+                continue;
+            }
+
             $neto = round($bruto - $descuento, 2);
 
             $ahorro += $descuento;
@@ -214,9 +273,49 @@ class PedidoForm
         return [
             'total'       => round($total, 2),
             'ahorro'      => round($ahorro, 2),
+            'rebaja'      => round($rebaja, 2),
             'promociones' => Promocion::query()->vigentes()->paraBodega($bodegaId)->exists() ? self::promocionesAplicadas($promociones) : '',
             'descuentos'  => $descuentos,
         ];
+    }
+
+    /**
+     * El % de venta en bodega que vale con lo escogido en el formulario
+     * (vendedor y %): 0 si el vendedor no vende en bodega; si no, sin pasar
+     * de su tope. Para el total de la preventa.
+     */
+    public static function porcentajeDe(mixed $vendedorId, mixed $porcentaje): float
+    {
+        $datos = VentaEnBodega::datos(['vendedor_id' => $vendedorId, 'descuento_mayoreo_porcentaje' => $porcentaje]);
+
+        return is_float($datos['descuento_mayoreo_porcentaje']) ? $datos['descuento_mayoreo_porcentaje'] : 0.0;
+    }
+
+    /**
+     * El vendedor escogido, si vende en bodega (mayoreo); null si no.
+     */
+    private static function vendedorEnBodega(Get $get): ?User
+    {
+        $id = $get('vendedor_id');
+        $vendedor = is_numeric($id) ? User::query()->find((int) $id) : null;
+
+        return $vendedor instanceof User && $vendedor->vendeEnBodega() ? $vendedor : null;
+    }
+
+    /**
+     * Hasta cuánto descuento puede dar el vendedor escogido (0 si no vende en bodega).
+     */
+    private static function topeDe(Get $get): float
+    {
+        return self::vendedorEnBodega($get)?->descuento_maximo ?? 0.0;
+    }
+
+    /**
+     * "5 %", "7.5 %".
+     */
+    public static function porcentajeTexto(float $porcentaje): string
+    {
+        return rtrim(rtrim(number_format($porcentaje, 2), '0'), '.').' %';
     }
 
     /**
@@ -260,8 +359,9 @@ class PedidoForm
     }
 
     /**
-     * Vendedores para el pedido: administración escoge cualquiera; el
-     * encargado, solo los de su bodega (si no, el pedido se le iría a otra).
+     * Vendedores para el pedido: los de ruta y los usuarios de bodega (venta
+     * en bodega). Administración escoge cualquiera; el encargado, solo los
+     * de su bodega (si no, el pedido se le iría a otra).
      *
      * @param Builder<Model> $query
      *
@@ -270,7 +370,7 @@ class PedidoForm
     private static function vendedoresQuePuedeEscoger(Builder $query): Builder
     {
         $usuario = Acceso::usuario();
-        $query->whereHas('roles', fn (Builder $q): Builder => $q->where('name', Rol::Vendedor->value));
+        $query->whereHas('roles', fn (Builder $q): Builder => $q->whereIn('name', [Rol::Vendedor->value, Rol::Bodega->value]));
 
         if ($usuario === null) {
             return $query->whereRaw('1 = 0');

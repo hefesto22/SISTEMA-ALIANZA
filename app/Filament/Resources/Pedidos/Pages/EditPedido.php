@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Pedidos\Pages;
 
 use App\Domain\Pedidos\RecalcularPedido;
+use App\Domain\Pedidos\VentaEnBodega;
 use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
 use App\Filament\Support\Acceso;
@@ -71,15 +72,26 @@ class EditPedido extends EditRecord
             }
         }
 
-        return $data;
+        $pedido = $this->getRecord();
+
+        // Venta en bodega o no, según el vendedor que queda.
+        return VentaEnBodega::datos([...$data, 'vendedor_id' => $data['vendedor_id'] ?? ($pedido instanceof Pedido ? $pedido->vendedor_id : null)]);
     }
 
+    /**
+     * Se recalcula con los precios de hoy. La venta en bodega (que quedó
+     * pendiente porque no se pudo validar) se intenta validar otra vez.
+     */
     protected function afterSave(): void
     {
         /** @var Pedido $pedido */
         $pedido = $this->getRecord();
 
         app(RecalcularPedido::class)->ejecutar($pedido, preciosVigentes: true);
+
+        if ($pedido->en_bodega) {
+            CreatePedido::validarVentaEnBodega($pedido);
+        }
     }
 
     /**

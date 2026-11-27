@@ -42,7 +42,7 @@
 
     $statePath = $getStatePath();
     $lineasIniciales = LineasPedido::normalizar($getState());
-    $resumen = PedidoForm::resumenDe($lineasIniciales, $field->bodegaDelPedido());
+    $resumen = PedidoForm::resumenDe($lineasIniciales, $field->bodegaDelPedido(), null, $field->porcentajeMayoreo());
     $hoy = $getPromocionesDeHoy();
     $productosIniciales = count(array_unique(array_column($lineasIniciales, 'producto_id')));
     $edicion = (bool) $getRecord()?->exists;
@@ -54,6 +54,7 @@
         'descuentos' => (object) $resumen['descuentos'],
         'total'      => $resumen['total'],
         'ahorro'     => $resumen['ahorro'],
+        'rebaja'     => $resumen['rebaja'],
         'promos'     => $resumen['promociones'],
         'tasa'       => CalculadoraPrecio::tasaIsv(),
         'simbolo'    => (string) config('honduras.moneda.simbolo', 'L.'),
@@ -291,6 +292,7 @@
             descuentos: @js($config['descuentos']),
             total: @js($config['total']),
             ahorro: @js($config['ahorro']),
+            rebaja: @js($config['rebaja']),
             promociones: @js($config['promos']),
 
             init() {
@@ -318,6 +320,10 @@
                 this.ordenProductos = [...new Set(this.lineas.map((l) => Number(l.producto_id)))]
 
                 this.$watch('lineas', () => this.recalcular())
+
+                {{-- Venta en bodega: el total cambia con el vendedor y el descuento. --}}
+                this.$wire.$watch('data.vendedor_id', () => this.recalcular())
+                this.$wire.$watch('data.descuento_mayoreo_porcentaje', () => this.recalcular())
 
                 {{-- Administración: al cambiar la bodega, las promociones son las de esa bodega. --}}
                 if (@js($config['veTodo'])) {
@@ -608,6 +614,7 @@
 
                 if (this.lineas.length === 0) {
                     this.ahorro = 0
+                    this.rebaja = 0
                     this.promociones = ''
                     this.descuentos = {}
 
@@ -629,6 +636,7 @@
 
                     this.total = r.total
                     this.ahorro = r.ahorro
+                    this.rebaja = r.rebaja ?? 0
                     this.promociones = r.promociones
                     this.descuentos = r.descuentos ?? {}
                 } catch (e) {}
@@ -1127,7 +1135,7 @@
                 <span class="pv-barra-etiqueta">Total estimado</span>
                 <span class="pv-barra-monto" x-text="dinero(total)">{{ lempiras($resumen['total']) }}</span>
                 <span class="pv-barra-detalle">
-                    <span x-text="grupos.length === 0 ? 'Agregue productos' : (grupos.length === 1 ? '1 producto' : grupos.length + ' productos')">{{ $productosIniciales === 0 ? 'Agregue productos' : ($productosIniciales === 1 ? '1 producto' : "{$productosIniciales} productos") }}</span><span x-show="ahorro > 0" @if ($resumen['ahorro'] <= 0) style="display: none" @endif> · <span class="pv-barra-ahorro" x-text="'ahorra ' + dinero(ahorro)">ahorra {{ lempiras($resumen['ahorro']) }}</span></span>
+                    <span x-text="grupos.length === 0 ? 'Agregue productos' : (grupos.length === 1 ? '1 producto' : grupos.length + ' productos')">{{ $productosIniciales === 0 ? 'Agregue productos' : ($productosIniciales === 1 ? '1 producto' : "{$productosIniciales} productos") }}</span><span x-show="ahorro > 0" @if ($resumen['ahorro'] <= 0) style="display: none" @endif> · <span class="pv-barra-ahorro" x-text="'ahorra ' + dinero(ahorro)">ahorra {{ lempiras($resumen['ahorro']) }}</span></span><span x-show="rebaja > 0" @if ($resumen['rebaja'] <= 0) style="display: none" @endif> · <span class="pv-barra-ahorro" x-text="'descuento ' + dinero(rebaja)">descuento {{ lempiras($resumen['rebaja']) }}</span></span>
                 </span>
             </div>
 

@@ -27,7 +27,8 @@ use Illuminate\Support\Carbon;
  * @property float $precio
  * @property bool $gravado
  * @property float $subtotal
- * @property float $descuento
+ * @property float $descuento lo que se le quita: la promoción o el descuento de la venta en bodega
+ * @property float $descuento_mayoreo la parte de `descuento` que es descuento de venta en bodega (0 si es promoción)
  * @property int|null $promocion_id
  * @property bool $bonificacion regalo de una promoción gratis: lo agrega RecalcularPedido
  * @property float $isv
@@ -66,6 +67,7 @@ class PedidoItem extends Model
             'gravado'             => 'boolean',
             'subtotal'            => 'float',
             'descuento'           => 'float',
+            'descuento_mayoreo'   => 'float',
             'isv'                 => 'float',
             'total'               => 'float',
             'bonificacion'        => 'boolean',

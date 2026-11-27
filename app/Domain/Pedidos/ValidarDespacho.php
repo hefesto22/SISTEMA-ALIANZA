@@ -43,10 +43,11 @@ final class ValidarDespacho
      * @param array<int, int|string|null> $despachado [id de línea => cantidad que sale]; si falta una línea sale completa
      * @param list<array{presentacion_id: int, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en otra presentación o uno que no venía (ver AjustarLineas)
      * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener unidades sueltas
+     * @param bool $abrirSolas si las sueltas no alcanzan, se abren solas las cajas que sobran (venta en bodega: nadie dice cuáles)
      */
-    public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = [], array $abrir = []): Pedido
+    public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = [], array $abrir = [], bool $abrirSolas = false): Pedido
     {
-        return DB::transaction(function () use ($pedido, $despachado, $usuario, $nuevas, $abrir): Pedido {
+        return DB::transaction(function () use ($pedido, $despachado, $usuario, $nuevas, $abrir, $abrirSolas): Pedido {
             $pedido = Pedido::query()->lockForUpdate()->findOrFail($pedido->id);
 
             if (! $pedido->estaPendiente()) {
@@ -64,7 +65,7 @@ final class ValidarDespacho
                 sinPerdida: $precioDelPedido,
             );
 
-            $this->salida->ejecutar($pedido, TipoMovimiento::Despacho, $usuario, abrir: $abrir);
+            $this->salida->ejecutar($pedido, TipoMovimiento::Despacho, $usuario, abrir: $abrir, abrirSolas: $abrirSolas);
 
             $pedido->forceFill([
                 'estado'       => EstadoPedido::PorImprimir,

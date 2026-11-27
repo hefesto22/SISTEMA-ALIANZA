@@ -53,6 +53,10 @@
                 <span class="vp-pill fuera">Fuera de ruta</span>
             @endif
 
+            @if ($pedido->en_bodega)
+                <span class="vp-pill bodega">Venta en bodega · {{ $pedido->se_lo_lleva ? 'se lo lleva' : 'va en camión' }}</span>
+            @endif
+
             <span class="vp-tiempo" title="{{ $pedido->created_at?->format('d/m/Y H:i') }}">
                 {{ svg('heroicon-m-clock') }} {{ $pedido->created_at?->diffForHumans() }}
             </span>

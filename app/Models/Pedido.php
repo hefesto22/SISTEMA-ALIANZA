@@ -24,8 +24,15 @@ use Illuminate\Support\Carbon;
  * impreso, la factura se anula y el pedido vuelve a Por imprimir: al
  * reimprimirlo sale una factura nueva que sustituye a la anulada.
  *
- * subtotal = bruto (sin ISV), descuento = promociones, ISV sobre lo neto,
- * total = subtotal − descuento + ISV.
+ * subtotal = bruto (sin ISV), descuento = promociones y descuento de venta
+ * en bodega (`descuento_mayoreo`, la parte que no es promoción), ISV sobre
+ * lo neto, total = subtotal − descuento + ISV.
+ *
+ * Venta en bodega (`en_bodega`): la hace un usuario de bodega al cliente que
+ * llega; puede llevar un descuento a todo el pedido
+ * (`descuento_mayoreo_porcentaje`, hasta el tope del usuario y sin bajar del
+ * costo), se valida al guardar y no cuenta para comisiones. Si el cliente se
+ * lo lleva (`se_lo_lleva`), no va en camión.
  *
  * Fuera de ruta: el vendedor le vendió a un cliente que no es de sus rutas;
  * se permite, pero queda marcado con el motivo.
@@ -44,6 +51,10 @@ use Illuminate\Support\Carbon;
  * @property string|null $notas
  * @property bool $fuera_de_ruta
  * @property string|null $motivo_fuera_ruta
+ * @property bool $en_bodega
+ * @property bool $se_lo_lleva
+ * @property float $descuento_mayoreo_porcentaje
+ * @property float $descuento_mayoreo
  * @property float $subtotal
  * @property float $descuento
  * @property float $isv
@@ -83,13 +94,20 @@ class Pedido extends Model
         'notas',
         'fuera_de_ruta',
         'motivo_fuera_ruta',
+        'en_bodega',
+        'se_lo_lleva',
+        'descuento_mayoreo_porcentaje',
     ];
 
     /** @var array<string, mixed> */
     protected $attributes = [
-        'estado'        => 'pendiente',
-        'fuera_de_ruta' => false,
-        'impresiones'   => 0,
+        'estado'                       => 'pendiente',
+        'fuera_de_ruta'                => false,
+        'en_bodega'                    => false,
+        'se_lo_lleva'                  => false,
+        'descuento_mayoreo_porcentaje' => 0,
+        'descuento_mayoreo'            => 0,
+        'impresiones'                  => 0,
     ];
 
     /**
@@ -98,17 +116,21 @@ class Pedido extends Model
     protected function casts(): array
     {
         return [
-            'estado'        => EstadoPedido::class,
-            'fecha'         => 'date',
-            'fuera_de_ruta' => 'boolean',
-            'subtotal'      => 'float',
-            'descuento'     => 'float',
-            'isv'           => 'float',
-            'total'         => 'float',
-            'validado_at'   => 'datetime',
-            'impresiones'   => 'integer',
-            'impreso_at'    => 'datetime',
-            'corregido_at'  => 'datetime',
+            'estado'                       => EstadoPedido::class,
+            'fecha'                        => 'date',
+            'fuera_de_ruta'                => 'boolean',
+            'en_bodega'                    => 'boolean',
+            'se_lo_lleva'                  => 'boolean',
+            'descuento_mayoreo_porcentaje' => 'float',
+            'descuento_mayoreo'            => 'float',
+            'subtotal'                     => 'float',
+            'descuento'                    => 'float',
+            'isv'                          => 'float',
+            'total'                        => 'float',
+            'validado_at'                  => 'datetime',
+            'impresiones'                  => 'integer',
+            'impreso_at'                   => 'datetime',
+            'corregido_at'                 => 'datetime',
         ];
     }
 
@@ -126,6 +148,14 @@ class Pedido extends Model
             $pedido->numero = $prefijo.'-'.str_pad((string) $pedido->id, 6, '0', STR_PAD_LEFT);
             $pedido->saveQuietly();
         });
+    }
+
+    /**
+     * Lo que se le quitó por promociones (sin el descuento de venta en bodega).
+     */
+    public function descuentoPromociones(): float
+    {
+        return round($this->descuento - $this->descuento_mayoreo, 2);
     }
 
     /**

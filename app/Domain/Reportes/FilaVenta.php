@@ -8,10 +8,12 @@ namespace App\Domain\Reportes;
  * Un renglón del reporte de ventas: un día, una bodega, un vendedor, un
  * producto, un cliente o el total. Montos en lempiras.
  *
- *  venta     = lo cobrado sin ISV, ya con los descuentos de promociones
- *  total     = lo facturado, con ISV
- *  costo     = lo que costó lo que salió (costo promedio del día que salió)
- *  ganancia  = venta − costo
+ *  venta       = lo cobrado sin ISV, ya con promociones y descuentos
+ *  promociones = lo que quitaron las promociones (los regalos a su precio)
+ *  descuentos  = lo rebajado en las ventas en bodega (mayoreo)
+ *  total       = lo facturado, con ISV
+ *  costo       = lo que costó lo que salió (costo promedio del día que salió)
+ *  ganancia    = venta − costo
  */
 final readonly class FilaVenta
 {
@@ -24,7 +26,8 @@ final readonly class FilaVenta
         public int $unidades,
         public ?string $cantidad,
         public float $venta,
-        public float $descuento,
+        public float $promociones,
+        public float $descuentos,
         public float $isv,
         public float $total,
         public float $costo,

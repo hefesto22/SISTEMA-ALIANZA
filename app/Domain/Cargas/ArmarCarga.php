@@ -89,6 +89,10 @@ final class ArmarCarga
                     throw new ReglaNegocioException("La factura {$factura->numero} ya no está vigente: no se puede cargar.");
                 }
 
+                if ($factura->pedido->se_lo_lleva) {
+                    throw new ReglaNegocioException("La factura {$factura->numero} es de una venta en bodega que el cliente se llevó: no va en camión.");
+                }
+
                 $otra = CargaFactura::query()
                     ->where('factura_id', $id)
                     ->whereIn('estado', [EntregaFactura::EnRuta->value, EntregaFactura::Entregada->value])

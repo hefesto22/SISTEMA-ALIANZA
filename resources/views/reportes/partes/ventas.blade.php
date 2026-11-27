@@ -9,6 +9,11 @@
     $t = $d['totales'];
     $pct = fn (?float $margen): string => $margen === null ? '—' : rtrim(rtrim(number_format($margen * 100, 1), '0'), '.').'%';
     $recortado = fn (string $parte): bool => $d['limite'] !== null && $d['cuantos'][$parte] > $d['limite'];
+    // Promociones y descuentos de venta en bodega son cosas distintas: van aparte.
+    $rebajas = collect([
+        $t->promociones > 0 ? lempiras($t->promociones).' de promociones' : null,
+        $t->descuentos > 0 ? lempiras($t->descuentos).' de descuentos' : null,
+    ])->filter()->implode(' y ');
 @endphp
 
 <div class="rp">
@@ -20,7 +25,7 @@
                 <div class="rp-kpi principal">
                     <span>Venta</span>
                     <strong>{{ lempiras($t->venta) }}</strong>
-                    <small>sin ISV{{ $t->descuento > 0 ? ', ya con '.lempiras($t->descuento).' de descuentos' : '' }}</small>
+                    <small>sin ISV{{ $rebajas !== '' ? ', ya con '.$rebajas : '' }}</small>
                 </div>
                 <div class="rp-kpi">
                     <span>Ganancia</span>
@@ -159,6 +164,7 @@
                                 <th>Día</th>
                                 <th class="n">Pedidos</th>
                                 <th class="n">Venta</th>
+                                <th class="n">Promociones</th>
                                 <th class="n">Descuentos</th>
                                 <th class="n">Costo</th>
                                 <th class="n">Ganancia</th>
@@ -172,7 +178,8 @@
                                     <td class="dia">{{ $f->nombre }}</td>
                                     <td class="n">{{ number_format($f->pedidos) }}</td>
                                     <td class="n">{{ lempiras($f->venta) }}</td>
-                                    <td class="n">{{ lempiras($f->descuento) }}</td>
+                                    <td class="n">{{ lempiras($f->promociones) }}</td>
+                                    <td class="n">{{ lempiras($f->descuentos) }}</td>
                                     <td class="n">{{ lempiras($f->costo) }}</td>
                                     <td @class(['n', 'neg' => $f->ganancia() < 0])>{{ lempiras($f->ganancia()) }}</td>
                                     <td class="n">{{ $pct($f->margen()) }}</td>
@@ -185,7 +192,8 @@
                                 <td>Total</td>
                                 <td class="n">{{ number_format($t->pedidos) }}</td>
                                 <td class="n">{{ lempiras($t->venta) }}</td>
-                                <td class="n">{{ lempiras($t->descuento) }}</td>
+                                <td class="n">{{ lempiras($t->promociones) }}</td>
+                                <td class="n">{{ lempiras($t->descuentos) }}</td>
                                 <td class="n">{{ lempiras($t->costo) }}</td>
                                 <td @class(['n', 'neg' => $t->ganancia() < 0])>{{ lempiras($t->ganancia()) }}</td>
                                 <td class="n">{{ $pct($t->margen()) }}</td>
@@ -208,6 +216,7 @@
                                 <th class="n">Pedidos</th>
                                 <th class="n">Clientes</th>
                                 <th class="n">Venta</th>
+                                <th class="n">Promociones</th>
                                 <th class="n">Descuentos</th>
                                 <th class="n">Costo</th>
                                 <th class="n">Ganancia</th>
@@ -227,7 +236,8 @@
                                     <td class="n">{{ number_format($f->pedidos) }}</td>
                                     <td class="n">{{ number_format($f->clientes) }}</td>
                                     <td class="n">{{ lempiras($f->venta) }}</td>
-                                    <td class="n">{{ lempiras($f->descuento) }}</td>
+                                    <td class="n">{{ lempiras($f->promociones) }}</td>
+                                    <td class="n">{{ lempiras($f->descuentos) }}</td>
                                     <td class="n">{{ lempiras($f->costo) }}</td>
                                     <td @class(['n', 'neg' => $f->ganancia() < 0])>{{ lempiras($f->ganancia()) }}</td>
                                     <td class="n">{{ $pct($f->margen()) }}</td>
@@ -241,7 +251,8 @@
                                 <td class="n">{{ number_format($t->pedidos) }}</td>
                                 <td class="n">{{ number_format($t->clientes) }}</td>
                                 <td class="n">{{ lempiras($t->venta) }}</td>
-                                <td class="n">{{ lempiras($t->descuento) }}</td>
+                                <td class="n">{{ lempiras($t->promociones) }}</td>
+                                <td class="n">{{ lempiras($t->descuentos) }}</td>
                                 <td class="n">{{ lempiras($t->costo) }}</td>
                                 <td @class(['n', 'neg' => $t->ganancia() < 0])>{{ lempiras($t->ganancia()) }}</td>
                                 <td class="n">{{ $pct($t->margen()) }}</td>
@@ -267,6 +278,7 @@
                                 <th class="n">Salió</th>
                                 <th class="n">Pedidos</th>
                                 <th class="n">Venta</th>
+                                <th class="n">Promociones</th>
                                 <th class="n">Descuentos</th>
                                 <th class="n">Costo</th>
                                 <th class="n">Ganancia</th>
@@ -283,7 +295,8 @@
                                     <td class="n">{{ $f->cantidad }}</td>
                                     <td class="n">{{ number_format($f->pedidos) }}</td>
                                     <td class="n">{{ lempiras($f->venta) }}</td>
-                                    <td class="n">{{ lempiras($f->descuento) }}</td>
+                                    <td class="n">{{ lempiras($f->promociones) }}</td>
+                                    <td class="n">{{ lempiras($f->descuentos) }}</td>
                                     <td class="n">{{ lempiras($f->costo) }}</td>
                                     <td @class(['n', 'neg' => $f->ganancia() < 0])>{{ lempiras($f->ganancia()) }}</td>
                                     <td class="n">{{ $pct($f->margen()) }}</td>
@@ -296,7 +309,8 @@
                                 <td class="n">{{ number_format($t->unidades) }} UN</td>
                                 <td class="n">{{ number_format($t->pedidos) }}</td>
                                 <td class="n">{{ lempiras($t->venta) }}</td>
-                                <td class="n">{{ lempiras($t->descuento) }}</td>
+                                <td class="n">{{ lempiras($t->promociones) }}</td>
+                                <td class="n">{{ lempiras($t->descuentos) }}</td>
                                 <td class="n">{{ lempiras($t->costo) }}</td>
                                 <td @class(['n', 'neg' => $t->ganancia() < 0])>{{ lempiras($t->ganancia()) }}</td>
                                 <td class="n">{{ $pct($t->margen()) }}</td>
@@ -320,6 +334,7 @@
                                 <th>Cliente</th>
                                 <th class="n">Pedidos</th>
                                 <th class="n">Venta</th>
+                                <th class="n">Promociones</th>
                                 <th class="n">Descuentos</th>
                                 <th class="n">Costo</th>
                                 <th class="n">Ganancia</th>
@@ -336,7 +351,8 @@
                                     </td>
                                     <td class="n">{{ number_format($f->pedidos) }}</td>
                                     <td class="n">{{ lempiras($f->venta) }}</td>
-                                    <td class="n">{{ lempiras($f->descuento) }}</td>
+                                    <td class="n">{{ lempiras($f->promociones) }}</td>
+                                    <td class="n">{{ lempiras($f->descuentos) }}</td>
                                     <td class="n">{{ lempiras($f->costo) }}</td>
                                     <td @class(['n', 'neg' => $f->ganancia() < 0])>{{ lempiras($f->ganancia()) }}</td>
                                     <td class="n">{{ $pct($f->margen()) }}</td>
@@ -349,7 +365,8 @@
                                 <td>Total</td>
                                 <td class="n">{{ number_format($t->pedidos) }}</td>
                                 <td class="n">{{ lempiras($t->venta) }}</td>
-                                <td class="n">{{ lempiras($t->descuento) }}</td>
+                                <td class="n">{{ lempiras($t->promociones) }}</td>
+                                <td class="n">{{ lempiras($t->descuentos) }}</td>
                                 <td class="n">{{ lempiras($t->costo) }}</td>
                                 <td @class(['n', 'neg' => $t->ganancia() < 0])>{{ lempiras($t->ganancia()) }}</td>
                                 <td class="n">{{ $pct($t->margen()) }}</td>
@@ -361,6 +378,6 @@
             </section>
         @endif
 
-        <div class="rp-nota">Venta, costo y ganancia van sin ISV. Cuenta como venta lo que bodega ya despachó (por imprimir e impreso), el día que se despachó.</div>
+        <div class="rp-nota">Venta, costo y ganancia van sin ISV. Cuenta como venta lo que bodega ya despachó (por imprimir e impreso), el día que se despachó. Promociones es lo que quitaron las promociones (los regalos a su precio); Descuentos, lo que se rebajó en las ventas en bodega. La venta ya los trae restados.</div>
     @endif
 </div>

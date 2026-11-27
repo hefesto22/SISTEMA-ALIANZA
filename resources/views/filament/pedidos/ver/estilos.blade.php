@@ -18,6 +18,8 @@
         .vp-pill.impreso, .vp-pill.vigente { color: var(--success-700); border-color: color-mix(in oklab, var(--success-500) 45%, transparent); background: color-mix(in oklab, var(--success-500) 12%, transparent); }
         .vp-pill.anulado { color: var(--vp-tenue); border-color: var(--vp-borde); background: color-mix(in oklab, var(--gray-400) 12%, transparent); }
         .vp-pill.fuera, .vp-pill.anulada { color: var(--danger-700); border-color: color-mix(in oklab, var(--danger-500) 45%, transparent); background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
+        .vp-pill.bodega { color: var(--primary-700); border-color: color-mix(in oklab, var(--primary-500) 45%, transparent); background: color-mix(in oklab, var(--primary-500) 12%, transparent); }
+        .dark .vp-pill.bodega { color: var(--primary-400); }
         .dark .vp-pill.pendiente { color: var(--warning-400); }
         .dark .vp-pill.por_imprimir { color: var(--info-400); }
         .dark .vp-pill.reimprimir { color: var(--primary-400); }

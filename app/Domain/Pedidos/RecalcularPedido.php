@@ -42,6 +42,13 @@ use Illuminate\Support\Facades\DB;
  * promociones se bloquean mientras se calcula, para que dos pedidos al mismo
  * tiempo no tomen las mismas unidades; si ya no queda, no hay regalo.
  *
+ * Venta en bodega (`en_bodega`): el % del pedido (`descuento_mayoreo_porcentaje`,
+ * ya revisado contra el tope del usuario: VentaEnBodega) se le quita a cada
+ * línea que se cobra y no tiene promoción, sin bajar del costo de hoy de su
+ * presentación: si el % lo dejaría por debajo, se rebaja solo hasta el costo
+ * (y si ya está en el costo o abajo, nada). Va en `descuento` y, aparte, en
+ * `descuento_mayoreo`.
+ *
  * Por línea: subtotal (bruto) − descuento = neto; el ISV va sobre el neto.
  */
 final class RecalcularPedido
@@ -94,10 +101,13 @@ final class RecalcularPedido
 
         $subtotal = 0.0;
         $descuento = 0.0;
+        $mayoreo = 0.0;
         $isv = 0.0;
+        $porcentaje = $pedido->en_bodega ? max(0.0, min(100.0, $pedido->descuento_mayoreo_porcentaje)) : 0.0;
 
         foreach ($items as $item) {
             $item->subtotal = round($item->precio * $item->cantidadFacturable(), 2);
+            $item->descuento_mayoreo = 0.0;
 
             if ($item->bonificacion) {
                 $item->descuento = $item->subtotal;
@@ -105,6 +115,12 @@ final class RecalcularPedido
                 $aplicado = $resultado->descuentoDe($item->id);
                 $item->descuento = min($item->subtotal, $aplicado->monto ?? 0.0);
                 $item->promocion_id = $aplicado?->promocion->id;
+
+                // La promoción queda sola; sin promoción, el descuento de venta en bodega.
+                if ($porcentaje > 0 && $item->descuento <= 0) {
+                    $item->descuento_mayoreo = self::descuentoMayoreo($item, $porcentaje);
+                    $item->descuento = $item->descuento_mayoreo;
+                }
             }
 
             $neto = round($item->subtotal - $item->descuento, 2);
@@ -114,19 +130,41 @@ final class RecalcularPedido
 
             $subtotal += $item->subtotal;
             $descuento += $item->descuento;
+            $mayoreo += $item->descuento_mayoreo;
             $isv += $item->isv;
         }
 
         $pedido->forceFill([
-            'subtotal'  => round($subtotal, 2),
-            'descuento' => round($descuento, 2),
-            'isv'       => round($isv, 2),
-            'total'     => round($subtotal - $descuento + $isv, 2),
+            'subtotal'          => round($subtotal, 2),
+            'descuento'         => round($descuento, 2),
+            'descuento_mayoreo' => round($mayoreo, 2),
+            'isv'               => round($isv, 2),
+            'total'             => round($subtotal - $descuento + $isv, 2),
         ])->save();
 
         $pedido->setRelation('items', $items->sortBy('id')->values());
 
         return $pedido;
+    }
+
+    /**
+     * El descuento de venta en bodega de una línea: el % de lo que se cobra,
+     * sin que el precio quede por debajo del costo de hoy de la presentación.
+     */
+    public static function descuentoMayoreo(PedidoItem $item, float $porcentaje): float
+    {
+        return self::descuentoHastaElCosto($item->subtotal, $item->presentacion->costo * $item->cantidadFacturable(), $porcentaje);
+    }
+
+    /**
+     * El $porcentaje de $bruto, sin pasar de lo que deja el bruto en el costo
+     * (nunca negativo). También lo usa la preventa para mostrar el total.
+     */
+    public static function descuentoHastaElCosto(float $bruto, float $costo, float $porcentaje): float
+    {
+        $hastaElCosto = max(0.0, round($bruto - round($costo, 2), 2));
+
+        return min(round($bruto * $porcentaje / 100, 2), $hastaElCosto);
     }
 
     /**
