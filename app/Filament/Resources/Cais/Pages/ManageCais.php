@@ -22,13 +22,13 @@ use Filament\Schemas\Components\RenderHook;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
+use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
 
 /**
- * CAI y datos fiscales. Arriba, lo que sale impreso en cada factura (los
- * datos fiscales, con su botón Editar) y con qué CAI factura cada bodega,
- * con los avisos (CAI de prueba, bodegas sin CAI, datos que faltan). Abajo,
- * cada CAI en una tarjeta (resources/views/filament/cais/).
+ * CAI y datos fiscales: debajo del título, en una línea, los datos fiscales
+ * que salen en la factura; avisos solo si algo está mal (CAI de prueba,
+ * bodegas sin CAI) y la tabla de los CAI.
  */
 class ManageCais extends ManageRecords
 {
@@ -39,14 +39,63 @@ class ManageCais extends ManageRecords
         return 'CAI y datos fiscales';
     }
 
-    public function getSubheading(): string
-    {
-        return 'Lo que sale impreso en cada factura y la numeración que autorizó el SAR.';
-    }
-
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('datosFiscales')
+                ->label('Datos fiscales')
+                ->icon(Heroicon::OutlinedBuildingOffice2)
+                ->color('gray')
+                ->visible(fn (): bool => Acceso::puede('Update:Cai'))
+                ->modalHeading('Datos fiscales de la factura')
+                ->modalDescription('Van impresos en todas las facturas (Acuerdo 481-2017 del SAR). Sin razón social, RTN y dirección no se puede facturar.')
+                ->modalWidth(Width::ThreeExtraLarge)
+                ->modalSubmitActionLabel('Guardar')
+                ->fillForm(fn (): array => DatosFiscales::actual()->only([
+                    'razon_social', 'nombre_comercial', 'rtn', 'direccion', 'telefono', 'correo', 'leyenda',
+                ]))
+                ->schema([
+                    TextInput::make('razon_social')
+                        ->label('Razón social')
+                        ->helperText('Como está inscrita en el RTN.')
+                        ->required()
+                        ->maxLength(150),
+                    TextInput::make('nombre_comercial')
+                        ->label('Nombre comercial')
+                        ->helperText('Si es distinto de la razón social; es el que sale grande.')
+                        ->maxLength(150),
+                    TextInput::make('rtn')
+                        ->label('RTN')
+                        ->required()
+                        ->length(RTN::LONGITUD)
+                        ->regex(RTN::REGEX)
+                        ->validationMessages(['regex' => 'El RTN son 14 dígitos, sin guiones ni espacios.'])
+                        ->placeholder('08011999123456'),
+                    TextInput::make('telefono')
+                        ->label('Teléfono')
+                        ->tel()
+                        ->maxLength(40),
+                    TextInput::make('correo')
+                        ->label('Correo')
+                        ->email()
+                        ->maxLength(120),
+                    Textarea::make('direccion')
+                        ->label('Dirección de la casa matriz')
+                        ->helperText('La dirección de cada bodega (establecimiento) sale de Bodegas.')
+                        ->required()
+                        ->rows(2)
+                        ->maxLength(255),
+                    Textarea::make('leyenda')
+                        ->label('Leyenda al pie (opcional)')
+                        ->helperText('Ej. datos del autoimpresor o de la imprenta autorizada.')
+                        ->rows(2)
+                        ->maxLength(1000),
+                ])
+                ->action(function (array $data): void {
+                    DatosFiscales::actual()->update($data);
+
+                    Notification::make()->title('Datos fiscales guardados')->success()->send();
+                }),
             CreateAction::make()
                 ->label('Nuevo CAI')
                 ->modalWidth(Width::FourExtraLarge),
@@ -54,70 +103,32 @@ class ManageCais extends ManageRecords
     }
 
     /**
-     * Se abre con el botón Editar de la tarjeta de datos fiscales.
+     * Los datos fiscales en una línea: razón social · RTN · dirección.
      */
-    public function datosFiscalesAction(): Action
+    public function getSubheading(): string
     {
-        return Action::make('datosFiscales')
-            ->label('Editar')
-            ->visible(fn (): bool => Acceso::puede('Update:Cai'))
-            ->modalHeading('Datos fiscales de la factura')
-            ->modalDescription('Van impresos en todas las facturas (Acuerdo 481-2017 del SAR). Sin razón social, RTN y dirección no se puede facturar.')
-            ->modalWidth(Width::ThreeExtraLarge)
-            ->modalSubmitActionLabel('Guardar')
-            ->fillForm(fn (): array => DatosFiscales::actual()->only([
-                'razon_social', 'nombre_comercial', 'rtn', 'direccion', 'telefono', 'correo', 'leyenda',
-            ]))
-            ->schema([
-                TextInput::make('razon_social')
-                    ->label('Razón social')
-                    ->helperText('Como está inscrita en el RTN.')
-                    ->required()
-                    ->maxLength(150),
-                TextInput::make('nombre_comercial')
-                    ->label('Nombre comercial')
-                    ->helperText('Si es distinto de la razón social; es el que sale grande.')
-                    ->maxLength(150),
-                TextInput::make('rtn')
-                    ->label('RTN')
-                    ->required()
-                    ->length(RTN::LONGITUD)
-                    ->regex(RTN::REGEX)
-                    ->validationMessages(['regex' => 'El RTN son 14 dígitos, sin guiones ni espacios.'])
-                    ->placeholder('08011999123456'),
-                TextInput::make('telefono')
-                    ->label('Teléfono')
-                    ->tel()
-                    ->maxLength(40),
-                TextInput::make('correo')
-                    ->label('Correo')
-                    ->email()
-                    ->maxLength(120),
-                Textarea::make('direccion')
-                    ->label('Dirección de la casa matriz')
-                    ->helperText('La dirección de cada bodega (establecimiento) sale de Bodegas.')
-                    ->required()
-                    ->rows(2)
-                    ->maxLength(255),
-                Textarea::make('leyenda')
-                    ->label('Leyenda al pie (opcional)')
-                    ->helperText('Ej. datos del autoimpresor o de la imprenta autorizada.')
-                    ->rows(2)
-                    ->maxLength(1000),
-            ])
-            ->action(function (array $data): void {
-                DatosFiscales::actual()->update($data);
+        $fiscales = DatosFiscales::actual();
 
-                Notification::make()->title('Datos fiscales guardados')->success()->send();
-            });
+        if (! $fiscales->estanCompletos()) {
+            return 'Faltan los datos fiscales: sin razón social, RTN y dirección no se puede facturar (botón "Datos fiscales").';
+        }
+
+        $rtn = (string) $fiscales->rtn;
+
+        return 'Se factura a nombre de '.collect([
+            $fiscales->razon_social,
+            'RTN '.(preg_match(RTN::REGEX, $rtn) === 1 ? (new RTN($rtn))->formateado() : $rtn),
+            $fiscales->direccion,
+        ])->filter()->implode(' · ');
     }
 
     public function content(Schema $schema): Schema
     {
         return $schema
             ->components([
-                View::make('filament.cais.resumen')
-                    ->viewData(fn (): array => $this->resumen()),
+                View::make('filament.cais.avisos')
+                    ->viewData(fn (): array => ['avisos' => $this->avisos()])
+                    ->visible(fn (): bool => $this->avisos() !== []),
                 RenderHook::make(PanelsRenderHook::RESOURCE_PAGES_LIST_RECORDS_TABLE_BEFORE),
                 EmbeddedTable::make(),
                 RenderHook::make(PanelsRenderHook::RESOURCE_PAGES_LIST_RECORDS_TABLE_AFTER),
@@ -125,41 +136,48 @@ class ManageCais extends ManageRecords
     }
 
     /**
-     * Lo de arriba: los datos fiscales (con lo que falta) y con qué CAI emite
-     * cada bodega activa sus facturas y, si están encendidas, sus notas de
-     * crédito. "prueba": alguna bodega emite con un CAI de prueba.
+     * Lo que está mal, en una línea cada cosa: alguna bodega emite con un CAI
+     * de prueba, o hay bodegas sin CAI vigente de facturas o (si están
+     * encendidas) de notas de crédito.
      *
-     * @return array{fiscales: DatosFiscales, rtn: string|null, faltan: list<string>, edita: bool, notas: bool, bodegas: list<array{nombre: string, factura: Cai|null, nota: Cai|null}>, prueba: bool}
+     * @return list<array{color: string, texto: string}>
      */
-    public function resumen(): array
+    public function avisos(): array
     {
-        $fiscales = DatosFiscales::actual();
         $notas = Configuracion::actual()->notas_credito;
-        $bodegas = [];
+        $sinFactura = [];
+        $sinNota = [];
         $prueba = false;
 
         foreach (Bodega::query()->activas()->orderBy('nombre')->get() as $bodega) {
-            $factura = Cai::paraBodega($bodega->id)?->loadMissing('bodegas');
-            $nota = $notas ? Cai::paraBodega($bodega->id, tipo: Cai::NOTA_CREDITO)?->loadMissing('bodegas') : null;
-            $prueba = $prueba || $factura?->esDePrueba() === true || $nota?->esDePrueba() === true;
+            $factura = Cai::paraBodega($bodega->id);
+            $nota = $notas ? Cai::paraBodega($bodega->id, tipo: Cai::NOTA_CREDITO) : null;
 
-            $bodegas[] = ['nombre' => $bodega->nombre, 'factura' => $factura, 'nota' => $nota];
+            if ($factura === null) {
+                $sinFactura[] = $bodega->nombre;
+            }
+
+            if ($notas && $nota === null) {
+                $sinNota[] = $bodega->nombre;
+            }
+
+            $prueba = $prueba || $factura?->esDePrueba() === true || $nota?->esDePrueba() === true;
         }
 
-        $rtn = $fiscales->rtn;
+        $avisos = [];
 
-        return [
-            'fiscales' => $fiscales,
-            'rtn'      => $rtn !== null && preg_match(RTN::REGEX, $rtn) === 1 ? (new RTN($rtn))->formateado() : $rtn,
-            'faltan'   => array_keys(array_filter([
-                'razón social' => $fiscales->razon_social,
-                'RTN'          => $rtn,
-                'dirección'    => $fiscales->direccion,
-            ], fn (?string $valor): bool => blank($valor))),
-            'edita'   => Acceso::puede('Update:Cai'),
-            'notas'   => $notas,
-            'bodegas' => $bodegas,
-            'prueba'  => $prueba,
-        ];
+        if ($prueba) {
+            $avisos[] = ['color' => 'warning', 'texto' => 'Se factura con un CAI de prueba: lo que se imprime no vale ante el SAR. Agregue el CAI del SAR y desactive el de prueba.'];
+        }
+
+        if ($sinFactura !== []) {
+            $avisos[] = ['color' => 'danger', 'texto' => 'Sin CAI de facturas vigente (no pueden imprimir): '.implode(', ', $sinFactura).'.'];
+        }
+
+        if ($sinNota !== []) {
+            $avisos[] = ['color' => 'danger', 'texto' => 'Sin CAI de notas de crédito vigente (no registran devoluciones con crédito): '.implode(', ', $sinNota).'.'];
+        }
+
+        return $avisos;
     }
 }

@@ -18,12 +18,15 @@ use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\FontFamily;
+use Filament\Support\Enums\TextSize;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\Layout\Stack;
+use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ViewColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 
 /**
  * CAI del SAR: rango de facturas autorizado, fecha límite y a qué bodegas
@@ -143,32 +146,68 @@ class CaiResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            // Una tarjeta por CAI: documento, estado, numeración, cuánto se ha usado, cuándo vence y sus bodegas.
             ->columns([
-                Stack::make([
-                    ViewColumn::make('tarjeta')
-                        ->view('filament.cais.tarjeta')
-                        ->state(fn (Cai $record): string => $record->cai)
-                        ->searchable(['cai', 'notas']),
-                ]),
+                TextColumn::make('tipo_documento')
+                    ->label('Documento')
+                    ->badge()
+                    ->formatStateUsing(fn (string $state): string => $state === Cai::NOTA_CREDITO ? 'Nota de crédito' : 'Factura')
+                    ->color(fn (string $state): string => $state === Cai::NOTA_CREDITO ? 'warning' : 'info'),
+                TextColumn::make('cai')
+                    ->label('CAI')
+                    ->fontFamily(FontFamily::Mono)
+                    ->size(TextSize::Small)
+                    ->copyable()
+                    ->copyMessage('CAI copiado')
+                    ->searchable()
+                    ->description(fn (Cai $record): ?string => $record->notas !== null ? Str::limit($record->notas, 42) : null)
+                    ->tooltip(fn (Cai $record): ?string => $record->notas),
+                TextColumn::make('numeracion')
+                    ->label('Numeración')
+                    ->state(fn (Cai $record): string => $record->prefijo())
+                    ->fontFamily(FontFamily::Mono)
+                    ->size(TextSize::Small)
+                    ->description(fn (Cai $record): string => number_format($record->rango_desde).' al '.number_format($record->rango_hasta)),
+                ViewColumn::make('uso')
+                    ->label('Usados')
+                    ->view('filament.cais.uso'),
+                TextColumn::make('fecha_limite')
+                    ->label('Vence')
+                    ->date('d/m/Y')
+                    ->sortable()
+                    ->description(fn (Cai $record): string => $record->estaVencido() ? 'vencido' : $record->fecha_limite->copy()->endOfDay()->diffForHumans())
+                    ->color(fn (Cai $record): ?string => match (true) {
+                        $record->estaVencido()                           => 'danger',
+                        $record->fecha_limite->lte(today()->addDays(30)) => 'warning',
+                        default                                          => null,
+                    }),
+                TextColumn::make('bodegas.nombre')
+                    ->label('Bodegas')
+                    ->badge()
+                    ->color('gray')
+                    ->placeholder('Global'),
+                TextColumn::make('situacion')
+                    ->label('Estado')
+                    ->badge()
+                    ->state(fn (Cai $record): array => array_values(array_filter([$record->situacion(), $record->esDePrueba() ? 'De prueba' : null])))
+                    ->color(fn (string $state): string => match ($state) {
+                        'Vigente'   => 'success',
+                        'De prueba' => 'warning',
+                        'Inactivo'  => 'gray',
+                        default     => 'danger',
+                    }),
             ])
-            ->contentGrid(['md' => 2])
-            ->extraAttributes(['class' => 'cai-tarjetas'])
-            ->heading('CAI registrados')
-            ->description('Primero los activos; las facturas antes que las notas de crédito.')
-            ->searchPlaceholder('CAI o nota')
             ->defaultSort(fn (Builder $query): Builder => $query->orderByDesc('activo')->orderBy('tipo_documento')->orderByDesc('fecha_limite'))
             ->emptyStateHeading('Sin CAI')
             ->emptyStateDescription('Agregue el CAI que le dio el SAR. Sin un CAI vigente no se pueden imprimir facturas.')
             ->recordActions([
                 EditAction::make()
-                    ->button()
-                    ->outlined()
+                    ->iconButton()
+                    ->tooltip('Editar')
                     ->modalHeading(fn (Cai $record): string => 'CAI '.$record->cai)
                     ->modalWidth(Width::FourExtraLarge),
                 DeleteAction::make()
                     ->iconButton()
-                    ->tooltip('Borrar el CAI')
+                    ->tooltip('Borrar (solo si no se ha usado)')
                     ->hidden(fn (Cai $record): bool => $record->usados() > 0),
             ]);
     }
