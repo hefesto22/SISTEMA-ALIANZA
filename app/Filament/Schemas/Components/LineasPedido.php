@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Schemas\Components;
 
 use App\Domain\Inventario\Disponible;
+use App\Domain\Pedidos\VentaEnBodega;
 use App\Domain\Precios\CalculadoraPrecio;
 use App\Domain\Promociones\UsoDePromociones;
 use App\Enums\EstadoPedido;
@@ -42,9 +43,11 @@ use Livewire\Attributes\Renderless;
  * (App\Domain\Inventario\Disponible), así no se vende dos veces lo mismo;
  * en total (unidades base) y de cada presentación ("2 CJ48 · 5 UN"): una
  * caja solo sale de sus cajas; las unidades sueltas, de las sueltas o de
- * abrir cajas. Con "controlar existencias" encendido (Configuración) lo que
- * no tiene disponible se ve en el buscador pero no se agrega, y no se pide
- * (ni se guarda) más de lo disponible.
+ * abrir cajas. Con "controlar existencias" encendido (Configuración), o en
+ * una venta en bodega (lo apartado en preventas no se vende otra vez en el
+ * mostrador), lo que no tiene disponible se ve en el buscador pero no se
+ * agrega, y no se pide (ni se guarda) más de lo disponible
+ * (controlaDisponible()).
  *
  * Promociones: las vigentes hoy en la bodega del pedido van arriba de la
  * lista para agregarlas de un toque (lo que pide la promoción y, si es con
@@ -159,7 +162,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $this->sinRedibujar();
         $buscar = trim($buscar);
         $bodega = $this->bodegaDelPedido();
-        $controlar = Configuracion::actual()->controlar_existencias;
+        $controlar = $this->controlaDisponible();
 
         if ($buscar === '' || ($controlar && $bodega === null)) {
             return [];
@@ -344,7 +347,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         $productos = [];
         $fuera = 0;
         $bodega = $this->bodegaDelPedido();
-        $controlar = Configuracion::actual()->controlar_existencias;
+        $controlar = $this->controlaDisponible();
         $ids = $pedido->items->pluck('producto_id')->all();
         $hay = Disponible::existencia($bodega, $ids);
         $apartado = Disponible::apartado($bodega, $ids, $this->pedidoQueSeEdita());
@@ -512,6 +515,16 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     }
 
     /**
+     * Si no se deja pedir más de lo disponible: con "controlar existencias"
+     * encendido, o si el vendedor escogido vende en bodega (lo que ya se
+     * vendió en preventa no se vende otra vez en el mostrador).
+     */
+    public function controlaDisponible(): bool
+    {
+        return Configuracion::actual()->controlar_existencias || VentaEnBodega::esDe($this->makeGetUtility()('vendedor_id'));
+    }
+
+    /**
      * El pedido que se está editando (sus líneas no cuentan como apartadas
      * contra él mismo); null al crear.
      */
@@ -534,7 +547,7 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     {
         $bodega = $this->bodegaDelPedido();
 
-        if ($lineas === [] || $bodega === null || ! Configuracion::actual()->controlar_existencias) {
+        if ($lineas === [] || $bodega === null || ! $this->controlaDisponible()) {
             return null;
         }
 

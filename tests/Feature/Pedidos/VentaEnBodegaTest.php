@@ -37,7 +37,8 @@ use Livewire\Livewire;
  * Venta en bodega (mayoreo): el usuario de bodega le vende al cliente que
  * llega y le puede dar un % a todo el pedido, hasta su tope (Usuarios), en
  * las líneas sin promoción y nunca por debajo del costo. Queda validada al
- * guardar; si se lo lleva no va en camión. No cuenta para comisiones.
+ * guardar; si se lo lleva no va en camión. No cuenta para comisiones. No
+ * se vende lo apartado en preventas pendientes.
  *
  * El jabón cuesta L 8 la UN y L 96 la CJ12 y se vende a L 10 y L 120 (sin
  * ISV). Hay 12 UN y 3 CJ12.
@@ -203,6 +204,43 @@ test('va en camión: queda en Impreso para cargarlo; sueltas que no alcanzan abr
 
     expect([Existencia::de($this->bodega->id, $this->un->id), Existencia::de($this->bodega->id, $this->cj12->id)])->toBe([9, 2])
         ->and(FacturasParaCargar::de($this->bodega->id)->pluck('pedido_id')->all())->toBe([$pedido->id]);
+});
+
+test('en bodega no se vende lo ya vendido en preventa, aunque no se controlen existencias', function (): void {
+    Configuracion::actual()->update(['controlar_existencias' => false]);
+
+    expect([VentaEnBodega::esDe($this->encargado->id), VentaEnBodega::esDe($this->vendedor->id), VentaEnBodega::esDe(null)])->toBe([true, false, false])
+        ->and(VentaEnBodega::vendedores())->toContain($this->encargado->id)->not->toContain($this->vendedor->id);
+
+    // En preventa ya se vendieron 2 de las 3 CJ12: en bodega solo queda 1.
+    $preventa = pedidoEnBodega($this, $this->vendedor, [[$this->cj12->id, 2]], 0);
+
+    $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
+
+    $datos = [
+        'cliente_id'  => $this->cliente->id,
+        'vendedor_id' => $this->encargado->id,
+        'fecha'       => now()->toDateString(),
+        'se_lo_lleva' => true,
+        'items'       => [['producto_id' => $this->jabon->id, 'presentacion_id' => $this->cj12->id, 'cantidad' => 2]],
+    ];
+
+    Livewire::test(CreatePedido::class)
+        ->fillForm($datos)
+        ->call('create')
+        ->assertHasFormErrors(['items']);
+
+    Livewire::test(CreatePedido::class)
+        ->fillForm([...$datos, 'items' => [['producto_id' => $this->jabon->id, 'presentacion_id' => $this->cj12->id, 'cantidad' => 1]]])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $undoRepeaterFake();
+
+    expect(Pedido::query()->where('en_bodega', true)->sole()->estado)->toBe(EstadoPedido::PorImprimir)
+        ->and($preventa->fresh()?->estado)->toBe(EstadoPedido::Pendiente)
+        ->and(Existencia::de($this->bodega->id, $this->cj12->id))->toBe(2);
 });
 
 test('el tope se pone en Usuarios, solo a los usuarios de bodega', function (): void {

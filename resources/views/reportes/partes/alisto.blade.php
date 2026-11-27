@@ -2,10 +2,11 @@
     Hoja de alisto: lo que se saca de la bodega para unos pedidos pendientes
     (los de un día o los marcados), para apartarlo antes de validar. Por
     bodega, un renglón por producto: lo que sale de cada presentación (con
-    los regalos), lo que dice el sistema que hay (en rojo si no alcanza), a
-    qué pedido va cada parte, una casilla "Apartado" y un espacio "Faltó"
-    para anotar lo que no se encontró (al validar se pone en "¿Faltó algo?"
-    y a los últimos pedidos les sale menos). Abajo, los pedidos y las firmas.
+    los regalos), a qué pedido va cada parte, una casilla "Apartado" y un
+    espacio "Faltó" para anotar lo que no se encontró en físico (al validar
+    se pone en "¿Faltó algo?" y a los últimos pedidos les sale menos). No
+    lleva lo que dice el sistema: se revisa en físico. Abajo, los pedidos y
+    las firmas.
     Hoja: App\Http\Controllers\HojaDeAlistoController.
     Datos: $d['bodegas'] = App\Domain\Pedidos\HojaDeAlisto::datos().
 --}}
@@ -22,9 +23,6 @@
     .rp td.al-sale span { display: block; }
     .rp td.al-sale b { font-size: 1rem; font-weight: 700; }
     .rp td.al-sale small { margin-inline-start: 0.25rem; font-size: 0.7rem; font-weight: 600; color: var(--rp-tenue); }
-    .rp .al-hay { width: 8.5rem; font-size: 0.78rem; color: var(--rp-tenue); }
-    .rp .al-hay.mal { font-weight: 600; color: var(--rp-mal); }
-    .rp .al-hay small { display: block; }
     .rp .al-para { margin-top: 0.2rem; font-size: 0.72rem; line-height: 1.45; color: var(--rp-tenue); }
     .rp td.al-marca { width: 4.5rem; text-align: center; vertical-align: middle; }
     .rp td.al-falto, .rp th.al-falto { width: 6.5rem; border-left: 1px solid var(--rp-borde); }
@@ -48,7 +46,6 @@
     @forelse ($bodegas as $b)
         @php
             $productos = $b['productos'];
-            $faltan = count(array_filter($productos, fn (array $p): bool => $p['falta'] !== null));
         @endphp
 
         <section class="rp-seccion">
@@ -56,9 +53,6 @@
                 {{ count($bodegas) > 1 ? $b['bodega'].' · ' : '' }}Lo que se saca de la bodega
                 <small>{{ $plural(count($productos), 'producto', 'productos') }} para {{ $plural(count($b['pedidos']), 'pedido', 'pedidos') }} · marque «Apartado» al separarlo y anote en «Faltó» lo que no encontró</small>
             </h2>
-            @if ($faltan > 0)
-                <div class="rp-aviso">Según el sistema no alcanza {{ $plural($faltan, 'producto', 'productos') }} (en rojo). Al validar, a los últimos pedidos les sale menos.</div>
-            @endif
             <div class="rp-tabla">
                 <table class="al-prod">
                     <thead>
@@ -66,7 +60,6 @@
                             <th>Código</th>
                             <th>Producto · para quién</th>
                             <th class="al-sale">Sale</th>
-                            <th>En sistema</th>
                             <th class="al-marca">Apartado</th>
                             <th class="al-falto">Faltó</th>
                         </tr>
@@ -86,12 +79,6 @@
                                     @foreach ($p['sale'] as $s)
                                         <span><b>{{ number_format($s['cantidad']) }}</b><small>{{ $s['sigla'] }}</small></span>
                                     @endforeach
-                                </td>
-                                <td @class(['al-hay', 'mal' => $p['falta'] !== null])>
-                                    {{ $p['hay'] }}
-                                    @if ($p['falta'] !== null)
-                                        <small>No alcanza: {{ $p['falta'] }}</small>
-                                    @endif
                                 </td>
                                 <td class="al-marca"><span class="al-caja"></span></td>
                                 <td class="al-falto"></td>

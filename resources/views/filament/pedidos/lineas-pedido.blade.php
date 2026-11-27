@@ -21,8 +21,10 @@
     escogida: lo de todas). En el buscador salen primero los que tienen
     disponible; los que no, al final con "SIN EXISTENCIA" en rojo. Solo se
     muestra lo disponible (lo de otros pedidos ya va restado). Con
-    "controlar existencias" encendido los que no tienen se ven pero no se
-    pueden agregar, y no se deja pedir más de lo disponible.
+    "controlar existencias" encendido, o en venta en bodega (el vendedor
+    escogido es de bodega: lo ya vendido en preventa no se vende otra vez en
+    el mostrador; controla()), los que no tienen se ven pero no se pueden
+    agregar, y no se deja pedir más de lo disponible.
 
     Promociones de hoy (las de la bodega del pedido): arriba de la lista,
     cada una con "Agregar al pedido" (lo que pide la promoción y, si es con
@@ -34,6 +36,7 @@
     ("Quedan 140 de 500 UN de regalo"); agotada, no se ofrece ni se agrega.
 --}}
 @php
+    use App\Domain\Pedidos\VentaEnBodega;
     use App\Domain\Precios\CalculadoraPrecio;
     use App\Filament\Resources\Pedidos\Schemas\PedidoForm;
     use App\Filament\Schemas\Components\LineasPedido;
@@ -61,6 +64,7 @@
         'maximo'     => LineasPedido::MAXIMO_CANTIDAD,
         'edicion'    => $edicion,
         'controlar'  => Configuracion::actual()->controlar_existencias,
+        'enBodega'   => VentaEnBodega::vendedores(),
         'veTodo'     => Acceso::veTodo(),
     ];
 @endphp
@@ -555,9 +559,14 @@
                 return Number(por[pres] ?? 0)
             },
 
+            {{-- Si no se pasa de lo disponible: con "controlar existencias" o en venta en bodega (el vendedor escogido es de bodega). --}}
+            controla() {
+                return @js($config['controlar']) || @js($config['enBodega']).includes(Number(this.$wire.get('data.vendedor_id')))
+            },
+
             {{-- Controlando la existencia, lo que no tiene disponible se ve pero no se agrega. --}}
             bloqueado(p) {
-                return @js($config['controlar']) && ! this.sinBodegaEscogida() && Number(p?.hay ?? 0) <= 0
+                return this.controla() && ! this.sinBodegaEscogida() && Number(p?.hay ?? 0) <= 0
             },
 
             {{-- Poco: menos de lo que trae la presentación más grande. --}}
@@ -574,7 +583,7 @@
             maximoPara(id, pres) {
                 const hay = this.hayDe(id)
 
-                if (! @js($config['controlar']) || hay === null || this.sinBodegaEscogida()) {
+                if (! this.controla() || hay === null || this.sinBodegaEscogida()) {
                     return @js($config['maximo'])
                 }
 
@@ -598,7 +607,7 @@
 
             {{-- Controlando la existencia, sin bodega no se sabe qué se puede despachar. --}}
             sinBodega() {
-                return @js($config['controlar']) && this.sinBodegaEscogida()
+                return this.controla() && this.sinBodegaEscogida()
             },
 
             recordar(id) {
@@ -805,7 +814,7 @@
 
             {{-- Controlando la existencia: el primer producto de la promoción que no alcanza ('' si alcanza todo). --}}
             noAlcanzaPara(promo) {
-                if (! @js($config['controlar']) || this.sinBodegaEscogida()) {
+                if (! this.controla() || this.sinBodegaEscogida()) {
                     return ''
                 }
 
@@ -1012,7 +1021,7 @@
         <div class="pv-ultimo" x-show="ultimo && lineas.length === 0" x-cloak>
             <div>
                 <div class="pv-ultimo-titulo" x-text="'Último pedido de este cliente: ' + (ultimo?.numero ?? '') + ' del ' + (ultimo?.fecha ?? '')"></div>
-                <div class="pv-ultimo-detalle" x-text="(ultimo ? Object.keys(ultimo.productos).length : 0) + ' productos, con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + (@js($config['controlar']) ? ' no se agregan: ya no se venden o no hay disponible en la bodega)' : ' ya no se venden)') : '') + '.'"></div>
+                <div class="pv-ultimo-detalle" x-text="(ultimo ? Object.keys(ultimo.productos).length : 0) + ' productos, con los precios de hoy' + (ultimo?.fuera ? ' (' + ultimo.fuera + (controla() ? ' no se agregan: ya no se venden o no hay disponible en la bodega)' : ' ya no se venden)') : '') + '.'"></div>
             </div>
             <button type="button" x-on:click="repetirUltimo()">Agregar los mismos productos</button>
         </div>

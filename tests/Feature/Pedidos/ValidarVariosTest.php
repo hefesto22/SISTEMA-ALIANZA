@@ -188,7 +188,7 @@ test('la hoja de alisto dice lo que se saca de cada producto y a qué pedido va;
     expect($hoja)->toHaveCount(1)
         ->and(array_column($hoja[0]['pedidos'], 'numero'))->toBe([$uno->numero, $dos->numero])
         ->and(array_map(fn (array $sale): array => [$sale['sigla'], $sale['cantidad']], $jabon['sale']))->toBe([['CJ12', 3], ['UN', 3]])
-        ->and([$jabon['hay'], $jabon['falta']])->toBe(['3 CJ12 · 12 UN', null])
+        ->and($jabon['falta'])->toBeNull()
         ->and($jabon['para'])->toHaveCount(2)
         ->and($jabon['para'][0])->toStartWith($uno->numero.' ')->toEndWith(': 1 CJ12 + 3 UN')
         ->and(HojaDeAlisto::paraAnotar($hoja))->toBe([
@@ -205,7 +205,8 @@ test('la hoja de alisto dice lo que se saca de cada producto y a qué pedido va;
         ->assertSee($this->jabon->descripcion)
         ->assertSee((string) $dos->numero)
         ->assertSee('Apartado')
-        ->assertSee('Faltó');
+        ->assertSee('Faltó')
+        ->assertDontSee('En sistema');
 
     Livewire::test(ListPedidos::class)
         ->assertSee('Hoja de alisto')

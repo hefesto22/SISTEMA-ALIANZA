@@ -17,15 +17,16 @@ use Illuminate\Support\Str;
  * Hoja de alisto: lo que hay que sacar de la bodega para unos pedidos
  * pendientes (los de un día, o los marcados), para ir apartándolo antes de
  * validar. Por bodega, un renglón por producto con el total a sacar de cada
- * presentación (con los regalos de las promociones), lo que dice el sistema
- * que hay, si no alcanza y a qué pedido va cada parte. En papel lleva una
+ * presentación (con los regalos de las promociones) y a qué pedido va cada
+ * parte. "falta" (si según el sistema no alcanza) es para el aviso del modal
+ * de validar; en papel no va: allá se revisa en físico. En papel lleva una
  * casilla "Apartado" y un espacio "Faltó": lo que faltó se anota al validar
  * (ValidarVarios, $faltaron) y a los últimos pedidos les sale menos.
  *
  * Los pedidos van del más viejo al más nuevo, como al validar.
  *
  * @phpstan-type HojaVenta array{presentacionId: int, sigla: string, cantidad: int, cobra: int}
- * @phpstan-type HojaRenglon array{productoId: int, codigo: string, descripcion: string, sale: list<HojaVenta>, regalo: string|null, hay: string, falta: string|null, para: list<string>}
+ * @phpstan-type HojaRenglon array{productoId: int, codigo: string, descripcion: string, sale: list<HojaVenta>, regalo: string|null, falta: string|null, para: list<string>}
  * @phpstan-type HojaBodega array{bodegaId: int, bodega: string, pedidos: list<array{numero: string, cliente: string, fecha: string, total: float}>, total: float, desde: string, hasta: string, productos: list<HojaRenglon>}
  */
 final class HojaDeAlisto
@@ -190,7 +191,6 @@ final class HojaDeAlisto
         $presentaciones = $modelo->presentaciones->sortByDesc('contenido')->values();
         $sale = [];
         $regalo = [];
-        $hayTexto = [];
         $falta = [];
 
         foreach ($presentaciones as $presentacion) {
@@ -207,10 +207,6 @@ final class HojaDeAlisto
 
             if (($producto['regalo'][$presentacion->id] ?? 0) > 0) {
                 $regalo[] = number_format($producto['regalo'][$presentacion->id]).' '.$presentacion->sigla();
-            }
-
-            if (($hay[$presentacion->id] ?? 0) !== 0) {
-                $hayTexto[] = number_format($hay[$presentacion->id] ?? 0).' '.$presentacion->sigla();
             }
         }
 
@@ -230,7 +226,6 @@ final class HojaDeAlisto
             'descripcion' => $modelo->descripcion,
             'sale'        => $sale,
             'regalo'      => $regalo === [] ? null : implode(' y ', $regalo),
-            'hay'         => $hayTexto === [] ? 'nada' : implode(' · ', $hayTexto),
             'falta'       => $falta === [] ? null : implode(', ', $falta),
             'para'        => self::para($producto['para'], $presentaciones->keyBy('id')->all(), $pedidos),
         ];
