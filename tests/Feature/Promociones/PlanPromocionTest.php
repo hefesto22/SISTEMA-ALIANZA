@@ -48,7 +48,7 @@ beforeEach(function (): void {
 });
 
 /**
- * Plan con una línea "24+1" de manzana y pera (se regala manzana) y el tope dado.
+ * Plan con una línea "24+1" de manzana y pera (cada sabor aparte, regala del mismo) y el tope dado.
  */
 function planNectar(object $prueba, int $tope, ?User $usuario = null): PlanPromocion
 {
@@ -59,7 +59,7 @@ function planNectar(object $prueba, int $tope, ?User $usuario = null): PlanPromo
         'vigente_hasta' => today()->endOfMonth()->toDateString(),
         'bodegas'       => [],
         'lineas'        => [
-            ['id' => null, 'productos' => [$prueba->manzana->id, $prueba->pera->id], 'compra' => 24, 'regala' => 1, 'regalo_id' => $prueba->manzana->id, 'tope' => $tope, 'porcentaje' => 4.17],
+            ['id' => null, 'productos' => [$prueba->manzana->id, $prueba->pera->id], 'compra' => 24, 'regala' => 1, 'tope' => $tope, 'porcentaje' => 4.17],
         ],
     ], $usuario ?? $prueba->admin);
 }
@@ -105,19 +105,41 @@ test('cada línea del plan queda como promoción gratis que cuenta unidades, con
         ->and($linea->nombre)->toBe('24+1 NECTAR MANZANA TETRA 200 Y 1 MÁS')
         ->and($linea->condiciones->pluck('producto_id')->all())->toBe([$this->manzana->id, $this->pera->id])
         ->and($linea->condiciones->pluck('presentacion_id')->all())->toBe([presentacion($this->manzana)->id, presentacion($this->pera)->id])
-        ->and($linea->resumen())->toBe('Por cada 24 unidades de NECTAR MANZANA TETRA 200 o NECTAR PERA TETRA 200 (se pueden mezclar) lleva 1 unidad de NECTAR MANZANA TETRA 200 gratis')
+        ->and($linea->resumen())->toBe('Por cada 24 unidades de un mismo producto (NECTAR MANZANA TETRA 200 o NECTAR PERA TETRA 200) lleva 1 unidad de ese mismo producto gratis; no se mezclan')
+        ->and($linea->enPartes())->toBe([
+            'mecanica'  => '24+1',
+            'titulo'    => '',
+            'compra'    => 'Por cada 24 unidades de un mismo producto (no se mezclan)',
+            'productos' => ['NECTAR MANZANA TETRA 200', 'NECTAR PERA TETRA 200'],
+            'lleva'     => 'Lleva 1 unidad de ese mismo producto gratis',
+        ])
         ->and(GuardarPlanPromocion::porcentaje(24, 1, presentacion($this->manzana), presentacion($this->manzana)))->toBe(4.17);
 });
 
-test('24+1 se cumple mezclando sabores, sueltas o en caja', function (): void {
+test('24+1 cuenta cada sabor aparte (sueltas o en caja) y regala del mismo sabor: no se mezclan', function (): void {
     planNectar($this, 1000);
 
-    // 12 UN de manzana + 1 CJ24 de pera = 36 unidades → 1 de regalo.
-    expect(regaloDe(preventaNectar($this, [[presentacion($this->manzana), 12], [caja($this->pera), 1]])))->toBe(1)
-        // 2 CJ24 = 48 → 2.
+    // 12 UN de manzana + 12 de pera no completan nada.
+    expect(regaloDe(preventaNectar($this, [[presentacion($this->manzana), 12], [presentacion($this->pera), 12]])))->toBe(0)
+        // 2 CJ24 de manzana = 48 → 2.
         ->and(regaloDe(preventaNectar($this, [[caja($this->manzana), 2]])))->toBe(2)
         // 23 no alcanzan.
         ->and(regaloDe(preventaNectar($this, [[presentacion($this->pera), 23]])))->toBe(0);
+
+    // 12 de manzana + 1 CJ24 de pera: el regalo es 1 UN de pera.
+    $pedido = preventaNectar($this, [[presentacion($this->manzana), 12], [caja($this->pera), 1]]);
+    $regalos = $pedido->items()->where('bonificacion', true)->get();
+
+    expect($regalos)->toHaveCount(1)
+        ->and($regalos->sole()->producto_id)->toBe($this->pera->id)
+        ->and($regalos->sole()->presentacion_id)->toBe(presentacion($this->pera)->id)
+        ->and($regalos->sole()->cantidad)->toBe(1);
+
+    // 24 de cada uno: 1 de manzana y 1 de pera.
+    $ambos = preventaNectar($this, [[caja($this->manzana), 1], [caja($this->pera), 1]]);
+
+    expect($ambos->items()->where('bonificacion', true)->orderBy('producto_id')->pluck('cantidad', 'producto_id')->all())
+        ->toBe([$this->manzana->id => 1, $this->pera->id => 1]);
 });
 
 test('no se regala más de lo autorizado: se aparta desde la preventa y al anular regresa', function (): void {
@@ -146,6 +168,16 @@ test('no se regala más de lo autorizado: se aparta desde la preventa y al anula
 test('si quedan menos de las que le tocan, se le da lo que queda y se avisa', function (): void {
     planNectar($this, 2);
 
+    // El tope es de toda la línea: se toma en el orden de la línea (manzana, luego pera).
+    $dos = PedidoForm::resumenDe([
+        ['id' => null, 'producto_id' => $this->pera->id, 'presentacion_id' => caja($this->pera)->id, 'cantidad' => 2],
+        ['id' => null, 'producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 1],
+    ], $this->bodega->id);
+
+    expect($dos['promociones'])->toContain('Regalo: 1 unidad de NECTAR MANZANA TETRA 200')
+        ->and($dos['promociones'])->toContain('Regalo: 1 unidad de NECTAR PERA TETRA 200')
+        ->and($dos['promociones'])->toContain('le tocaban 2, solo quedaban 1 de las autorizadas');
+
     $resumen = PedidoForm::resumenDe([['id' => null, 'producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 3]], $this->bodega->id);
 
     expect($resumen['promociones'])->toContain('le tocaban 3, solo quedaban 2 de las autorizadas')
@@ -153,7 +185,7 @@ test('si quedan menos de las que le tocan, se le da lo que queda y se avisa', fu
 
     $agotada = PedidoForm::resumenDe([['id' => null, 'producto_id' => $this->pera->id, 'presentacion_id' => caja($this->pera)->id, 'cantidad' => 1]], $this->bodega->id);
 
-    expect($agotada['promociones'])->toContain('agotada: le tocaban 1 unidad de NECTAR MANZANA TETRA 200');
+    expect($agotada['promociones'])->toContain('agotada: le tocaban 1 unidad de NECTAR PERA TETRA 200');
 });
 
 test('el avance separa lo entregado (impreso) de lo comprometido y lo valora al costo', function (): void {
@@ -187,7 +219,7 @@ test('al cambiar el plan, la línea usada sigue con lo ya regalado y no se puede
         'vigente_desde' => today()->startOfMonth()->toDateString(),
         'vigente_hasta' => today()->endOfMonth()->toDateString(),
         'bodegas'       => [],
-        'lineas'        => [['id' => $linea->id, 'productos' => [$this->manzana->id], 'compra' => 24, 'regala' => 1, 'regalo_id' => $this->manzana->id, 'tope' => 5, 'porcentaje' => null]],
+        'lineas'        => [['id' => $linea->id, 'productos' => [$this->manzana->id], 'compra' => 24, 'regala' => 1, 'tope' => 5, 'porcentaje' => null]],
     ];
 
     $plan = app(GuardarPlanPromocion::class)->ejecutar($plan, $datos, $this->admin);
@@ -197,7 +229,7 @@ test('al cambiar el plan, la línea usada sigue con lo ya regalado y no se puede
         ->and($plan->seUso())->toBeTrue();
 
     $otro = Producto::factory()->create(['proveedor_id' => $this->proveedor->id]);
-    $datos['lineas'] = [['id' => null, 'productos' => [$otro->id], 'compra' => 12, 'regala' => 1, 'regalo_id' => $otro->id, 'tope' => 5, 'porcentaje' => null]];
+    $datos['lineas'] = [['id' => null, 'productos' => [$otro->id], 'compra' => 12, 'regala' => 1, 'tope' => 5, 'porcentaje' => null]];
 
     expect(fn () => app(GuardarPlanPromocion::class)->ejecutar($plan, $datos, $this->admin))
         ->toThrow(ReglaNegocioException::class, 'ya se dio en pedidos');
@@ -214,7 +246,7 @@ test('el encargado arma planes solo de su bodega y el vendedor no los ve', funct
         'vigente_desde' => today()->toDateString(),
         'vigente_hasta' => today()->toDateString(),
         'bodegas'       => [$otra->id],
-        'lineas'        => [['id' => null, 'productos' => [$this->pera->id], 'compra' => 24, 'regala' => 1, 'regalo_id' => $this->pera->id, 'tope' => 5]],
+        'lineas'        => [['id' => null, 'productos' => [$this->pera->id], 'compra' => 24, 'regala' => 1, 'tope' => 5]],
     ], $encargado);
 
     expect($plan->bodegas->pluck('id')->all())->toBe([$this->bodega->id])
@@ -275,5 +307,11 @@ test('en la preventa la línea del plan dice cuánto regalo queda y agrega la ca
         ->and($hoy['promos'][0]['quedan'])->toBe(2)
         ->and($hoy['promos'][0]['sigla'])->toBe('UN')
         ->and($hoy['promos'][0]['compra'])->toBe([$this->manzana->id, $this->pera->id])
-        ->and($hoy['promos'][0]['lineas'])->toBe([['producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 1]]);
+        ->and($hoy['promos'][0]['lineas'])->toBe([['producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 1]])
+        ->and($hoy['promos'][0]['partes']['mecanica'])->toBe('24+1')
+        // No se mezclan: cada sabor con su botón, que agrega su caja.
+        ->and($hoy['promos'][0]['opciones'])->toBe([
+            ['producto_id' => $this->manzana->id, 'nombre' => 'NECTAR MANZANA TETRA 200', 'agrega' => '1 '.caja($this->manzana)->sigla(), 'lineas' => [['producto_id' => $this->manzana->id, 'presentacion_id' => caja($this->manzana)->id, 'cantidad' => 1]]],
+            ['producto_id' => $this->pera->id, 'nombre' => 'NECTAR PERA TETRA 200', 'agrega' => '1 '.caja($this->pera)->sigla(), 'lineas' => [['producto_id' => $this->pera->id, 'presentacion_id' => caja($this->pera)->id, 'cantidad' => 1]]],
+        ]);
 });

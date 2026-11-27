@@ -14,7 +14,7 @@ test('el plan de prueba de MERHONSA se arma una sola vez, con sus cinco líneas 
     User::factory()->create()->assignRole(Rol::Administrador->value);
     $proveedor = Proveedor::factory()->create(['codigo' => PlanesProveedorPruebaSeeder::PROVEEDOR]);
 
-    $codigos = collect(PlanesProveedorPruebaSeeder::LINEAS)->flatMap(fn (array $linea): array => [...$linea['productos'], $linea['regalo']])->unique();
+    $codigos = collect(PlanesProveedorPruebaSeeder::LINEAS)->flatMap(fn (array $linea): array => $linea['productos'])->unique();
 
     foreach ($codigos as $codigo) {
         Producto::factory()->conCaja(12)->create(['codigo' => $codigo, 'proveedor_id' => $proveedor->id]);

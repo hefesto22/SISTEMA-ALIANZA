@@ -191,7 +191,9 @@ test('el vendedor ve sus pedidos solo mientras están pendientes; ya validados s
 
     Livewire::test(ListPedidos::class)
         ->assertCanSeeTableRecords([$pendiente])
-        ->assertCanNotSeeTableRecords([$validado, $anulado]);
+        ->assertCanNotSeeTableRecords([$validado, $anulado])
+        ->assertSee('1 pedido por validar')
+        ->assertTableActionVisible('cambiar', $pendiente);
 
     // Si lo anula desde la pantalla del pedido, vuelve a la lista: ya no lo ve.
     Livewire::test(ViewPedido::class, ['record' => $pendiente->getRouteKey()])
@@ -200,6 +202,12 @@ test('el vendedor ve sus pedidos solo mientras están pendientes; ya validados s
 
     expect($pendiente->fresh()?->estado)->toBe(EstadoPedido::Anulado)
         ->and(Pedido::query()->visiblePara($this->vendedor)->count())->toBe(0);
+
+    // Sin pedidos: qué es esta lista y cómo tomar uno.
+    Livewire::test(ListPedidos::class)
+        ->assertSee('No tiene pedidos por validar')
+        ->assertSee('Nueva preventa')
+        ->assertSee('Ir a Clientes');
 });
 
 test('el encargado busca y agrega al validar un producto que no venía en el pedido', function (): void {

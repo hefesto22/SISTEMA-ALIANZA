@@ -41,9 +41,10 @@ use Illuminate\Support\Carbon;
  *
  * Plan del proveedor (PlanPromocion): cada línea autorizada del plan es una
  * promoción con plan_id, que se arma y se cambia desde el plan. Cuenta
- * UNIDADES (compra_unidades): "24+1" se cumple con 24 unidades de
- * cualquiera de sus productos, mezclados, en cualquier presentación. Con
- * tope_unidades, no se regala más de lo autorizado: lo que queda lo dice
+ * UNIDADES (compra_unidades) de cada producto aparte, no se mezclan: "24+1"
+ * se cumple con 24 unidades de un mismo producto, en cualquier
+ * presentación, y se regala de ese mismo producto. Con tope_unidades (de
+ * toda la línea), no se regala más de lo autorizado: lo que queda lo dice
  * App\Domain\Promociones\UsoDePromociones.
  *
  * @property int $id
@@ -79,7 +80,7 @@ class Promocion extends Model
     use HasFactory;
 
     /** Lo que el motor de promociones necesita cargado. */
-    public const PARA_CALCULAR = ['condiciones.presentacion', 'beneficioPresentacion.unidadMedida', 'productoBeneficio'];
+    public const PARA_CALCULAR = ['condiciones.presentacion.producto', 'condiciones.presentacion.unidadMedida', 'beneficioPresentacion.unidadMedida', 'productoBeneficio'];
 
     protected $table = 'promociones';
 
@@ -357,7 +358,7 @@ class Promocion extends Model
     }
 
     /**
-     * "24+1": cuenta unidades de cualquiera de sus productos, mezclados.
+     * "24+1": cuenta unidades de cada uno de sus productos (no se mezclan).
      */
     public function cuentaUnidades(): bool
     {
@@ -428,27 +429,72 @@ class Promocion extends Model
     }
 
     /**
-     * "Por cada 24 unidades de NECTAR MANZANA, NECTAR PERA o NECTAR PIÑA
-     * (se pueden mezclar) lleva 1 unidad de NECTAR MANZANA gratis".
+     * "Por cada 24 unidades de NECTAR MANZANA lleva 1 unidad más gratis"; con
+     * varios productos: "Por cada 24 unidades de un mismo producto (NECTAR
+     * MANZANA o NECTAR PERA) lleva 1 unidad de ese mismo producto gratis; no
+     * se mezclan".
      */
     private function resumenEnUnidades(): string
     {
         $productos = $this->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->values();
-        $base = $this->condiciones->first()?->presentacion;
-        $cuantas = $base instanceof Presentacion ? $base->enPalabras((int) $this->compra_unidades) : $this->compra_unidades.' unidades';
+        $cuantas = $this->unidadesTexto();
         $beneficio = $this->beneficioPresentacion->enPalabras($this->cantidad_beneficio);
 
-        $de = match ($productos->count()) {
-            0       => '',
-            1       => ' de '.$productos->first(),
-            default => ' de '.$productos->slice(0, -1)->implode(', ').' o '.$productos->last().' (se pueden mezclar)',
-        };
+        if ($productos->count() <= 1) {
+            return "Por cada {$cuantas} de {$productos->first()} lleva {$beneficio} más {$this->beneficioTexto()}";
+        }
 
-        $regalo = $productos->count() === 1 && $this->regaloEnCondicion()
-            ? "{$beneficio} más"
-            : "{$beneficio} de {$this->productoBeneficio->descripcion}";
+        $cuales = $productos->slice(0, -1)->implode(', ').' o '.$productos->last();
 
-        return "Por cada {$cuantas}{$de} lleva {$regalo} {$this->beneficioTexto()}";
+        return "Por cada {$cuantas} de un mismo producto ({$cuales}) lleva {$beneficio} de ese mismo producto {$this->beneficioTexto()}; no se mezclan";
+    }
+
+    /**
+     * La promoción en partes, para la tarjeta de la preventa en el teléfono:
+     * la mecánica ("20+1"; vacía si no cuenta unidades), el título (las del
+     * plan no llevan: la mecánica y los productos lo dicen todo), qué compra,
+     * de qué productos y qué lleva.
+     *
+     * @return array{mecanica: string, titulo: string, compra: string, productos: list<string>, lleva: string}
+     */
+    public function enPartes(): array
+    {
+        $beneficio = $this->beneficioPresentacion->enPalabras($this->cantidad_beneficio);
+
+        if ($this->cuentaUnidades()) {
+            $productos = array_values($this->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->all());
+            $varios = count($productos) > 1;
+
+            return [
+                'mecanica'  => $this->mecanica(),
+                'titulo'    => '',
+                'compra'    => $varios ? "Por cada {$this->unidadesTexto()} de un mismo producto (no se mezclan)" : "Por cada {$this->unidadesTexto()}",
+                'productos' => $productos,
+                'lleva'     => $varios ? "Lleva {$beneficio} de ese mismo producto {$this->beneficioTexto()}" : "Lleva {$beneficio} más {$this->beneficioTexto()}",
+            ];
+        }
+
+        $soloElRegalo = $this->regaloEnCondicion() && $this->condiciones->count() === 1;
+
+        return [
+            'mecanica'  => '',
+            'titulo'    => $this->nombre,
+            'compra'    => 'Compra',
+            'productos' => array_values($this->condiciones->map(fn (PromocionCondicion $c): string => $c->texto())->all()),
+            'lleva'     => $soloElRegalo
+                ? "Lleva {$beneficio} más {$this->beneficioTexto()}"
+                : "Lleva {$beneficio} de {$this->productoBeneficio->descripcion} {$this->beneficioTexto()}",
+        ];
+    }
+
+    /**
+     * "24 unidades" (en la unidad de sus productos).
+     */
+    private function unidadesTexto(): string
+    {
+        $base = $this->condiciones->first()?->presentacion;
+
+        return $base instanceof Presentacion ? $base->enPalabras((int) $this->compra_unidades) : $this->compra_unidades.' unidades';
     }
 
     public static function porcentajeTexto(float $porcentaje): string

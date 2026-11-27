@@ -227,8 +227,10 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
     /**
      * Promociones vigentes hoy en la bodega del pedido, como las usa el
      * teléfono: qué hay que agregar para llevarla ("lineas": lo que pide la
-     * promoción más el regalo, en su presentación), qué productos la activan
-     * ("compra") y cuál es el regalo; y los datos de esos productos, con lo
+     * promoción más el regalo, en su presentación; en las del plan, cada
+     * producto con lo suyo en "opciones", porque no se mezclan), qué
+     * productos la activan ("compra"), cuál es el regalo y sus partes para
+     * la tarjeta ("partes"); y los datos de esos productos, con lo
      * disponible.
      *
      * @return array{promos: list<array<string, mixed>>, productos: array<int, array<string, mixed>>}
@@ -272,15 +274,11 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
 
         foreach ($promociones as $promocion) {
             $lineas = [];
+            $opciones = $promocion->cuentaUnidades() ? self::opcionesEnUnidades($promocion) : [];
 
             if ($promocion->cuentaUnidades()) {
-                // "24+1": se agregan las 24 del primer producto (en la caja que las trae, si hay).
-                $primera = $promocion->condiciones->first();
-
-                if ($primera !== null) {
-                    [$presentacionId, $cuantas] = self::paraCompletar($primera->producto, (int) $promocion->compra_unidades);
-                    self::sumarLinea($lineas, $primera->producto_id, $presentacionId, $cuantas);
-                }
+                // "24+1": por defecto, las 24 del primer producto (cada uno tiene la suya en "opciones").
+                $lineas = $opciones[0]['lineas'] ?? [];
             } else {
                 foreach ($promocion->condiciones as $condicion) {
                     self::sumarLinea($lineas, $condicion->producto_id, $condicion->presentacion_id, $condicion->cantidad);
@@ -292,14 +290,16 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
             }
 
             $promos[] = [
-                'id'      => $promocion->id,
-                'codigo'  => (string) $promocion->codigo,
-                'nombre'  => $promocion->nombre,
-                'resumen' => $promocion->resumen(),
-                'nota'    => $promocion->descripcion,
-                'compra'  => array_values(array_unique($promocion->condiciones->pluck('producto_id')->all())),
-                'regalo'  => $promocion->producto_beneficio_id,
-                'lineas'  => array_values($lineas),
+                'id'       => $promocion->id,
+                'codigo'   => (string) $promocion->codigo,
+                'nombre'   => $promocion->nombre,
+                'resumen'  => $promocion->resumen(),
+                'partes'   => $promocion->enPartes(),
+                'nota'     => $promocion->descripcion,
+                'compra'   => array_values(array_unique($promocion->condiciones->pluck('producto_id')->all())),
+                'regalo'   => $promocion->producto_beneficio_id,
+                'lineas'   => array_values($lineas),
+                'opciones' => $opciones,
                 // Con tope: cuánto regalo queda de lo autorizado (0 = agotada); null = sin tope.
                 'tope'   => $promocion->tieneTope() ? (int) $promocion->tope_unidades : null,
                 'quedan' => $disponibles[$promocion->id] ?? null,
@@ -632,6 +632,31 @@ class LineasPedido extends Field implements HasNestedRecursiveValidationRules
         }
 
         return null;
+    }
+
+    /**
+     * "24+1" (cada producto aparte): por cada producto, lo que se agrega para
+     * llevarla, con el texto del botón ("1 CJ24" o "24 UN").
+     *
+     * @return list<array{producto_id: int, nombre: string, agrega: string, lineas: list<array{producto_id: int, presentacion_id: int, cantidad: int}>}>
+     */
+    private static function opcionesEnUnidades(Promocion $promocion): array
+    {
+        $opciones = [];
+
+        foreach ($promocion->condiciones->unique('producto_id') as $condicion) {
+            [$presentacionId, $cuantas] = self::paraCompletar($condicion->producto, (int) $promocion->compra_unidades);
+            $sigla = $condicion->producto->presentaciones->firstWhere('id', $presentacionId)?->sigla() ?? '';
+
+            $opciones[] = [
+                'producto_id' => $condicion->producto_id,
+                'nombre'      => $condicion->producto->descripcion,
+                'agrega'      => trim($cuantas.' '.$sigla),
+                'lineas'      => [['producto_id' => $condicion->producto_id, 'presentacion_id' => $presentacionId, 'cantidad' => $cuantas]],
+            ];
+        }
+
+        return $opciones;
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Pedidos\Tables;
 
 use App\Enums\EstadoPedido;
+use App\Filament\Resources\Clientes\ClienteResource;
 use App\Filament\Resources\Pedidos\Actions\AnularPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\CorregirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\HojaDeAlistoAction;
@@ -15,6 +16,7 @@ use App\Filament\Resources\Pedidos\PedidoResource;
 use App\Filament\Support\Acceso;
 use App\Models\Cliente;
 use App\Models\Pedido;
+use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
@@ -44,6 +46,10 @@ use Livewire\Component;
  * y el resto en "...". Al hacer clic en la tarjeta se abre Validar o
  * Corregir; si no le toca, se abre el pedido.
  *
+ * El vendedor (solo ve sus pendientes) tiene Ver · Cambiar, los filtros en
+ * el embudo junto al buscador y, si no tiene pedidos, qué es esta lista y
+ * los botones Nueva preventa e Ir a Clientes.
+ *
  * Bodega puede marcar varias (ya validadas) e imprimirlas de un solo, por
  * ejemplo para reimprimir las de un cliente o un vendedor con los filtros.
  * En la pestaña Pendiente marca los pendientes, saca su hoja de alisto
@@ -71,12 +77,28 @@ class PedidosTable
             ->recordUrl(fn (Pedido $record): ?string => self::alHacerClic($record) === null ? PedidoResource::getUrl('view', ['record' => $record]) : null)
             ->poll('30s')
             ->extraAttributes(['class' => 'pedidos-tarjetas'])
-            ->searchPlaceholder('Buscar por cliente, código, número de pedido o de factura, o vendedor…')
+            ->searchPlaceholder($esVendedor ? 'Buscar cliente o número de pedido' : 'Buscar por cliente, código, número de pedido o de factura, o vendedor…')
             ->defaultSort('created_at', 'desc')
             ->paginated([12, 24, 48])
             ->defaultPaginationPageOption(12)
-            ->filtersLayout(FiltersLayout::AboveContentCollapsible)
-            ->filtersFormColumns(['md' => 2, 'xl' => 4])
+            ->filtersLayout($esVendedor ? FiltersLayout::Dropdown : FiltersLayout::AboveContentCollapsible)
+            ->emptyStateIcon($esVendedor ? Heroicon::OutlinedClipboardDocumentCheck : null)
+            ->emptyStateHeading($esVendedor ? 'No tiene pedidos por validar' : null)
+            ->emptyStateDescription($esVendedor
+                ? 'Aquí salen los pedidos que usted toma, hasta que bodega los valida. Para tomar uno toque "Nueva preventa", o en Clientes toque "Tomar pedido".'
+                : null)
+            ->emptyStateActions($esVendedor ? [
+                Action::make('nuevaPreventa')
+                    ->label('Nueva preventa')
+                    ->icon(Heroicon::OutlinedPlus)
+                    ->url(fn (): string => PedidoResource::getUrl('create')),
+                Action::make('irAClientes')
+                    ->label('Ir a Clientes')
+                    ->icon(Heroicon::OutlinedUserGroup)
+                    ->color('gray')
+                    ->url(fn (): string => ClienteResource::getUrl()),
+            ] : [])
+            ->filtersFormColumns($esVendedor ? 1 : ['md' => 2, 'xl' => 4])
             ->checkIfRecordIsSelectableUsing(fn (Pedido $record, Component $livewire): bool => self::seMarca($record, $livewire))
             ->toolbarActions([
                 ImprimirPedidoAction::seleccionados(),
@@ -143,8 +165,17 @@ class PedidosTable
                 ImprimirPedidoAction::make()
                     ->button()
                     ->outlined(),
+                // Al vendedor (sus pedidos son pendientes): Ver · Cambiar.
+                Action::make('cambiar')
+                    ->label('Cambiar')
+                    ->icon(Heroicon::OutlinedPencilSquare)
+                    ->button()
+                    ->outlined()
+                    ->url(fn (Pedido $record): string => PedidoResource::getUrl('edit', ['record' => $record]))
+                    ->visible(fn (Pedido $record): bool => $esVendedor && Gate::allows('update', $record)),
                 ActionGroup::make([
-                    EditAction::make(),
+                    EditAction::make()
+                        ->hidden($esVendedor),
                     ImprimirPedidoAction::copia(),
                     ImprimirPedidoAction::noSalio(),
                     ImprimirPedidoAction::vistaPrevia(),

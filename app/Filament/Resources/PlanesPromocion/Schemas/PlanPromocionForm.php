@@ -36,14 +36,16 @@ use Illuminate\Support\Carbon;
  *   Bodegas (ninguna = todas) · La hoja del proveedor (imagen o PDF) · Notas
  *   Líneas autorizadas, una tarjeta por línea de la hoja (se encogen y se copian):
  *     Productos que compra (del proveedor escogido arriba)
- *     Compra · Regala · Producto que se regala · Tope autorizado · % de la hoja
+ *     Compra · Regala · Tope autorizado · % de la hoja
  *     Al costo: el % que da la mecánica y la inversión, o lo que falta para calcularlos
  *
- * "Compra + Regala" es la mecánica en UNIDADES: 24 + 1 se cumple con 24
- * unidades de cualquiera de los productos de la fila, mezclados, sueltas o
- * en caja. El tope son las unidades de regalo que autorizó el proveedor.
- * "Al costo" calcula el % que da la mecánica y la inversión autorizada (tope
- * × costo del regalo); si regala bastante más que el % de la hoja, se marca.
+ * "Compra + Regala" es la mecánica en UNIDADES de cada producto aparte (no
+ * se mezclan): 24 + 1 se cumple con 24 unidades de un mismo producto,
+ * sueltas o en caja, y se regala 1 unidad de ese mismo. El tope son las
+ * unidades de regalo que autorizó el proveedor para toda la línea. "Al
+ * costo" calcula el % que da la mecánica y la inversión autorizada (tope ×
+ * costo de la unidad, en promedio si los productos cuestan distinto); si
+ * regala bastante más que el % de la hoja, se marca.
  *
  * Al guardar, cada fila queda como una promoción del plan
  * (GuardarPlanPromocion). Los productos de las líneas son solo los del
@@ -80,7 +82,6 @@ final class PlanPromocionForm
                                     }
 
                                     $linea['productos'] = array_values(array_filter(self::enteros($linea['productos'] ?? []), fn (int $id): bool => isset($suyos[$id])));
-                                    $linea['regalo_id'] = is_numeric($linea['regalo_id'] ?? null) && isset($suyos[(int) $linea['regalo_id']]) ? (int) $linea['regalo_id'] : null;
                                     $lineas[$clave] = $linea;
                                 }
 
@@ -131,7 +132,7 @@ final class PlanPromocionForm
                     ]),
 
                 Section::make('Líneas autorizadas')
-                    ->description('Una por cada línea de la hoja. La mecánica cuenta unidades: 24 + 1 se cumple con 24 unidades de cualquiera de los productos de la línea (se pueden mezclar), sueltas o en caja. El tope son las unidades de regalo autorizadas: no se regala más.')
+                    ->description('Una por cada línea de la hoja. Cada producto cuenta aparte, no se mezclan: 24 + 1 se cumple con 24 unidades de un mismo producto, sueltas o en caja, y se regala de ese mismo producto. El tope son las unidades de regalo autorizadas para toda la línea: no se regala más.')
                     ->icon(Heroicon::OutlinedGift)
                     ->compact()
                     ->schema([
@@ -142,7 +143,7 @@ final class PlanPromocionForm
                             ->schema([
                                 Hidden::make('id'),
                                 Select::make('productos')
-                                    ->label('Productos que compra el cliente (se pueden mezclar)')
+                                    ->label('Productos que compra el cliente (cada uno aparte; se regala del mismo)')
                                     ->multiple()
                                     ->searchable()
                                     // Solo los del proveedor escogido arriba.
@@ -151,12 +152,6 @@ final class PlanPromocionForm
                                     ->disabled(fn (Get $get): bool => blank($get('../../proveedor_id')))
                                     ->required()
                                     ->live()
-                                    // El regalo suele ser el mismo: si no hay, el primero.
-                                    ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
-                                        if (blank($get('regalo_id')) && is_array($state) && $state !== []) {
-                                            $set('regalo_id', (int) reset($state));
-                                        }
-                                    })
                                     ->columnSpan(['default' => 2, 'lg' => 12]),
                                 TextInput::make('compra')
                                     ->label('Compra (unidades)')
@@ -166,7 +161,7 @@ final class PlanPromocionForm
                                     ->placeholder('Ej. 24')
                                     ->required()
                                     ->live(debounce: 500)
-                                    ->columnSpan(['default' => 1, 'lg' => 2]),
+                                    ->columnSpan(['default' => 1, 'lg' => 3]),
                                 TextInput::make('regala')
                                     ->label('Regala (unidades)')
                                     ->numeric()
@@ -175,16 +170,7 @@ final class PlanPromocionForm
                                     ->default(1)
                                     ->required()
                                     ->live(debounce: 500)
-                                    ->columnSpan(['default' => 1, 'lg' => 2]),
-                                Select::make('regalo_id')
-                                    ->label('Producto que se regala')
-                                    ->searchable()
-                                    ->options(fn (Get $get): array => self::productosDe($get('../../proveedor_id')))
-                                    ->placeholder(fn (Get $get): string => filled($get('../../proveedor_id')) ? 'Escoja el producto…' : 'Primero escoja el proveedor')
-                                    ->disabled(fn (Get $get): bool => blank($get('../../proveedor_id')))
-                                    ->required()
-                                    ->live()
-                                    ->columnSpan(['default' => 2, 'lg' => 4]),
+                                    ->columnSpan(['default' => 1, 'lg' => 3]),
                                 TextInput::make('tope')
                                     ->label('Tope autorizado (UN)')
                                     ->numeric()
@@ -193,7 +179,7 @@ final class PlanPromocionForm
                                     ->placeholder('Ej. 500')
                                     ->required()
                                     ->live(debounce: 500)
-                                    ->columnSpan(['default' => 1, 'lg' => 2]),
+                                    ->columnSpan(['default' => 1, 'lg' => 3]),
                                 TextInput::make('porcentaje')
                                     ->label('% de la hoja')
                                     ->numeric()
@@ -201,7 +187,7 @@ final class PlanPromocionForm
                                     ->maxValue(100)
                                     ->placeholder('Ej. 4.17')
                                     ->live(debounce: 500)
-                                    ->columnSpan(['default' => 1, 'lg' => 2]),
+                                    ->columnSpan(['default' => 1, 'lg' => 3]),
                                 TextEntry::make('al_costo')
                                     ->label('Al costo')
                                     ->state(fn (Get $get): string => self::alCosto($get))
@@ -238,7 +224,6 @@ final class PlanPromocionForm
             'productos'  => $p->condiciones->map(fn (PromocionCondicion $c): int => $c->producto_id)->values()->all(),
             'compra'     => $p->compra_unidades,
             'regala'     => $p->cantidad_beneficio,
-            'regalo_id'  => $p->producto_beneficio_id,
             'tope'       => $p->tope_unidades,
             'porcentaje' => $p->porcentaje_autorizado,
         ])->values()->all();
@@ -251,7 +236,7 @@ final class PlanPromocionForm
      *
      * @param array<string, mixed> $data
      *
-     * @return array{proveedor_id: int, nombre: string, vigente_desde: string, vigente_hasta: string, archivo: string|null, notas: string|null, bodegas: list<int>, lineas: list<array{id: int|null, productos: list<int>, compra: int, regala: int, regalo_id: int, tope: int, porcentaje: float|null}>}
+     * @return array{proveedor_id: int, nombre: string, vigente_desde: string, vigente_hasta: string, archivo: string|null, notas: string|null, bodegas: list<int>, lineas: list<array{id: int|null, productos: list<int>, compra: int, regala: int, tope: int, porcentaje: float|null}>}
      */
     public static function datos(array $data): array
     {
@@ -267,7 +252,6 @@ final class PlanPromocionForm
                 'productos'  => self::enteros($fila['productos'] ?? []),
                 'compra'     => self::entero($fila['compra'] ?? null),
                 'regala'     => self::entero($fila['regala'] ?? null),
-                'regalo_id'  => self::entero($fila['regalo_id'] ?? null),
                 'tope'       => self::entero($fila['tope'] ?? null),
                 'porcentaje' => is_numeric($fila['porcentaje'] ?? null) ? round((float) $fila['porcentaje'], 2) : null,
             ];
@@ -358,7 +342,7 @@ final class PlanPromocionForm
 
     /**
      * "Regala 4.17 % al costo (la hoja dice 4.17 %) · Inversión autorizada
-     * L 3,435.00 (500 × L 6.87 la UN del regalo)". Si falta algo, lo dice.
+     * L 3,435.00 (500 × L 6.87 la unidad)". Si falta algo, lo dice.
      */
     private static function alCosto(Get $get): string
     {
@@ -370,10 +354,6 @@ final class PlanPromocionForm
 
         if (self::entero($get('compra')) < 1) {
             $faltan[] = 'cuántas compra';
-        }
-
-        if (! is_numeric($get('regalo_id'))) {
-            $faltan[] = 'el producto que se regala';
         }
 
         if (! is_numeric($get('tope'))) {
@@ -392,7 +372,7 @@ final class PlanPromocionForm
             : 'Sin costo registrado para calcular el %';
 
         if ($inversion !== null && $costo !== null) {
-            $texto .= ' · Inversión autorizada '.lempiras($inversion).' ('.number_format(self::entero($get('tope'))).' × '.lempiras($costo).' la unidad del regalo)';
+            $texto .= ' · Inversión autorizada '.lempiras($inversion).' ('.number_format(self::entero($get('tope'))).' × '.lempiras($costo).' la unidad'.(count(self::enteros($get('productos') ?? [])) > 1 ? ', en promedio' : '').')';
         }
 
         return self::excede($get) ? $texto.' · Regala más que la hoja: revise la mecánica.' : $texto;
@@ -410,25 +390,27 @@ final class PlanPromocionForm
     }
 
     /**
+     * Cada producto regala del mismo: el % sale del primero y la inversión,
+     * del costo promedio de la unidad de los de la línea.
+     *
      * @return array{0: float|null, 1: float|null, 2: float|null} [% al costo, inversión autorizada, costo de la unidad del regalo]
      */
     private static function calculo(Get $get): array
     {
         $productos = self::enteros($get('productos') ?? []);
-        $regaloId = $get('regalo_id');
         $bases = Presentacion::query()
-            ->whereIn('producto_id', array_filter([...$productos, is_numeric($regaloId) ? (int) $regaloId : 0]))
+            ->whereIn('producto_id', $productos)
             ->where('es_base', true)
             ->get()
             ->keyBy('producto_id');
 
-        $baseCompra = $productos !== [] ? $bases->get($productos[0]) : null;
-        $baseRegalo = is_numeric($regaloId) ? $bases->get((int) $regaloId) : null;
-        $porcentaje = GuardarPlanPromocion::porcentaje(self::entero($get('compra')), self::entero($get('regala')), $baseCompra, $baseRegalo);
+        $primera = $productos !== [] ? $bases->get($productos[0]) : null;
+        $porcentaje = GuardarPlanPromocion::porcentaje(self::entero($get('compra')), self::entero($get('regala')), $primera, $primera);
+        $costo = GuardarPlanPromocion::costoDelRegalo($bases->all());
         $tope = $get('tope');
-        $inversion = $baseRegalo instanceof Presentacion && is_numeric($tope) ? round((int) $tope * $baseRegalo->costo, 2) : null;
+        $inversion = $costo !== null && is_numeric($tope) ? round((int) $tope * $costo, 2) : null;
 
-        return [$porcentaje, $inversion, $baseRegalo instanceof Presentacion ? round($baseRegalo->costo, 2) : null];
+        return [$porcentaje, $inversion, $costo !== null ? round($costo, 2) : null];
     }
 
     private static function entero(mixed $valor): int

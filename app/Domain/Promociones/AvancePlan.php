@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Promociones;
 
 use App\Models\PlanPromocion;
+use App\Models\Presentacion;
 use App\Models\Promocion;
 use App\Models\PromocionCondicion;
 
@@ -12,7 +13,8 @@ use App\Models\PromocionCondicion;
  * Cómo va un plan del proveedor, línea por línea: cuánto regalo autorizó,
  * cuánto ya se entregó (pedidos impresos), cuánto está comprometido
  * (pedidos sin imprimir) y cuánto queda; y lo mismo en lempiras, al costo de
- * hoy del regalo (lo que el proveedor le reconoce a la distribuidora).
+ * hoy del regalo (lo que el proveedor le reconoce a la distribuidora). Como
+ * cada producto regala del mismo, es el costo promedio de los de la línea.
  * También compara el % que da la mecánica con el autorizado en la hoja.
  */
 final class AvancePlan
@@ -62,17 +64,19 @@ final class AvancePlan
     private static function linea(Promocion $promocion, array $uso): array
     {
         $tope = (int) $promocion->tope_unidades;
-        $costo = round($promocion->beneficioPresentacion->costo, 4);
-        $primera = $promocion->condiciones->first();
-        $porcentaje = GuardarPlanPromocion::porcentaje((int) $promocion->compra_unidades, $promocion->cantidad_beneficio, $primera?->presentacion, $promocion->beneficioPresentacion);
+        // Cada producto regala del mismo: al costo promedio de sus unidades.
+        $costo = GuardarPlanPromocion::costoDelRegalo($promocion->condiciones->map(fn (PromocionCondicion $c): Presentacion => $c->presentacion)) ?? 0.0;
+        $primera = $promocion->condiciones->first()?->presentacion;
+        $porcentaje = GuardarPlanPromocion::porcentaje((int) $promocion->compra_unidades, $promocion->cantidad_beneficio, $primera, $primera);
         $autorizado = $promocion->porcentaje_autorizado;
+        $productos = array_values($promocion->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->all());
 
         return [
             'id'                    => $promocion->id,
             'codigo'                => (string) $promocion->codigo,
             'mecanica'              => $promocion->mecanica(),
-            'productos'             => array_values($promocion->condiciones->map(fn (PromocionCondicion $c): string => $c->producto->descripcion)->unique()->all()),
-            'regalo'                => $promocion->productoBeneficio->descripcion,
+            'productos'             => $productos,
+            'regalo'                => count($productos) > 1 ? 'Del mismo producto que compra' : $promocion->productoBeneficio->descripcion,
             'sigla'                 => $promocion->beneficioPresentacion->sigla(),
             'activa'                => $promocion->activa,
             'tope'                  => $tope,

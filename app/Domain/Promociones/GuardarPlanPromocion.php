@@ -18,8 +18,10 @@ use Illuminate\Support\Str;
 /**
  * Arma o cambia un plan del proveedor con sus líneas, como viene en la hoja.
  * Cada línea es una promoción del plan (gratis, contando unidades, con
- * tope): "24+1 de NÉCTAR MANZANA, PERA… se regala NÉCTAR MANZANA, 1,000
- * unidades". Las fechas y las bodegas del plan pasan a sus promociones.
+ * tope): "24+1 de NÉCTAR MANZANA o PERA, 1,000 unidades". Cada producto
+ * cuenta aparte (no se mezclan) y se regala de ese mismo, en su unidad: no
+ * se escoge el regalo. Las fechas y las bodegas del plan pasan a sus
+ * promociones.
  *
  * Al cambiarlo: las líneas que siguen se actualizan (lo ya regalado sigue
  * contando para su tope), las nuevas se crean y las que se quitan se
@@ -39,7 +41,7 @@ final class GuardarPlanPromocion
      *     archivo?: string|null,
      *     notas?: string|null,
      *     bodegas?: list<int>,
-     *     lineas: list<array{id?: int|null, productos: list<int>, compra: int, regala: int, regalo_id: int, tope: int, porcentaje?: float|null, activa?: bool}>
+     *     lineas: list<array{id?: int|null, productos: list<int>, compra: int, regala: int, tope: int, porcentaje?: float|null, activa?: bool}>
      * } $datos
      */
     public function ejecutar(?PlanPromocion $plan, array $datos, User $usuario): PlanPromocion
@@ -99,9 +101,11 @@ final class GuardarPlanPromocion
     }
 
     /**
-     * Una línea de la hoja: la promoción gratis que cuenta unidades, con su tope.
+     * Una línea de la hoja: la promoción gratis que cuenta unidades, con su
+     * tope. El regalo que queda guardado es el primer producto, en su unidad
+     * (para el nombre y la sigla); el motor regala del que se compró.
      *
-     * @param array{id?: int|null, productos: list<int>, compra: int, regala: int, regalo_id: int, tope: int, porcentaje?: float|null, activa?: bool} $linea
+     * @param array{id?: int|null, productos: list<int>, compra: int, regala: int, tope: int, porcentaje?: float|null, activa?: bool} $linea
      */
     private function guardarLinea(PlanPromocion $plan, ?Promocion $promocion, array $linea, int $numero, User $usuario): Promocion
     {
@@ -119,14 +123,13 @@ final class GuardarPlanPromocion
             throw new ReglaNegocioException("Línea {$numero}: el tope son las unidades de regalo que autorizó el proveedor (0 o más).");
         }
 
-        $regalo = Producto::query()->with('presentaciones')->find($linea['regalo_id']);
+        $compra = $productos->sortBy(fn (Producto $p): int => (int) array_search($p->id, $linea['productos'], true))->values();
+        $regalo = $compra->first();
         $baseRegalo = $regalo?->presentaciones->first(fn (Presentacion $p): bool => $p->es_base);
 
         if (! $regalo instanceof Producto || ! $baseRegalo instanceof Presentacion) {
-            throw new ReglaNegocioException("Línea {$numero}: escoja el producto que se regala.");
+            throw new ReglaNegocioException("Línea {$numero}: {$regalo?->descripcion} no tiene unidad base.");
         }
-
-        $compra = $productos->sortBy(fn (Producto $p): int => (int) array_search($p->id, $linea['productos'], true))->values();
         $nombre = "{$linea['compra']}+{$linea['regala']} {$compra->first()?->descripcion}".($compra->count() > 1 ? ' Y '.($compra->count() - 1).' MÁS' : '');
 
         $promocion ??= new Promocion(['created_by' => $usuario->id, 'activa' => true]);
@@ -169,6 +172,26 @@ final class GuardarPlanPromocion
         }
 
         return $promocion;
+    }
+
+    /**
+     * Lo que vale al costo la unidad del regalo de una línea: como cada
+     * producto regala del mismo, el promedio de sus unidades (las que tienen
+     * costo). Null si ninguna tiene.
+     *
+     * @param iterable<Presentacion|null> $bases
+     */
+    public static function costoDelRegalo(iterable $bases): ?float
+    {
+        $costos = [];
+
+        foreach ($bases as $base) {
+            if ($base instanceof Presentacion && $base->costo > 0) {
+                $costos[] = $base->costo;
+            }
+        }
+
+        return $costos === [] ? null : round(array_sum($costos) / count($costos), 4);
     }
 
     /**

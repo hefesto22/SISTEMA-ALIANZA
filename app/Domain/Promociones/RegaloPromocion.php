@@ -9,8 +9,9 @@ use App\Models\Promocion;
 
 /**
  * Bonificación que le toca al pedido por una promoción gratis: cuántas
- * del regalo, en su presentación. RecalcularPedido la pone en su propia
- * línea del pedido, con 100 % de descuento.
+ * del regalo, en su presentación (en las del plan, la unidad del producto
+ * que compró: cada producto lleva la suya). RecalcularPedido la pone en su
+ * propia línea del pedido, con 100 % de descuento.
  *
  * Con tope (plan del proveedor): $ganadas es lo que le tocaba y $cantidad
  * lo que se le da (lo que quedaba de lo autorizado). Con $cantidad = 0 la
@@ -41,7 +42,7 @@ final readonly class RegaloPromocion
      */
     public function texto(): string
     {
-        $producto = $this->promocion->productoBeneficio->descripcion;
+        $producto = $this->presentacion->producto->descripcion;
 
         if ($this->cantidad <= 0) {
             return "{$this->promocion->codigo} agotada: le tocaban {$this->presentacion->enPalabras($this->ganadas)} de {$producto}, pero ya se regalaron todas las autorizadas.";

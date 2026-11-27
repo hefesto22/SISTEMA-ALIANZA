@@ -17,6 +17,7 @@ class ManageClientes extends ManageRecords
     {
         return [
             CreateAction::make()
+                ->label('Nuevo cliente')
                 ->mutateDataUsing(fn (array $data): array => ClienteForm::completar($data)),
         ];
     }

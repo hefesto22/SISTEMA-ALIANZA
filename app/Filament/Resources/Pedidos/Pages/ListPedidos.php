@@ -425,8 +425,8 @@ class ListPedidos extends ListRecords
 
     /**
      * Bodega y administración no llevan texto: las pestañas ya dicen cuántos
-     * hay de cada uno. El vendedor no tiene pestañas: se le dice por qué sus
-     * pedidos desaparecen al validarlos.
+     * hay de cada uno. El vendedor no tiene pestañas: cuántos tiene por
+     * validar y por cuánto (sin ninguno, lo explica la lista vacía).
      */
     public function getSubheading(): ?string
     {
@@ -436,9 +436,14 @@ class ListPedidos extends ListRecords
 
         $pendientes = PedidoResource::getEloquentQuery()->where('estado', EstadoPedido::Pendiente);
         $cuantos = (clone $pendientes)->count();
+
+        if ($cuantos === 0) {
+            return null;
+        }
+
         $monto = (float) (clone $pendientes)->sum('total');
 
-        return "Sus pedidos por validar: {$cuantos} · ".lempiras($monto).'. Cuando bodega los valida ya no salen aquí.';
+        return ($cuantos === 1 ? '1 pedido' : "{$cuantos} pedidos").' por validar · '.lempiras($monto).'. Cuando bodega los valida salen de esta lista.';
     }
 
     /**

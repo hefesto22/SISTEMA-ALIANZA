@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\Rol;
 use App\Filament\Resources\Bodegas\Pages\ManageBodegas;
+use App\Filament\Resources\Clientes\ClienteResource;
 use App\Filament\Resources\Clientes\Pages\ManageClientes;
 use App\Filament\Resources\Pedidos\Pages\CreatePedido;
 use App\Filament\Resources\Rutas\Pages\ManageRutas;
@@ -209,6 +210,26 @@ test('sin marcar fuera de ruta el vendedor no puede escoger un cliente de otra r
     $undoRepeaterFake();
 
     expect(Pedido::query()->count())->toBe(0);
+});
+
+test('desde Clientes el vendedor toma el pedido con el cliente ya escogido, si es de su ruta', function (): void {
+    $enRuta = Cliente::factory()->create(['municipio_id' => $this->santaRosa->id, 'bodega_id' => $this->bodega->id]);
+    $fuera = Cliente::factory()->create(['municipio_id' => $this->sinuapa->id]);
+
+    $this->actingAs($this->vendedor);
+
+    Livewire::test(ManageClientes::class)
+        ->assertTableActionVisible('preventa', $enRuta)
+        ->assertTableActionHasUrl('preventa', ClienteResource::preventa($enRuta), $enRuta);
+
+    Livewire::withQueryParams(['cliente' => $enRuta->id])
+        ->test(CreatePedido::class)
+        ->assertFormSet(['cliente_id' => $enRuta->id]);
+
+    // Uno que no es de su ruta no queda escogido: lo busca como siempre.
+    Livewire::withQueryParams(['cliente' => $fuera->id])
+        ->test(CreatePedido::class)
+        ->assertFormSet(['cliente_id' => null]);
 });
 
 test('fuera de ruta: el pedido sale marcado y con el motivo, que es obligatorio', function (): void {

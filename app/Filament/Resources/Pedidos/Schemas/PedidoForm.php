@@ -87,6 +87,7 @@ class PedidoForm
                             ->searchable(['nombre', 'codigo', 'rtn'])
                             ->searchPrompt('Escriba nombre, código o RTN')
                             ->placeholder('Buscar cliente…')
+                            ->default(fn (): ?int => self::clienteDeLaUrl())
                             ->required()
                             ->createOptionForm(ClienteForm::components())
                             ->createOptionModalHeading('Nuevo cliente')
@@ -381,6 +382,23 @@ class PedidoForm
         }
 
         return $query;
+    }
+
+    /**
+     * "Tomar pedido" desde Clientes (?cliente=5): la preventa empieza con ese
+     * cliente escogido, si es de los que le tocan (activo y, al vendedor, de
+     * sus rutas). Si no, se escoge como siempre.
+     */
+    private static function clienteDeLaUrl(): ?int
+    {
+        $usuario = Acceso::usuario();
+        $id = request()->integer('cliente');
+
+        if ($usuario === null || $id <= 0) {
+            return null;
+        }
+
+        return Cliente::filtrarVisibles(Cliente::query()->where('activo', true), $usuario)->whereKey($id)->exists() ? $id : null;
     }
 
     /**

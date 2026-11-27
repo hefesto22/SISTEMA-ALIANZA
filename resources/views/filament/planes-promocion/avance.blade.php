@@ -133,7 +133,7 @@
                                     <span>{{ $producto }}</span>
                                 @endforeach
                                 @if (count($l['productos']) > 1)
-                                    <span class="ap-tenue">Se pueden mezclar para completar {{ explode('+', $l['mecanica'])[0] }} unidades.</span>
+                                    <span class="ap-tenue">Cada uno cuenta aparte ({{ explode('+', $l['mecanica'])[0] }} unidades del mismo producto); no se mezclan.</span>
                                 @endif
                             </div>
                         </td>

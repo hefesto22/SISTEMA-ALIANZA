@@ -13,12 +13,14 @@ use App\Models\Departamento;
 use App\Models\Municipio;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ViewColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -66,33 +68,47 @@ class ClienteResource extends Resource
     }
 
     /**
-     * En el celular cada cliente es una tarjeta compacta: nombre, dirección,
-     * teléfono (se llama con un toque) y municipio. Código, RTN, bodega y
-     * activo, solo en pantallas grandes. La bodega solo la ve administración.
+     * En el celular cada cliente es una tarjeta (filament.clientes.tarjeta):
+     * nombre, código, municipio, dirección y teléfono, con "Tomar pedido"
+     * (abre la preventa con el cliente escogido), "Llamar" y lo demás en
+     * "...". Al vendedor, tocar la tarjeta también abre la preventa. En
+     * pantallas grandes es la tabla de siempre; la bodega solo la ve
+     * administración. El vendedor solo ve los clientes activos.
      */
     public static function table(Table $table): Table
     {
+        $esVendedor = Acceso::esVendedor();
+
         return $table
             ->stackedOnMobile()
             ->extraAttributes(['class' => 'tabla-celular'])
+            ->modifyQueryUsing(fn (Builder $query): Builder => $esVendedor ? $query->where('activo', true) : $query)
             ->columns([
+                ViewColumn::make('celular')
+                    ->label('Cliente')
+                    ->view('filament.clientes.tarjeta')
+                    ->state(fn (Cliente $record): string => $record->nombre)
+                    ->hiddenFrom('md'),
                 TextColumn::make('nombre')
                     ->searchable()
                     ->sortable()
                     ->weight('bold')
                     ->description(fn (Cliente $record): ?string => $record->direccion)
-                    ->wrap(),
+                    ->wrap()
+                    ->visibleFrom('md'),
                 TextColumn::make('telefono')
                     ->label('Teléfono')
                     ->icon(Heroicon::OutlinedPhone)
-                    ->url(fn (Cliente $record): ?string => $record->telefono !== null && $record->telefono !== '' ? 'tel:'.preg_replace('/\D+/', '', $record->telefono) : null)
+                    ->url(fn (Cliente $record): ?string => self::llamar($record))
                     ->color('primary')
-                    ->placeholder('—'),
+                    ->placeholder('—')
+                    ->visibleFrom('md'),
                 TextColumn::make('municipio.nombre')
                     ->label('Municipio')
                     ->formatStateUsing(fn (string $state, Cliente $record): string => $state.', '.$record->municipio?->departamento->nombre)
                     ->placeholder('Sin zona')
-                    ->searchable(),
+                    ->searchable()
+                    ->visibleFrom('md'),
                 TextColumn::make('codigo')
                     ->label('Código')
                     ->searchable()
@@ -115,6 +131,10 @@ class ClienteResource extends Resource
                     ->visibleFrom('md'),
             ])
             ->defaultSort('nombre')
+            ->searchPlaceholder('Buscar cliente, código o RTN')
+            ->recordUrl(fn (Cliente $record): ?string => $esVendedor && $record->activo && PedidoResource::canCreate()
+                ? self::preventa($record)
+                : null)
             ->filters([
                 SelectFilter::make('bodega_id')
                     ->label('Bodega')
@@ -137,23 +157,62 @@ class ClienteResource extends Resource
                     ->toggle()
                     ->visible(fn (): bool => Acceso::veTodo()),
                 TernaryFilter::make('activo')
-                    ->default(true),
+                    ->default(true)
+                    ->visible(! $esVendedor),
             ])
             ->emptyStateDescription(fn (): ?string => Acceso::usuario()?->municipiosDeRuta() === []
                 ? 'No tiene rutas asignadas. Pida a administración que lo agregue a una ruta en Administración → Rutas.'
                 : null)
             ->recordActions([
-                Action::make('pedidos')
-                    ->label('Pedidos')
+                Action::make('preventa')
+                    ->label('Tomar pedido')
                     ->icon(Heroicon::OutlinedShoppingCart)
+                    ->button()
+                    ->url(fn (Cliente $record): string => self::preventa($record))
+                    ->visible(fn (Cliente $record): bool => $record->activo && PedidoResource::canCreate())
+                    ->extraAttributes(['class' => 'accion-principal']),
+                Action::make('llamar')
+                    ->label('Llamar')
+                    ->icon(Heroicon::OutlinedPhone)
+                    ->button()
+                    ->outlined()
                     ->color('gray')
-                    ->url(fn (Cliente $record): string => PedidoResource::getUrl('index', [
-                        'tab'     => 'todos',
-                        'filters' => ['cliente_id' => ['value' => $record->id]],
-                    ])),
-                EditAction::make()
-                    ->modalDescription(fn (Cliente $record): ?string => $record->codigo),
+                    ->url(fn (Cliente $record): ?string => self::llamar($record))
+                    ->visible(fn (Cliente $record): bool => self::llamar($record) !== null)
+                    ->extraAttributes(['class' => 'solo-celular']),
+                ActionGroup::make([
+                    Action::make('pedidos')
+                        ->label('Ver sus pedidos')
+                        ->icon(Heroicon::OutlinedClipboardDocumentList)
+                        ->url(fn (Cliente $record): string => PedidoResource::getUrl('index', [
+                            'tab'     => 'todos',
+                            'filters' => ['cliente_id' => ['value' => $record->id]],
+                        ])),
+                    EditAction::make()
+                        ->modalDescription(fn (Cliente $record): ?string => $record->codigo),
+                ])
+                    ->icon(Heroicon::EllipsisVertical)
+                    ->color('gray')
+                    ->tooltip('Más'),
             ]);
+    }
+
+    /**
+     * La preventa con este cliente ya escogido.
+     */
+    public static function preventa(Cliente $cliente): string
+    {
+        return PedidoResource::getUrl('create', ['cliente' => $cliente->id]);
+    }
+
+    /**
+     * "tel:99887766" para llamar con un toque; null sin teléfono.
+     */
+    private static function llamar(Cliente $cliente): ?string
+    {
+        $numero = preg_replace('/\D+/', '', (string) $cliente->telefono);
+
+        return $numero === null || $numero === '' ? null : 'tel:'.$numero;
     }
 
     /**

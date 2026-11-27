@@ -195,7 +195,7 @@ final class RecalcularPedido
                 $item->promocion_id = $regalo->promocion->id;
                 $item->bonificacion = true;
                 $item->precio = $regalo->presentacion->precio;
-                $item->gravado = $regalo->promocion->productoBeneficio->gravado;
+                $item->gravado = $regalo->presentacion->producto->gravado;
                 $item->setRelation('presentacion', $regalo->presentacion);
             }
 

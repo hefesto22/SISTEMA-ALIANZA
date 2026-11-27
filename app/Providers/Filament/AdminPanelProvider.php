@@ -60,7 +60,9 @@ class AdminPanelProvider extends PanelProvider
      *    texto queda en una línea, cortado con "…" si no cabe;
      *  - tabla con clase "tabla-celular" (y stackedOnMobile): en el celular
      *    cada registro sale como tarjeta compacta, sin el nombre de cada
-     *    columna arriba de su valor.
+     *    columna arriba de su valor ni "Ordenar por"; el botón con clase
+     *    "accion-principal" ocupa el ancho que sobra, y el de clase
+     *    "solo-celular" no sale en pantallas grandes.
      */
     private const ESTILO_LISTADOS = '<style>'
         .'.fi-resource-list-records-page .fi-breadcrumbs{display:none}'
@@ -68,6 +70,8 @@ class AdminPanelProvider extends PanelProvider
         .'.fi-ta-cell.celda-recortada>.fi-ta-col{min-width:0}'
         .'.fi-ta-cell.celda-recortada .fi-ta-text,.fi-ta-cell.celda-recortada .fi-ta-text>*{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
         .'.tabla-celular .fi-ta-cell-label{display:none}'
+        .'@media (max-width:767px){.tabla-celular .fi-ta-table-stacked-header-cell{display:none}.tabla-celular .fi-ta-row .fi-ta-actions{width:100%;gap:.5rem}.tabla-celular .fi-ta-row .fi-ta-actions .accion-principal{flex:1 1 auto;justify-content:center}}'
+        .'@media (min-width:768px){.tabla-celular .solo-celular{display:none!important}}'
         .'</style>';
 
     /**
