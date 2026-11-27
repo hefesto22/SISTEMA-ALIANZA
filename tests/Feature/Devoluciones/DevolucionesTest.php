@@ -191,7 +191,50 @@ test('lo que se puede devolver de cada línea, para el modal', function (): void
 
     $lineas = DevolucionAction::lineas($this->pedido);
 
+    // En qué salió cada una, cuánto queda (en unidades) y en qué se anota: la caja, además, en sueltas.
     expect(array_column($lineas, 'id'))->toBe([$this->lineaUn->id, $this->pedido->items()->where('presentacion_id', $this->cj12->id)->sole()->id])
-        ->and($lineas[0]['puede'])->toBe('7 unidades')
-        ->and($lineas[1]['puede'])->toBe('1 caja de 12');
+        ->and([$lineas[0]['salio'], $lineas[0]['puede'], $lineas[0]['sigla'], $lineas[0]['caja']])->toBe(['10 UN', 'ya devolvió 3 UN · quedan 7 UN', 'UN', false])
+        ->and([$lineas[1]['salio'], $lineas[1]['puede'], $lineas[1]['sigla'], $lineas[1]['base'], $lineas[1]['caja']])->toBe(['1 CJ12', 'son 12 UN', 'CJ12', 'UN', true]);
+});
+
+test('de una caja se devuelven unidades sueltas: se abonan y cuestan por unidad y no pasan de lo que traía la caja', function (): void {
+    $caja = $this->pedido->items()->where('presentacion_id', $this->cj12->id)->sole();
+    $antes = Existencia::de($this->bodega->id, $this->un->id);
+
+    $devolucion = app(RegistrarDevolucion::class)->ejecutar($this->pedido, TipoDevolucion::Credito, [$caja->id => ['buenas_un' => 2, 'danadas_un' => 3]], $this->encargado);
+
+    // 2 buenas regresan sueltas a la bodega; las 3 dañadas, a costo de unidad, son pérdida.
+    expect($devolucion->items->map(fn (DevolucionItem $item): array => [$item->presentacion_id, $item->cantidad, $item->danado, $item->precio, $item->subtotal, $item->costo])->all())
+        ->toBe([[$this->un->id, 2, false, 10.0, 20.0, 8.0], [$this->un->id, 3, true, 10.0, 30.0, 8.0]])
+        ->and($devolucion->total)->toBe(57.5)
+        ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe($antes + 2)
+        ->and(RegistrarDevolucion::devueltas($this->pedido)[$caja->id])->toBe(5)
+        ->and(fn () => app(RegistrarDevolucion::class)->ejecutar($this->pedido, TipoDevolucion::Credito, [$caja->id => ['buenas' => 1]], $this->encargado))
+        ->toThrow(ReglaNegocioException::class, 'hasta 7 unidades (salió 1 caja de 12 y ya devolvió 5 unidades)');
+
+    // En una línea en unidades, lo suelto es lo mismo.
+    $otra = app(RegistrarDevolucion::class)->ejecutar($this->pedido, TipoDevolucion::Credito, [$this->lineaUn->id => ['buenas_un' => 1]], $this->encargado);
+
+    expect($otra->items->sole()->cantidad)->toBe(1);
+});
+
+test('el formulario dice en qué salió cada producto y la caja se anota en cajas o en unidades sueltas', function (): void {
+    $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
+
+    Livewire::test(ViewPedido::class, ['record' => $this->pedido->getRouteKey()])
+        ->mountAction('devolucion')
+        ->assertMountedActionModalSee(['10 UN', '1 CJ12', 'son 12 UN', 'Buenas (regresan a la bodega)', 'Dañadas (pérdida)'])
+        ->fillForm([
+            'tipo'   => TipoDevolucion::Credito->value,
+            'lineas' => [1 => ['danadas_un' => 3]],
+        ])
+        ->callMountedAction()
+        ->assertHasNoActionErrors()
+        ->assertNotified();
+
+    $undoRepeaterFake();
+
+    expect(Devolucion::query()->sole()->items->map(fn (DevolucionItem $item): array => [$item->presentacion_id, $item->cantidad, $item->danado])->all())
+        ->toBe([[$this->un->id, 3, true]]);
 });

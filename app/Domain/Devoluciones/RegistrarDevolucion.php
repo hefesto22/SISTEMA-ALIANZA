@@ -17,14 +17,17 @@ use App\Models\Devolucion;
 use App\Models\DevolucionItem;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
+use App\Models\Presentacion;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
  * El cliente devuelve producto de un pedido ya entregado (impreso). Por cada
- * línea se dice cuántas regresan buenas y cuántas dañadas (en la presentación
- * de la línea; las unidades no "recuerdan" de qué caja salieron):
+ * línea se dice cuántas regresan buenas y cuántas dañadas: en la presentación
+ * de la línea (1 CJ12) y, de una línea en caja, también unidades sueltas en
+ * la presentación base (3 UN; se cobran y cuestan por unidad). Las unidades
+ * no "recuerdan" de qué caja salieron.
  *
  *  - Las buenas regresan a la bodega del pedido (kárdex "Devolución").
  *  - Las dañadas no regresan: quedan marcadas en la devolución, con su
@@ -39,8 +42,8 @@ use Illuminate\Support\Facades\DB;
  *    CAI tipo 07 de la bodega y los datos de la factura; apagado, queda como
  *    crédito interno.
  *
- * No se devuelve más de lo que salió menos lo ya devuelto. Un pedido con
- * devoluciones ya no se corrige (CorregirPedido).
+ * No se devuelve más de lo que salió menos lo ya devuelto (en unidades). Un
+ * pedido con devoluciones ya no se corrige (CorregirPedido).
  */
 final class RegistrarDevolucion
 {
@@ -53,7 +56,7 @@ final class RegistrarDevolucion
     ) {}
 
     /**
-     * @param array<int, array{buenas?: int|string|null, danadas?: int|string|null}> $lineas [id de la línea del pedido => cuántas regresan buenas y dañadas]
+     * @param array<int, array{buenas?: int|string|null, danadas?: int|string|null, buenas_un?: int|string|null, danadas_un?: int|string|null}> $lineas [id de la línea del pedido => cuántas regresan buenas y dañadas en su presentación y, de una caja, sueltas]
      * @param Pedido|null $seLeDebeA en un cambio: el pedido de otro cliente con cuyo producto ya se le dio el cambio (a ese otro se le queda debiendo)
      */
     public function ejecutar(Pedido $pedido, TipoDevolucion $tipo, array $lineas, User $usuario, ?string $motivo = null, ?Pedido $seLeDebeA = null): Devolucion
@@ -124,7 +127,8 @@ final class RegistrarDevolucion
     }
 
     /**
-     * Cuánto se ha devuelto ya de cada línea del pedido.
+     * Cuánto se ha devuelto ya de cada línea del pedido, en unidades (la
+     * presentación base): 1 CJ12 y 3 UN de una línea en caja son 15.
      *
      * @return array<int, int>
      */
@@ -132,10 +136,11 @@ final class RegistrarDevolucion
     {
         /** @var array<int, int> $devueltas */
         $devueltas = DevolucionItem::query()
-            ->whereIn('devolucion_id', Devolucion::query()->where('pedido_id', $pedido->id)->select('id'))
-            ->whereNotNull('pedido_item_id')
-            ->groupBy('pedido_item_id')
-            ->selectRaw('pedido_item_id, SUM(cantidad) AS cantidad')
+            ->join('presentaciones', 'presentaciones.id', '=', 'devolucion_items.presentacion_id')
+            ->whereIn('devolucion_items.devolucion_id', Devolucion::query()->where('pedido_id', $pedido->id)->select('id'))
+            ->whereNotNull('devolucion_items.pedido_item_id')
+            ->groupBy('devolucion_items.pedido_item_id')
+            ->selectRaw('devolucion_items.pedido_item_id, SUM(devolucion_items.cantidad * GREATEST(presentaciones.contenido, 1)) AS cantidad')
             ->pluck('cantidad', 'pedido_item_id')
             ->map(fn (mixed $cantidad): int => (int) $cantidad)
             ->all();
@@ -144,24 +149,55 @@ final class RegistrarDevolucion
     }
 
     /**
-     * Lo que regresa de cada línea, revisado: [línea, buenas, dañadas], en
-     * orden de producto y presentación (así bloquean igual que un despacho).
+     * Cuántas unidades (presentación base) quedan por devolver de la línea:
+     * lo que salió menos lo ya devuelto.
      *
-     * @param array<int, array{buenas?: int|string|null, danadas?: int|string|null}> $lineas
+     * @param array<int, int> $devueltas RegistrarDevolucion::devueltas()
+     */
+    public static function puede(PedidoItem $item, array $devueltas): int
+    {
+        return $item->cantidadFacturable() * max(1, $item->presentacion->contenido) - ($devueltas[$item->id] ?? 0);
+    }
+
+    /**
+     * En qué se cuentan las sueltas de la línea: la presentación base del
+     * producto. Null si la línea ya es en unidades o el producto no tiene base.
+     */
+    public static function sueltas(PedidoItem $item): ?Presentacion
+    {
+        if ($item->presentacion->contenido <= 1) {
+            return null;
+        }
+
+        $base = $item->producto->presentaciones->first(fn (Presentacion $presentacion): bool => $presentacion->es_base);
+
+        return $base instanceof Presentacion && $base->id !== $item->presentacion_id ? $base : null;
+    }
+
+    /**
+     * Lo que regresa de cada línea, revisado: [línea, presentación, buenas,
+     * dañadas]. De una línea en caja, las cajas van en su presentación y las
+     * sueltas en la base; de una en unidades, todo en la suya. Todo junto, en
+     * unidades, no pasa de lo que salió menos lo ya devuelto. En orden de
+     * producto y presentación (así bloquean igual que un despacho).
      *
-     * @return list<array{0: PedidoItem, 1: int, 2: int}>
+     * @param array<int, array{buenas?: int|string|null, danadas?: int|string|null, buenas_un?: int|string|null, danadas_un?: int|string|null}> $lineas
+     *
+     * @return list<array{0: PedidoItem, 1: Presentacion, 2: int, 3: int}>
      */
     private function filas(Pedido $pedido, array $lineas): array
     {
-        $items = $pedido->items()->with(['producto', 'presentacion.unidadMedida'])->get()->keyBy('id');
+        $items = $pedido->items()->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida'])->get()->keyBy('id');
         $devueltas = self::devueltas($pedido);
         $filas = [];
 
         foreach ($lineas as $id => $linea) {
             $buenas = max(0, (int) ($linea['buenas'] ?? 0));
             $danadas = max(0, (int) ($linea['danadas'] ?? 0));
+            $buenasSueltas = max(0, (int) ($linea['buenas_un'] ?? 0));
+            $danadasSueltas = max(0, (int) ($linea['danadas_un'] ?? 0));
 
-            if ($buenas + $danadas === 0) {
+            if ($buenas + $danadas + $buenasSueltas + $danadasSueltas === 0) {
                 continue;
             }
 
@@ -171,34 +207,54 @@ final class RegistrarDevolucion
                 throw new ReglaNegocioException("Uno de los productos de la devolución no es del pedido {$pedido->numero}.");
             }
 
-            $puede = $item->cantidadFacturable() - ($devueltas[$item->id] ?? 0);
+            $contenido = max(1, $item->presentacion->contenido);
+            $sueltas = self::sueltas($item);
 
-            if ($buenas + $danadas > $puede) {
+            // Una línea en unidades: lo suelto es lo mismo.
+            if ($contenido === 1) {
+                [$buenas, $danadas, $buenasSueltas, $danadasSueltas] = [$buenas + $buenasSueltas, $danadas + $danadasSueltas, 0, 0];
+            } elseif ($buenasSueltas + $danadasSueltas > 0 && $sueltas === null) {
+                throw new ReglaNegocioException("{$item->producto->descripcion} no se maneja en unidades sueltas: devuélvalo en {$item->presentacion->palabra(2)}.");
+            }
+
+            $puede = self::puede($item, $devueltas);
+            $unidad = $sueltas ?? $item->presentacion;
+
+            if (($buenas + $danadas) * $contenido + $buenasSueltas + $danadasSueltas > $puede) {
+                $devuelto = $devueltas[$item->id] ?? 0;
+
                 throw new ReglaNegocioException(sprintf(
                     'De %s se puede devolver hasta %s (salió %s%s).',
                     $item->producto->descripcion,
-                    $item->presentacion->enPalabras(max(0, $puede)),
+                    $contenido > 1 && $sueltas === null ? $item->presentacion->enPalabras(intdiv(max(0, $puede), $contenido)) : $unidad->enPalabras(max(0, $puede)),
                     $item->presentacion->enPalabras($item->cantidadFacturable()),
-                    ($devueltas[$item->id] ?? 0) > 0 ? ' y ya devolvió '.$item->presentacion->enPalabras($devueltas[$item->id]) : '',
+                    $devuelto > 0 ? ' y ya devolvió '.($contenido > 1 && $sueltas === null ? $item->presentacion->enPalabras(intdiv($devuelto, $contenido)) : $unidad->enPalabras($devuelto)) : '',
                 ));
             }
 
-            $filas[] = [$item, $buenas, $danadas];
+            if ($buenas + $danadas > 0) {
+                $filas[] = [$item, $item->presentacion, $buenas, $danadas];
+            }
+
+            if ($sueltas !== null && $buenasSueltas + $danadasSueltas > 0) {
+                $filas[] = [$item, $sueltas, $buenasSueltas, $danadasSueltas];
+            }
         }
 
         if ($filas === []) {
             throw new ReglaNegocioException('Escriba cuántas regresan (buenas o dañadas) de al menos un producto.');
         }
 
-        usort($filas, fn (array $a, array $b): int => [$a[0]->producto_id, $a[0]->presentacion_id] <=> [$b[0]->producto_id, $b[0]->presentacion_id]);
+        usort($filas, fn (array $a, array $b): int => [$a[0]->producto_id, $a[1]->id] <=> [$b[0]->producto_id, $b[1]->id]);
 
         return $filas;
     }
 
     /**
-     * Un renglón por línea y estado (buenas / dañadas), con lo que se cobró por una.
+     * Un renglón por línea, presentación y estado (buenas / dañadas), con lo
+     * que se cobró por una: lo de la línea, y por unidad si regresó suelta.
      *
-     * @param list<array{0: PedidoItem, 1: int, 2: int}> $filas
+     * @param list<array{0: PedidoItem, 1: Presentacion, 2: int, 3: int}> $filas
      */
     private function renglones(Devolucion $devolucion, array $filas): void
     {
@@ -207,9 +263,9 @@ final class RegistrarDevolucion
         $gravado = 0.0;
         $isv = 0.0;
 
-        foreach ($filas as [$item, $buenas, $danadas]) {
+        foreach ($filas as [$item, $presentacion, $buenas, $danadas]) {
             $cobradas = $item->cantidadFacturable();
-            $neto = $cobradas > 0 ? round(($item->subtotal - $item->descuento) / $cobradas, 4) : 0.0;
+            $neto = $cobradas > 0 ? round(($item->subtotal - $item->descuento) / $cobradas * $presentacion->contenido / max(1, $item->presentacion->contenido), 4) : 0.0;
 
             foreach ([[$buenas, false], [$danadas, true]] as [$cantidad, $danado]) {
                 if ($cantidad === 0) {
@@ -222,7 +278,7 @@ final class RegistrarDevolucion
                 $devolucion->items()->create([
                     'pedido_item_id'  => $item->id,
                     'producto_id'     => $item->producto_id,
-                    'presentacion_id' => $item->presentacion_id,
+                    'presentacion_id' => $presentacion->id,
                     'cantidad'        => $cantidad,
                     'danado'          => $danado,
                     'precio'          => $neto,
@@ -230,7 +286,7 @@ final class RegistrarDevolucion
                     'subtotal'        => $subtotal,
                     'isv'             => $impuesto,
                     'total'           => round($subtotal + $impuesto, 2),
-                    'costo'           => round($item->presentacion->costo, 4),
+                    'costo'           => round($presentacion->costo, 4),
                 ]);
 
                 if ($item->gravado) {
@@ -279,15 +335,15 @@ final class RegistrarDevolucion
      * Lo bueno entra a la bodega. Lo de un cambio sale cuando se sube a una
      * carga (Reposiciones).
      *
-     * @param list<array{0: PedidoItem, 1: int, 2: int}> $filas
+     * @param list<array{0: PedidoItem, 1: Presentacion, 2: int, 3: int}> $filas
      */
     private function bodega(Devolucion $devolucion, Pedido $pedido, array $filas, User $usuario): void
     {
         $nota = "DEVOLUCIÓN {$devolucion->numero} · PEDIDO {$pedido->numero}";
 
-        foreach ($filas as [$item, $buenas]) {
+        foreach ($filas as [, $presentacion, $buenas]) {
             if ($buenas > 0) {
-                $this->mover->ejecutar($pedido->bodega_id, $item->presentacion, $buenas, TipoMovimiento::Devolucion, $usuario, pedidoId: $pedido->id, nota: $nota);
+                $this->mover->ejecutar($pedido->bodega_id, $presentacion, $buenas, TipoMovimiento::Devolucion, $usuario, pedidoId: $pedido->id, nota: $nota);
             }
         }
     }

@@ -24,8 +24,11 @@ use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\FusedGroup;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 
@@ -58,8 +61,8 @@ final class DevolucionAction
             ->color('gray')
             ->visible(fn (mixed $record): bool => $record instanceof Pedido && $record->estado === EstadoPedido::Impreso && (Acceso::usuario()?->can('create', Devolucion::class) ?? false))
             ->modalHeading(fn (Pedido $record): string => "Devolución · {$record->numero} · {$record->cliente->nombre}")
-            ->modalDescription('Lo bueno regresa a la bodega; lo dañado no, queda marcado para el reporte de producto dañado. Las unidades no importan de qué caja salieron: se cuentan en la presentación de cada línea.')
-            ->modalWidth(Width::ThreeExtraLarge)
+            ->modalDescription('Anote lo que regresó de cada producto: en cajas (CJ) o en unidades sueltas (UN). Lo bueno regresa a la bodega; lo dañado no regresa: es pérdida y sale en el reporte de producto dañado.')
+            ->modalWidth(Width::FiveExtraLarge)
             ->modalSubmitActionLabel('Registrar devolución')
             ->fillForm(fn (Pedido $record): array => ['tipo' => TipoDevolucion::Cambio->value, 'entrega' => self::PROXIMA_CARGA, 'lineas' => self::lineas($record)])
             ->schema([
@@ -104,16 +107,30 @@ final class DevolucionAction
                     ->label('Lo que regresa')
                     ->table([
                         TableColumn::make('Producto'),
-                        TableColumn::make('Puede devolver')->width('140px'),
-                        TableColumn::make('Buenas')->width('100px'),
-                        TableColumn::make('Dañadas')->width('100px'),
+                        TableColumn::make('Salió')->width('150px'),
+                        TableColumn::make('Buenas (regresan a la bodega)')->width('230px'),
+                        TableColumn::make('Dañadas (pérdida)')->width('230px'),
                     ])
                     ->schema([
                         Hidden::make('id'),
-                        TextInput::make('producto')->hiddenLabel()->disabled()->dehydrated(false),
-                        TextInput::make('puede')->hiddenLabel()->disabled()->dehydrated(false),
-                        TextInput::make('buenas')->hiddenLabel()->numeric()->integer()->minValue(0)->default(0),
-                        TextInput::make('danadas')->hiddenLabel()->numeric()->integer()->minValue(0)->default(0),
+                        Hidden::make('producto')->dehydrated(false),
+                        Hidden::make('codigo')->dehydrated(false),
+                        Hidden::make('salio')->dehydrated(false),
+                        Hidden::make('puede')->dehydrated(false),
+                        Hidden::make('sigla')->dehydrated(false),
+                        Hidden::make('base')->dehydrated(false),
+                        Hidden::make('caja')->dehydrated(false),
+                        TextEntry::make('ver_producto')
+                            ->hiddenLabel()
+                            ->state(fn (Get $get): string => (string) $get('producto'))
+                            ->helperText(fn (Get $get): string => (string) $get('codigo'))
+                            ->weight(FontWeight::SemiBold),
+                        TextEntry::make('ver_salio')
+                            ->hiddenLabel()
+                            ->state(fn (Get $get): string => (string) $get('salio'))
+                            ->helperText(fn (Get $get): string => (string) $get('puede')),
+                        self::cantidades('buenas'),
+                        self::cantidades('danadas'),
                     ])
                     ->addable(false)
                     ->deletable(false)
@@ -135,8 +152,10 @@ final class DevolucionAction
                 foreach ((array) ($data['lineas'] ?? []) as $fila) {
                     if (is_array($fila) && is_numeric($fila['id'] ?? null)) {
                         $lineas[(int) $fila['id']] = [
-                            'buenas'  => is_numeric($fila['buenas'] ?? null) ? (int) $fila['buenas'] : 0,
-                            'danadas' => is_numeric($fila['danadas'] ?? null) ? (int) $fila['danadas'] : 0,
+                            'buenas'     => is_numeric($fila['buenas'] ?? null) ? (int) $fila['buenas'] : 0,
+                            'danadas'    => is_numeric($fila['danadas'] ?? null) ? (int) $fila['danadas'] : 0,
+                            'buenas_un'  => is_numeric($fila['buenas_un'] ?? null) ? (int) $fila['buenas_un'] : 0,
+                            'danadas_un' => is_numeric($fila['danadas_un'] ?? null) ? (int) $fila['danadas_un'] : 0,
                         ];
                     }
                 }
@@ -332,31 +351,78 @@ final class DevolucionAction
     }
 
     /**
-     * Las líneas que salieron y todavía se pueden devolver.
+     * Las líneas que salieron y todavía se pueden devolver, para el
+     * formulario: el producto, en qué salió ("1 CJ12"), cuánto queda por
+     * devolver ("son 12 UN"; "ya devolvió 3 UN · quedan 9 UN") y en qué se
+     * anota: la presentación de la línea (sigla) y, de una caja, las
+     * unidades sueltas (base).
      *
-     * @return list<array{id: int, producto: string, puede: string, buenas: int, danadas: int}>
+     * @return list<array{id: int, producto: string, codigo: string, salio: string, puede: string, sigla: string, base: string, caja: bool, buenas: null, danadas: null, buenas_un: null, danadas_un: null}>
      */
     public static function lineas(Pedido $pedido): array
     {
         $devueltas = RegistrarDevolucion::devueltas($pedido);
         $filas = [];
 
-        foreach ($pedido->items()->with(['producto', 'presentacion.unidadMedida'])->orderBy('id')->get() as $item) {
-            $puede = $item->cantidadFacturable() - ($devueltas[$item->id] ?? 0);
+        foreach ($pedido->items()->with(['producto.presentaciones.unidadMedida', 'presentacion.unidadMedida'])->orderBy('id')->get() as $item) {
+            $puede = RegistrarDevolucion::puede($item, $devueltas);
 
             if ($puede <= 0) {
                 continue;
             }
 
+            $sigla = $item->presentacion->sigla();
+            $sueltas = RegistrarDevolucion::sueltas($item);
+            $contenido = max(1, $item->presentacion->contenido);
+            $devuelto = $devueltas[$item->id] ?? 0;
+            // Sin base (o en unidades), lo que queda se cuenta en la presentación de la línea.
+            [$cuantas, $ya, $en] = $sueltas === null && $contenido > 1
+                ? [intdiv($puede, $contenido), intdiv($devuelto, $contenido), $sigla]
+                : [$puede, $devuelto, ($sueltas ?? $item->presentacion)->sigla()];
+
             $filas[] = [
-                'id'       => $item->id,
-                'producto' => "{$item->presentacion->sigla()} · {$item->producto->descripcion}".($item->bonificacion ? ' (regalo)' : ''),
-                'puede'    => $item->presentacion->enPalabras($puede),
-                'buenas'   => 0,
-                'danadas'  => 0,
+                'id'         => $item->id,
+                'producto'   => $item->producto->descripcion.($item->bonificacion ? ' (regalo)' : ''),
+                'codigo'     => (string) $item->producto->codigo,
+                'salio'      => number_format($item->cantidadFacturable()).' '.$sigla,
+                'puede'      => $ya > 0 ? "ya devolvió {$ya} {$en} · quedan {$cuantas} {$en}" : ($sueltas !== null ? "son {$cuantas} {$en}" : ''),
+                'sigla'      => $sigla,
+                'base'       => $sueltas?->sigla() ?? '',
+                'caja'       => $sueltas !== null,
+                'buenas'     => null,
+                'danadas'    => null,
+                'buenas_un'  => null,
+                'danadas_un' => null,
             ];
         }
 
         return $filas;
+    }
+
+    /**
+     * Buenas o dañadas de una línea: en su presentación (CJ12, UN…) y, si es
+     * una caja, también unidades sueltas (UN), juntas en la misma celda.
+     */
+    private static function cantidades(string $campo): FusedGroup
+    {
+        return FusedGroup::make([
+            TextInput::make($campo)
+                ->hiddenLabel()
+                ->numeric()
+                ->integer()
+                ->minValue(0)
+                ->placeholder('0')
+                ->suffix(fn (Get $get): string => (string) $get('sigla')),
+            TextInput::make($campo.'_un')
+                ->hiddenLabel()
+                ->numeric()
+                ->integer()
+                ->minValue(0)
+                ->placeholder('0')
+                ->suffix(fn (Get $get): string => (string) $get('base'))
+                ->visible(fn (Get $get): bool => (bool) $get('caja')),
+        ])
+            ->hiddenLabel()
+            ->columns(fn (Get $get): int => $get('caja') ? 2 : 1);
     }
 }
