@@ -23,7 +23,8 @@ use Illuminate\Database\Eloquent\Builder;
  * de cada producto (SalidaDePedido), en cada una de sus presentaciones. Lo
  * que no hay se marca "No hay" (sale 0). "Hay" es la existencia de la bodega
  * del pedido, de cada presentación (las cajas cerradas y las sueltas
- * aparte). Si las sueltas no alcanzan, bodega dice qué caja abre
+ * aparte). Si las sueltas no alcanzan, se da por hecho que se abre una
+ * caja y lo demás queda suelto: el modal la escoge solo, sin preguntar
  * (aperturas()). Bodega también puede agregar un producto que no venía en
  * el pedido (paraAgregar()).
  *
@@ -270,7 +271,7 @@ final class LineasPedido
     }
 
     /**
-     * Las cajas que bodega dijo que se abren para tener sueltas (en la fila
+     * Las cajas que el modal dio por abiertas para tener sueltas (en la fila
      * de la base de cada producto): [presentacion_id de la caja => cuántas]
      * para ValidarDespacho / CorregirPedido.
      *
@@ -338,7 +339,7 @@ final class LineasPedido
             'salio_pres' => $salio[$presentacion->id] ?? 0,
             'mueve'      => $mueve,
             'sale'       => $sale,
-            // Solo en la base: qué caja se abre y cuántas, si las sueltas no alcanzan (lo dice bodega).
+            // Solo en la base: qué caja se abre y cuántas, si las sueltas no alcanzan (la escoge el modal).
             'abrir_de'    => null,
             'abrir_cajas' => 0,
         ];

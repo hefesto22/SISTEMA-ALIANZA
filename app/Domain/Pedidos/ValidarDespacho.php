@@ -23,8 +23,9 @@ use Illuminate\Support\Facades\DB;
  * ya quede por debajo del costo (ahí el de hoy, para no vender a pérdida).
  *
  * Lo que sale se descuenta de la existencia de la bodega del pedido, cada
- * presentación de la suya. Si para las unidades sueltas hay que abrir
- * cajas, bodega dice cuáles ($abrir) y se abren antes. Con "controlar
+ * presentación de la suya. Si las unidades sueltas no alcanzan, se abre
+ * sola una caja del producto y lo que sobra queda suelto (SalidaDePedido;
+ * $abrir es la que mostró el modal). Con "controlar
  * existencias" encendido no deja sacar más de lo que hay: no se valida
  * nada y se avisa qué producto no alcanza.
  *
@@ -42,12 +43,11 @@ final class ValidarDespacho
     /**
      * @param array<int, int|string|null> $despachado [id de línea => cantidad que sale]; si falta una línea sale completa
      * @param list<array{presentacion_id: int, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en otra presentación o uno que no venía (ver AjustarLineas)
-     * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener unidades sueltas
-     * @param bool $abrirSolas si las sueltas no alcanzan, se abren solas las cajas que sobran (venta en bodega: nadie dice cuáles)
+     * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener unidades sueltas (si no viene, se abre sola la que haga falta)
      */
-    public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = [], array $abrir = [], bool $abrirSolas = false): Pedido
+    public function ejecutar(Pedido $pedido, array $despachado, User $usuario, array $nuevas = [], array $abrir = []): Pedido
     {
-        return DB::transaction(function () use ($pedido, $despachado, $usuario, $nuevas, $abrir, $abrirSolas): Pedido {
+        return DB::transaction(function () use ($pedido, $despachado, $usuario, $nuevas, $abrir): Pedido {
             $pedido = Pedido::query()->lockForUpdate()->findOrFail($pedido->id);
 
             if (! $pedido->estaPendiente()) {
@@ -65,7 +65,7 @@ final class ValidarDespacho
                 sinPerdida: $precioDelPedido,
             );
 
-            $this->salida->ejecutar($pedido, TipoMovimiento::Despacho, $usuario, abrir: $abrir, abrirSolas: $abrirSolas);
+            $this->salida->ejecutar($pedido, TipoMovimiento::Despacho, $usuario, abrir: $abrir);
 
             $pedido->forceFill([
                 'estado'       => EstadoPedido::PorImprimir,

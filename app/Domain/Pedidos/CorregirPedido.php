@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\DB;
  *
  * La existencia de la bodega se ajusta con la diferencia, por
  * presentación: lo que deja de salir regresa y lo que sale de más se
- * descuenta (si para eso hay que abrir cajas, bodega dice cuáles).
+ * descuenta (si las sueltas no alcanzan, se abre sola una caja).
  */
 final class CorregirPedido
 {
@@ -41,7 +41,7 @@ final class CorregirPedido
     /**
      * @param array<int, int|string|null> $sale [id de línea => cantidad que sale]; si falta una línea se queda como estaba
      * @param list<array{presentacion_id: int, cantidad: int}> $nuevas líneas nuevas: un producto del pedido en otra presentación o uno que no venía (ver AjustarLineas)
-     * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener unidades sueltas
+     * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener unidades sueltas (si no viene, se abre sola la que haga falta)
      */
     public function ejecutar(Pedido $pedido, array $sale, User $usuario, ?string $motivo = null, array $nuevas = [], array $abrir = []): Pedido
     {

@@ -90,6 +90,6 @@ final class VentaEnBodega
      */
     public function validar(Pedido $pedido, User $usuario): Pedido
     {
-        return $this->validar->ejecutar($pedido, [], $usuario, abrirSolas: true);
+        return $this->validar->ejecutar($pedido, [], $usuario);
     }
 }

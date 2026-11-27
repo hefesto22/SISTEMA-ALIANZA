@@ -6,6 +6,7 @@ use App\Domain\Exceptions\ReglaNegocioException;
 use App\Domain\Inventario\AbrirCaja;
 use App\Domain\Inventario\Disponible;
 use App\Domain\Inventario\RegistrarCompra;
+use App\Domain\Pedidos\CorregirPedido;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
 use App\Domain\Precios\CalculadoraPrecio;
@@ -68,7 +69,7 @@ test('10 CJ48 a 312, 10 CJ32 a 315 y 5 UN a 9 en la misma compra: un costo por u
         ->and($this->jabon->fresh()?->existenciaPorPresentacion(Existencia::porPresentacion($this->bodega->id, $this->jabon->id)))->toBe('10 CJ48 · 10 CJ32 · 5 UN');
 });
 
-test('al despachar sueltas que no alcanzan se abre la caja que dice bodega: sus unidades pasan a las sueltas y nada cambia de costo', function (): void {
+test('al despachar sueltas que no alcanzan se abre la caja que dio el modal: sus unidades pasan a las sueltas y nada cambia de costo', function (): void {
     app(RegistrarCompra::class)->ejecutar($this->bodega, $this->jabon->proveedor, [
         ['producto_id' => $this->jabon->id, 'presentacion_id' => $this->cj48->id, 'cantidad' => 10, 'costo' => 312.0],
         ['producto_id' => $this->jabon->id, 'presentacion_id' => $this->cj32->id, 'cantidad' => 10, 'costo' => 315.0],
@@ -84,7 +85,7 @@ test('al despachar sueltas que no alcanzan se abre la caja que dice bodega: sus 
     $pedido->items()->create(['producto_id' => $this->jabon->id, 'presentacion_id' => $this->un->id, 'cantidad' => 8]);
     app(RecalcularPedido::class)->ejecutar($pedido);
 
-    // Hay 5 sueltas y salen 8: bodega abre 1 CJ48.
+    // Hay 5 sueltas y salen 8: el modal da por abierta 1 CJ48.
     $historial = CambioPrecio::query()->count();
     app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado, abrir: [$this->cj48->id => 1]);
 
@@ -107,6 +108,37 @@ test('al despachar sueltas que no alcanzan se abre la caja que dice bodega: sus 
             [TipoMovimiento::Apertura, $this->un->id, 48, $costo],
             [TipoMovimiento::Despacho, $this->un->id, -8, $costo],
         ]);
+});
+
+test('hay 10 cajas y ninguna suelta: salen 6 unidades sin que nadie diga nada, se abre una caja y las demás quedan sueltas; al corregir, igual', function (): void {
+    Configuracion::actual()->update(['controlar_existencias' => true]);
+    app(RegistrarCompra::class)->ejecutar($this->bodega, $this->jabon->proveedor, [
+        ['producto_id' => $this->jabon->id, 'presentacion_id' => $this->cj48->id, 'cantidad' => 10, 'costo' => 312.0],
+    ], $this->admin);
+
+    $pedido = Pedido::query()->create([
+        'bodega_id'   => $this->bodega->id,
+        'cliente_id'  => Cliente::factory()->create(['bodega_id' => $this->bodega->id])->id,
+        'vendedor_id' => $this->vendedor->id,
+        'fecha'       => now(),
+    ]);
+    $linea = $pedido->items()->create(['producto_id' => $this->jabon->id, 'presentacion_id' => $this->un->id, 'cantidad' => 6]);
+    app(RecalcularPedido::class)->ejecutar($pedido);
+
+    app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
+
+    $aperturas = fn (): array => MovimientoInventario::query()->where('pedido_id', $pedido->id)->where('tipo', TipoMovimiento::Apertura)->orderBy('id')->get()
+        ->map(fn (MovimientoInventario $m): array => [$m->presentacion_id, $m->cantidad])->all();
+
+    // 9 cajas cerradas y 48 − 6 = 42 sueltas.
+    expect([Existencia::de($this->bodega->id, $this->cj48->id), Existencia::de($this->bodega->id, $this->un->id)])->toBe([9, 42])
+        ->and($aperturas())->toBe([[$this->cj48->id, -1], [$this->un->id, 48]]);
+
+    // Se corrige a 50: salen 44 más y hay 42 sueltas; se abre otra caja sola.
+    app(CorregirPedido::class)->ejecutar($pedido, [$linea->id => 50], $this->encargado, 'Pidió más');
+
+    expect([Existencia::de($this->bodega->id, $this->cj48->id), Existencia::de($this->bodega->id, $this->un->id)])->toBe([8, 46])
+        ->and($aperturas())->toHaveCount(4);
 });
 
 test('con "último costo" la compra de una caja deja la unidad a lo que costó ahí; abrirla no lo cambia', function (): void {

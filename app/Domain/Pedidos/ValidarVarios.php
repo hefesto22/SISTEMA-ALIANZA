@@ -81,7 +81,7 @@ final class ValidarVarios
             }
 
             try {
-                $validados[] = $this->validar->ejecutar($pedido, $sale === $pidio ? [] : $sale, $usuario, abrirSolas: true);
+                $validados[] = $this->validar->ejecutar($pedido, $sale === $pidio ? [] : $sale, $usuario);
 
                 if ($sale !== $pidio) {
                     $incompletos[] = $numero;
@@ -109,7 +109,7 @@ final class ValidarVarios
             }
 
             try {
-                $validados[] = $this->validar->ejecutar($pedido, $alcanza, $usuario, abrirSolas: true);
+                $validados[] = $this->validar->ejecutar($pedido, $alcanza, $usuario);
                 $incompletos[] = $numero;
 
                 if (isset($quedan[$bodega])) {

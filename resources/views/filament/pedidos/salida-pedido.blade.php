@@ -8,19 +8,21 @@
         ya sale), con su sigla ("CJ12", "UN"): se cambia ahí mismo.
       - Producto: el nombre, el código y lo que pidió; si cambió, en palabras
         debajo ("Falta 1 CJ12", "3 UN de más", "No sale", "Agregado").
-      - Bodega: si alcanza (verde), si hay que abrir una caja (ámbar, "Abrir 1
-        CJ12"), si falta (rojo, "Faltan 3 UN") o, al corregir, si regresa; y
-        debajo lo que hay. En el teléfono va debajo del nombre.
+      - Bodega: si alcanza (verde), si falta (rojo, "Faltan 3 UN") o, al
+        corregir, si regresa; y debajo lo que hay. En el teléfono va debajo
+        del nombre. Si las unidades sueltas no alcanzan pero hay cajas
+        cerradas, alcanza: se da por hecho que se abre una (la más chica que
+        alcanza) y las demás unidades quedan sueltas; no se pregunta ni se
+        avisa (va en la fila de la base, abrir_de y abrir_cajas, y el
+        servidor abre esa; si no viene, abre sola la que haga falta).
       - "No hay" lo deja en 0; "Sí hay", como se pidió; "Quitar", uno agregado.
     Al tocar el nombre (o la flecha) se abre el detalle: si cambió, en palabras; un contador por cada
     presentación que se vende (CJ12, CJ8, UN…; para mandar en otra
-    presentación), con lo que pidió debajo; si las sueltas no alcanzan,
-    un aviso "Se abre 1 caja de 12" con el porqué (bodega puede escoger otra
-    caja; viene la más chica que alcanza); si no alcanza, un aviso en rojo; y
+    presentación), con lo que pidió debajo; si no alcanza, un aviso en rojo; y
     la bodega en palabras: lo que hay, lo que mueve al guardar (corregir) y lo
-    que queda. Con más de 6 productos, filtros: todos, con cambios, no
-    alcanza. Abajo, un resumen de lo que no va completo, de lo que va de más,
-    de las cajas que se abren y de lo agregado.
+    que queda (ya con la caja abierta, si hizo falta). Con más de 6
+    productos, filtros: todos, con cambios, no alcanza. Abajo, un resumen de
+    lo que no va completo, de lo que va de más y de lo agregado.
 
     "Agregar otro producto" (arriba): un botón que abre el buscador (así al
     abrir el modal no salta el teclado del teléfono). Busca un producto
@@ -149,14 +151,12 @@
             .sp-chip.sp-chip-nuevo { color: var(--success-700); background: color-mix(in oklab, var(--success-500) 14%, transparent); }
             .dark .sp-chip.sp-chip-nuevo { color: var(--success-300); }
 
-            /* Bodega: ¿alcanza? (verde), hay que abrir una caja (ámbar), falta (rojo); abajo lo que hay. */
+            /* Bodega: ¿alcanza? (verde), falta (rojo), regresa (azul); abajo lo que hay. */
             .sp-corta-bodega { grid-area: bodega; min-width: 0; display: grid; justify-items: end; gap: 0.15rem; text-align: end; }
             .sp-b { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
             .sp-b-icono { flex-shrink: 0; width: 1rem; height: 1rem; }
             .sp-b-ok { color: var(--success-600); }
             .dark .sp-b-ok { color: var(--success-400); }
-            .sp-b-abrir { color: var(--warning-600); }
-            .dark .sp-b-abrir { color: var(--warning-400); }
             .sp-b-falta { color: var(--danger-600); }
             .dark .sp-b-falta { color: var(--danger-400); }
             .sp-b-regresa { color: var(--info-600); }
@@ -178,18 +178,13 @@
             .sp-info b { font-weight: 700; color: var(--gray-800); font-variant-numeric: tabular-nums; }
             .dark .sp-info b { color: var(--gray-100); }
 
-            /* Avisos de la fila abierta: se abre una caja (ámbar), no alcanza (rojo). */
+            /* Aviso de la fila abierta: no alcanza (rojo). */
             .sp-nota { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.8rem; line-height: 1.4; }
             .sp-nota > svg { flex-shrink: 0; width: 1.15rem; height: 1.15rem; margin-top: 0.05rem; }
             .sp-nota-texto { display: grid; gap: 0.2rem; min-width: 0; }
             .sp-nota-texto strong { font-size: 0.85rem; font-weight: 800; }
-            .sp-nota-abrir { color: var(--warning-800); background: color-mix(in oklab, var(--warning-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--warning-500) 40%, transparent); }
-            .dark .sp-nota-abrir { color: var(--warning-300); }
             .sp-nota-falta { color: var(--danger-800); background: color-mix(in oklab, var(--danger-500) 10%, transparent); outline: 1px solid color-mix(in oklab, var(--danger-500) 40%, transparent); }
             .dark .sp-nota-falta { color: var(--danger-300); }
-            .sp-otra-caja { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.15rem; font-weight: 600; }
-            .sp-otra-caja select { height: 2rem; padding: 0 1.75rem 0 0.5rem; border-radius: 0.4rem; border: 0; font: inherit; font-weight: 700; color: inherit; background-color: #fff; outline: 1px solid color-mix(in oklab, var(--warning-500) 45%, transparent); }
-            .dark .sp-otra-caja select { background-color: var(--gray-900); }
 
             .sp-estado { font-size: 0.78rem; font-weight: 700; color: var(--warning-600); }
             .dark .sp-estado { color: var(--warning-400); }
@@ -582,7 +577,7 @@
                 return this.opcionesAbrir(grupo).find((fila) => this.n(fila.presentacion_id) === this.n(base?.abrir_de)) ?? null
             },
 
-            {{-- Cuántas de la caja escogida se abren: las que hacen falta para las sueltas (hasta las que hay). --}}
+            {{-- Cuántas de esa caja se abren: las que hacen falta para las sueltas (hasta las que hay). --}}
             cajasPorAbrir(grupo) {
                 const caja = this.cajaElegida(grupo)
                 const faltan = this.faltanSueltas(grupo)
@@ -594,7 +589,7 @@
                 return Math.min(this.libres(caja), Math.ceil(faltan / Math.max(1, this.n(caja.contenido))))
             },
 
-            {{-- Deja en la fila de las sueltas qué caja se abre y cuántas (es lo que va al servidor). Si bodega no ha escogido una que sirva, sugiere la más chica que alcanza (o la que más trae). --}}
+            {{-- Deja en la fila de las sueltas qué caja se abre y cuántas (es lo que va al servidor), sin preguntar: una sola de la más chica que alcanza; si ninguna alcanza sola, de la más chica que alcanza con varias (o de la más grande). Como App\Domain\Inventario\AbrirSiFaltan. --}}
             ajustarApertura(grupo) {
                 const base = this.baseDe(grupo)
 
@@ -610,25 +605,17 @@
                     return
                 }
 
-                if (! opciones.some((fila) => this.n(fila.presentacion_id) === this.n(base.abrir_de))) {
-                    const alcanza = [...opciones].reverse().find((fila) => this.libres(fila) * this.n(fila.contenido) >= this.faltanSueltas(grupo))
-                    base.abrir_de = this.n((alcanza ?? opciones[0]).presentacion_id)
-                }
+                const faltan = this.faltanSueltas(grupo)
+                const chicas = [...opciones].reverse()
+                const una = chicas.find((fila) => this.n(fila.contenido) >= faltan)
+                const varias = chicas.find((fila) => this.libres(fila) * this.n(fila.contenido) >= faltan)
 
+                base.abrir_de = this.n((una ?? varias ?? opciones[0]).presentacion_id)
                 base.abrir_cajas = this.cajasPorAbrir(grupo)
             },
 
             ajustarAperturas() {
                 this.grupos().forEach((grupo) => this.ajustarApertura(grupo))
-            },
-
-            elegirCaja(grupo, id) {
-                const base = this.baseDe(grupo)
-
-                if (base) {
-                    base.abrir_de = this.n(id)
-                    this.ajustarApertura(grupo)
-                }
             },
 
             {{-- Cuánto queda de esa presentación: lo que hay − lo que sale; las cajas que se abren salen y sus unidades entran a las sueltas. --}}
@@ -686,11 +673,10 @@
                 return partes.join(' y ')
             },
 
-            {{-- La columna Bodega: si alcanza (verde), si hay que abrir una caja (ámbar), si falta (rojo) o, al corregir, si regresa. --}}
+            {{-- La columna Bodega: si alcanza (verde; también si para las sueltas se abre una caja), si falta (rojo) o, al corregir, si regresa. --}}
             bodegaClase(grupo) {
                 if (! grupo.info.mueve) return ''
                 if (this.noAlcanza(grupo)) return 'sp-b-falta'
-                if (this.aperturaTexto(grupo) !== '') return 'sp-b-abrir'
                 if (! this.paraValidar && this.cambio(grupo) < 0) return 'sp-b-regresa'
                 if (this.total(grupo) > 0 && (this.paraValidar || this.cambio(grupo) > 0)) return 'sp-b-ok'
 
@@ -702,7 +688,6 @@
 
                 switch (this.bodegaClase(grupo)) {
                     case 'sp-b-falta': return (faltan.length === 1 && this.quedanDe(grupo, faltan[0]) === -1 ? 'Falta ' : 'Faltan ') + this.faltaTexto(grupo)
-                    case 'sp-b-abrir': return 'Abrir ' + this.cajasPorAbrir(grupo) + ' ' + (this.cajaElegida(grupo)?.sigla ?? '')
                     case 'sp-b-regresa': return 'Regresa'
                     case 'sp-b-ok': return 'Alcanza'
                     default: return ''
@@ -738,18 +723,6 @@
                 return texto.charAt(0).toUpperCase() + texto.slice(1)
             },
 
-            {{-- "Solo hay 2 unidades sueltas y salen 5." / "No hay unidades sueltas y salen 5." --}}
-            razonAbrir(grupo) {
-                const base = this.baseDe(grupo)
-
-                if (! base) return ''
-
-                const hay = Math.max(0, this.n(base.hay_pres))
-                const sueltas = hay === 0 ? 'No hay ' + base.plural + ' sueltas' : 'Solo hay ' + this.palabras(hay, base) + ' sueltas'
-
-                return sueltas + ' y salen ' + this.cambioDe(base) + (this.paraValidar ? '' : ' más') + '.'
-            },
-
             {{-- "faltan 3 unidades" / "falta 1 caja de 12". --}}
             faltaFrase(grupo) {
                 const faltan = this.filasDe(grupo).filter((fila) => this.cambioDe(fila) > 0 && this.quedanDe(grupo, fila) < 0)
@@ -766,23 +739,12 @@
                     .join(' · ')
             },
 
-            aperturaTexto(grupo) {
-                const caja = this.cajaElegida(grupo)
-
-                return caja && this.cajasPorAbrir(grupo) > 0 ? 'abre ' + this.cajasPorAbrir(grupo) + ' ' + caja.sigla : ''
-            },
-
             cambio(grupo) {
                 return this.filasDe(grupo).reduce((suma, fila) => suma + this.cambioDe(fila) * Math.max(1, this.n(fila.contenido)), 0)
             },
 
             noAlcanza(grupo) {
                 return grupo.info.mueve && this.faltaTexto(grupo) !== ''
-            },
-
-            {{-- Para el resumen de abajo: las cajas que se abren. --}}
-            aperturas() {
-                return this.grupos().filter((grupo) => this.aperturaTexto(grupo) !== '')
             },
 
             {{-- Como PedidoItem: "No sale: pidió 2 cajas de 12", "No va completo: falta 1 caja de 12 (pidió 3)", "Va de más: …"; vacío si va justo. --}}
@@ -987,7 +949,6 @@
                         <span class="sp-corta-bodega" x-show="grupo.info.mueve">
                             <span class="sp-b" x-show="bodegaClase(grupo) !== ''" x-bind:class="bodegaClase(grupo)">
                                 {{ svg('heroicon-m-check-circle', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-ok'"]) }}
-                                {{ svg('heroicon-m-cube', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-abrir'"]) }}
                                 {{ svg('heroicon-m-exclamation-triangle', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-falta'"]) }}
                                 {{ svg('heroicon-m-arrow-uturn-left', 'sp-b-icono', ['x-show' => "bodegaClase(grupo) === 'sp-b-regresa'"]) }}
                                 <span x-text="bodegaTexto(grupo)"></span>
@@ -1046,23 +1007,6 @@
                             </div>
                         </div>
 
-                        {{-- Las sueltas no alcanzan: se abre una caja (bodega puede escoger cuál). --}}
-                        <div class="sp-nota sp-nota-abrir" x-show="cajasPorAbrir(grupo) > 0" x-cloak>
-                            {{ svg('heroicon-m-cube') }}
-                            <div class="sp-nota-texto">
-                                <strong x-text="(cajasPorAbrir(grupo) === 1 ? 'Se abre ' : 'Se abren ') + palabras(cajasPorAbrir(grupo), cajaElegida(grupo) ?? {})"></strong>
-                                <span x-text="razonAbrir(grupo)"></span>
-                                <label class="sp-otra-caja" x-show="opcionesAbrir(grupo).length > 1">
-                                    <span>Caja que se abre:</span>
-                                    <select x-on:change="elegirCaja(grupo, $event.target.value)">
-                                        <template x-for="caja in opcionesAbrir(grupo)" x-bind:key="'abrir-' + caja.presentacion_id">
-                                            <option x-bind:value="caja.presentacion_id" x-bind:selected="n(caja.presentacion_id) === n(baseDe(grupo)?.abrir_de)" x-text="mayuscula(caja.singular) + ' (hay ' + libres(caja) + ')'"></option>
-                                        </template>
-                                    </select>
-                                </label>
-                            </div>
-                        </div>
-
                         {{-- No alcanza en la bodega. --}}
                         <div class="sp-nota sp-nota-falta" x-show="noAlcanza(grupo)" x-cloak>
                             {{ svg('heroicon-m-exclamation-triangle') }}
@@ -1100,15 +1044,6 @@
             <ul>
                 <template x-for="fila in deMas()" x-bind:key="'mas-' + fila.presentacion_id">
                     <li><b x-text="sigla(fila) + ' · ' + (fila.descripcion ?? fila.producto)"></b> — <span x-text="estadoCorto(fila)"></span></li>
-                </template>
-            </ul>
-        </div>
-
-        <div class="sp-incompletas sp-de-mas" x-show="aperturas().length > 0" x-cloak>
-            <strong>Cajas que se abren</strong>
-            <ul>
-                <template x-for="grupo in aperturas()" x-bind:key="'abre-' + grupo.id">
-                    <li><b x-text="grupo.info.descripcion ?? grupo.info.producto"></b> — <span x-text="(cajasPorAbrir(grupo) === 1 ? 'se abre ' : 'se abren ') + palabras(cajasPorAbrir(grupo), cajaElegida(grupo) ?? {})"></span></li>
                 </template>
             </ul>
         </div>

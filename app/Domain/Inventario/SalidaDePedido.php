@@ -18,11 +18,12 @@ use App\Models\User;
  * despacha; al corregir, solo la diferencia (si sale menos, regresa).
  *
  * Cada presentación sale de SU existencia: las CJ48 de las CJ48 y las UN de
- * las sueltas, con el costo de ese momento. Si para las sueltas hay que
- * abrir cajas, quien despacha dice cuáles ($abrir) y se abren antes de
- * sacar (AbrirCaja). Los regalos de promociones (bonificación) no los
- * escribe nadie: si las sueltas no alcanzan para ellos, se abre sola la
- * caja más chica del producto que sobre y alcance (abrirParaRegalos).
+ * las sueltas, con el costo de ese momento. Si las sueltas no alcanzan, se
+ * da por hecho que se abre una caja del producto y lo que sobra queda
+ * suelto: nadie tiene que decirlo. Primero las que vienen en $abrir (las
+ * que mostró el modal de Validar o Corregir) y, si todavía no alcanzan, la
+ * más chica que sobre y alcance (abrirSiNoAlcanzan, AbrirSiFaltan), también
+ * para los regalos de las promociones.
  *
  * Un movimiento por presentación aunque venga en varias líneas. Se procesan
  * en orden de producto y presentación para que dos despachos al mismo
@@ -39,14 +40,13 @@ final class SalidaDePedido
     /**
      * @param array<int, int> $antes lo que ya había salido por presentación (al corregir)
      * @param array<int, int> $abrir [presentacion_id de la caja => cuántas se abren] para tener sueltas
-     * @param bool $abrirSolas para todas las sueltas (no solo los regalos), se abren solas las cajas que sobran
      */
-    public function ejecutar(Pedido $pedido, TipoMovimiento $tipo, User $usuario, array $antes = [], array $abrir = [], bool $abrirSolas = false): void
+    public function ejecutar(Pedido $pedido, TipoMovimiento $tipo, User $usuario, array $antes = [], array $abrir = []): void
     {
         $pedido->loadMissing(['items.presentacion.unidadMedida', 'items.producto']);
 
         $this->abrir($pedido, $abrir, $usuario);
-        $this->abrirParaRegalos($pedido, $usuario, $antes, $abrirSolas);
+        $this->abrirSiNoAlcanzan($pedido, $usuario, $antes);
 
         $ahora = self::porPresentacion($pedido);
         $ids = array_unique([...array_keys($antes), ...array_keys($ahora)]);
@@ -156,26 +156,33 @@ final class SalidaDePedido
     }
 
     /**
-     * Si las sueltas de la bodega no alcanzan para lo que sale de regalo en
-     * la base (UN), abre solas las cajas del producto que sobran (AbrirSiFaltan).
-     * Con $todas, para todo lo que sale suelto (venta en bodega). Sin cajas
-     * que sobren no abre nada (sin controlar existencias, las sueltas quedan
-     * en negativo).
+     * Si las sueltas de la bodega no alcanzan para lo que sale en la base
+     * (UN), con lo que se cobra y los regalos, abre solas las cajas del
+     * producto que sobran (AbrirSiFaltan: una de la más chica que alcance;
+     * en el kárdex dice "(REGALO)" si de ese producto solo salen regalos).
+     * Solo para lo que sale con este pedido (si ya estaban en negativo, no
+     * se abre de más para cubrir eso). Sin cajas que sobren no abre nada
+     * (sin controlar existencias, las sueltas quedan en negativo).
      *
      * @param array<int, int> $antes lo que ya había salido por presentación (al corregir)
      */
-    private function abrirParaRegalos(Pedido $pedido, User $usuario, array $antes, bool $todas = false): void
+    private function abrirSiNoAlcanzan(Pedido $pedido, User $usuario, array $antes): void
     {
-        $regalos = [];
+        $bases = [];
+        $seCobran = [];
 
         /** @var PedidoItem $item */
         foreach ($pedido->items as $item) {
-            if (($item->bonificacion || $todas) && $item->presentacion->es_base && $item->cantidadFacturable() > 0) {
-                $regalos[$item->producto_id] = $item->presentacion;
+            if ($item->presentacion->es_base && $item->cantidadFacturable() > 0) {
+                $bases[$item->producto_id] = $item->presentacion;
+
+                if (! $item->bonificacion) {
+                    $seCobran[$item->producto_id] = true;
+                }
             }
         }
 
-        if ($regalos === []) {
+        if ($bases === []) {
             return;
         }
 
@@ -186,13 +193,13 @@ final class SalidaDePedido
             $salen[$presentacionId] = $cantidad - ($antes[$presentacionId] ?? 0);
         }
 
-        foreach ($regalos as $productoId => $base) {
-            $deRegalo = (int) $pedido->items
-                ->filter(fn (PedidoItem $item): bool => ($item->bonificacion || $todas) && $item->presentacion_id === $base->id)
-                ->sum(fn (PedidoItem $item): int => $item->cantidadFacturable());
-            $falta = min($deRegalo, ($salen[$base->id] ?? 0) - Existencia::de($pedido->bodega_id, $base->id));
+        foreach ($bases as $productoId => $base) {
+            $sale = $salen[$base->id] ?? 0;
+            $falta = min($sale, $sale - Existencia::de($pedido->bodega_id, $base->id));
 
-            $this->abrirSiFaltan->ejecutar($pedido->bodega_id, $productoId, $falta, $usuario, $pedido->id, $todas ? "PEDIDO {$pedido->numero}" : "PEDIDO {$pedido->numero} (REGALO)", $salen);
+            $nota = "PEDIDO {$pedido->numero}".(isset($seCobran[$productoId]) ? '' : ' (REGALO)');
+
+            $this->abrirSiFaltan->ejecutar($pedido->bodega_id, $productoId, $falta, $usuario, $pedido->id, $nota, $salen);
         }
     }
 }

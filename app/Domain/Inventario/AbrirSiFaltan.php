@@ -13,7 +13,8 @@ use App\Models\User;
  * producto en una bodega, cuando nadie dice cuál: la más chica que sobre (la
  * que no sale entera en la misma operación) y alcance; si ninguna alcanza
  * sola, de las más grandes las que hagan falta. Sin cajas que sobren no abre
- * nada. La usan los regalos de promociones y los cambios de una devolución.
+ * nada. La usan la salida de los pedidos (SalidaDePedido) y los cambios de
+ * una devolución.
  * Se llama dentro de una transacción.
  */
 final class AbrirSiFaltan

@@ -349,7 +349,7 @@ test('controlando la existencia no se despacha más de lo que hay; con lo que al
         ->and($pedido->fresh()?->estado)->toBe(EstadoPedido::PorImprimir);
 });
 
-test('controlando la existencia, las sueltas que faltan salen de la caja que bodega dice que se abre', function (): void {
+test('controlando la existencia, si las sueltas no alcanzan se abre sola una caja de las que quedan', function (): void {
     Configuracion::actual()->update(['controlar_existencias' => true]);
     contar($this->bodega, $this->caja, 2, $this->admin);
     contar($this->bodega, $this->base, 3, $this->admin);
@@ -359,17 +359,14 @@ test('controlando la existencia, las sueltas que faltan salen de la caja que bod
         [$this->producto, 1, 5],
     ]);
 
-    // Sin abrir caja no alcanzan las sueltas (hay 3 y salen 5).
-    expect(fn () => app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado))
-        ->toThrow(ReglaNegocioException::class, 'No alcanza');
-
     // El modal deja salir todo: las 2 sueltas que faltan salen de la caja que queda.
     $filas = LineasPedido::datos($pedido, segunExistencia: true)['items'];
 
     expect(array_column($filas, 'sale'))->toBe([1, 5])
         ->and(LineasPedido::aperturas(['items' => [['abrir_de' => $this->caja->id, 'abrir_cajas' => 1], ['abrir_de' => null, 'abrir_cajas' => 0]]]))->toBe([$this->caja->id => 1]);
 
-    app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado, abrir: [$this->caja->id => 1]);
+    // Hay 3 sueltas y salen 5: nadie dice qué caja se abre; se abre sola la CJ12 que no sale.
+    app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
 
     $abiertas = MovimientoInventario::query()->where('pedido_id', $pedido->id)->where('tipo', TipoMovimiento::Apertura)->orderBy('id')->get();
 
