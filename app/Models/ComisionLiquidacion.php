@@ -26,6 +26,7 @@ use Illuminate\Support\Carbon;
  * @property string $grupo
  * @property float $venta
  * @property float $anulado
+ * @property float $devuelto lo que se descontó por devoluciones con crédito
  * @property float $base
  * @property float $base_antes
  * @property float $pagado_antes
@@ -53,6 +54,7 @@ class ComisionLiquidacion extends Model
         'grupo',
         'venta',
         'anulado',
+        'devuelto',
         'base',
         'base_antes',
         'pagado_antes',
@@ -73,6 +75,7 @@ class ComisionLiquidacion extends Model
         return [
             'venta'         => 'float',
             'anulado'       => 'float',
+            'devuelto'      => 'float',
             'base'          => 'float',
             'base_antes'    => 'float',
             'pagado_antes'  => 'float',

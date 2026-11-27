@@ -115,6 +115,10 @@
                     @if ($fila->anulado != 0.0)
                         <div class="rp-nota">Se descontaron {{ lempiras($fila->anulado) }} de facturas ya pagadas que se anularon.</div>
                     @endif
+
+                    @if ($fila->devuelto != 0.0)
+                        <div class="rp-nota">Se descontaron {{ lempiras($fila->devuelto) }} de devoluciones con crédito (se le devolvió el dinero al cliente).</div>
+                    @endif
                 </article>
             @endforeach
         </section>

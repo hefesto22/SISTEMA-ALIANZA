@@ -11,11 +11,14 @@ use Illuminate\Support\Carbon;
 /**
  * Qué se pagó de cada factura al cerrar un periodo, por grupo (sin grupo:
  * lo que no paga comisión). tipo "venta" = entró en ese cierre; "anulada"
- * = se descontó (neta negativa) porque la anularon después de pagarla.
+ * = se descontó (neta negativa) porque la anularon después de pagarla;
+ * "devolucion" = se descontó una devolución con crédito de esa factura
+ * (devolucion_id, neta negativa).
  *
  * @property int $id
  * @property int $comision_periodo_id
  * @property int $factura_id
+ * @property int|null $devolucion_id la devolución con crédito que se descontó (tipo "devolucion")
  * @property int $vendedor_id
  * @property int|null $comision_grupo_id
  * @property string $tipo
@@ -30,12 +33,16 @@ class ComisionFactura extends Model
 
     public const ANULADA = 'anulada';
 
+    /** Devolución con crédito de una factura del periodo (o ya pagada): se descuenta. */
+    public const DEVOLUCION = 'devolucion';
+
     protected $table = 'comision_facturas';
 
     /** @var list<string> */
     protected $fillable = [
         'comision_periodo_id',
         'factura_id',
+        'devolucion_id',
         'vendedor_id',
         'comision_grupo_id',
         'tipo',

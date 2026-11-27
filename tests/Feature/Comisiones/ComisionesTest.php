@@ -11,7 +11,9 @@ use App\Domain\Comisiones\GuardarMetaComision;
 use App\Domain\Comisiones\PeriodoComision;
 use App\Domain\Comisiones\ReabrirPeriodoComision;
 use App\Domain\Comisiones\ResumenVendedor;
+use App\Domain\Devoluciones\RegistrarDevolucion;
 use App\Domain\Exceptions\ReglaNegocioException;
+use App\Domain\Facturacion\AnularFactura;
 use App\Domain\Pedidos\CorregirPedido;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarDespacho;
@@ -20,6 +22,7 @@ use App\Domain\Reportes\Periodo;
 use App\Enums\FrecuenciaComision;
 use App\Enums\ModoImpresion;
 use App\Enums\Rol;
+use App\Enums\TipoDevolucion;
 use App\Exports\ComisionesExcel;
 use App\Filament\Pages\Comisiones;
 use App\Filament\Pages\KpisVentas as PaginaKpis;
@@ -51,7 +54,9 @@ use Maatwebsite\Excel\Facades\Excel;
  * descuentos): se paga el % del escalón alcanzado sobre toda la venta del
  * grupo. Quincenal (1-14 y 15-fin de mes) o mensual; al cerrar queda lo
  * pagado y lo anulado después se descuenta en el siguiente. La meta es del
- * mes: la primera quincena es adelanto y la segunda completa el mes.
+ * mes: la primera quincena es adelanto y la segunda completa el mes. Las
+ * devoluciones con crédito bajan la venta (se paga del 1 al 5 del mes
+ * siguiente para descontarlas); las de después del cierre, en el siguiente.
  *
  * LIMPIEZA: 0.5% desde 0, 1% desde 800, 2% desde 1,000 (montos chicos para
  * las cuentas). El jabón (LIMPIEZA, gravado) a L 100 sin ISV; el arroz
@@ -286,6 +291,78 @@ test('al cerrar queda lo pagado; lo que se anula después se descuenta en el sig
 
     // Ya descontada: no se vuelve a descontar.
     expect((new ComisionesDelPeriodo(quincena('2026-12-01')))->anuladas())->toBe(0);
+});
+
+test('las devoluciones con crédito bajan la venta: las del mes si se registran antes de cerrar (del 1 al 5) y las de después en el siguiente cierre; un cambio no', function (): void {
+    Configuracion::actual()->update(['notas_credito' => false, 'comision_frecuencia' => FrecuenciaComision::Mensual]);
+    $noviembre = PeriodoComision::para(CarbonImmutable::parse('2026-11-01'), FrecuenciaComision::Mensual, 14);
+    $pedido = facturaDeComision($this, $this->ana, [[$this->jabon, 12]]);
+    $linea = $pedido->items()->sole();
+
+    // El 2 de diciembre, antes de cerrar noviembre, regresan 3 dañados con crédito y 1 por cambio.
+    $this->travelTo(CarbonImmutable::parse('2026-12-02 09:00:00'));
+    app(RegistrarDevolucion::class)->ejecutar($pedido, TipoDevolucion::Credito, [$linea->id => ['danadas' => 3]], $this->admin);
+    app(RegistrarDevolucion::class)->ejecutar($pedido, TipoDevolucion::Cambio, [$linea->id => ['danadas' => 1]], $this->admin);
+
+    // 1,200 − 300 = 900 → 1 %.
+    $ana = comisionDe($noviembre, $this->ana);
+    expect($ana->filas[0]->venta)->toBe(1200.0)
+        ->and($ana->filas[0]->devuelto)->toBe(300.0)
+        ->and($ana->filas[0]->base)->toBe(900.0)
+        ->and($ana->filas[0]->comision)->toBe(9.0)
+        ->and($ana->ventaTotal)->toBe(900.0)
+        ->and((new ComisionesDelPeriodo($noviembre))->devoluciones())->toBe(1);
+
+    $this->travelTo(CarbonImmutable::parse('2026-12-03 09:00:00'));
+    $cierre = app(CerrarPeriodoComision::class)->ejecutar($noviembre, $this->admin);
+    $ana = comisionDe($noviembre, $this->ana);
+
+    expect($cierre->comision)->toBe(9.0)
+        ->and(ComisionLiquidacion::query()->where('comision_periodo_id', $cierre->id)->sole()->devuelto)->toBe(300.0)
+        ->and($ana->filas[0]->devuelto)->toBe(300.0)
+        ->and($ana->ventaTotal)->toBe(900.0)
+        ->and((new ComisionesDelPeriodo($noviembre))->devoluciones())->toBe(1);
+
+    // Ya cerrado, el 10 regresan 2 más con crédito y vende 5 (500): esos 200 se descuentan en diciembre.
+    $this->travelTo(CarbonImmutable::parse('2026-12-10 09:00:00'));
+    app(RegistrarDevolucion::class)->ejecutar($pedido, TipoDevolucion::Credito, [$linea->id => ['danadas' => 2]], $this->admin);
+    facturaDeComision($this, $this->ana, [[$this->jabon, 5]]);
+
+    $diciembre = PeriodoComision::actual();
+    $ana = comisionDe($diciembre, $this->ana);
+
+    expect($diciembre->clave())->toBe('2026-12-01_2026-12-31')
+        ->and($ana->filas[0]->venta)->toBe(500.0)
+        ->and($ana->filas[0]->devuelto)->toBe(200.0)
+        ->and($ana->filas[0]->base)->toBe(300.0)
+        ->and($ana->filas[0]->comision)->toBe(1.5)
+        ->and((new ComisionesDelPeriodo($diciembre))->devoluciones())->toBe(1);
+
+    $this->travelTo(CarbonImmutable::parse('2027-01-02 09:00:00'));
+    app(CerrarPeriodoComision::class)->ejecutar($diciembre, $this->admin);
+
+    // Ya descontadas: no se vuelven a descontar.
+    expect((new ComisionesDelPeriodo(PeriodoComision::actual()))->devoluciones())->toBe(0);
+});
+
+test('si se anula una factura pagada que ya tenía una devolución descontada, solo se descuenta lo que quedaba', function (): void {
+    Configuracion::actual()->update(['notas_credito' => false]);
+    $pedido = facturaDeComision($this, $this->ana, [[$this->jabon, 12]]);
+    app(RegistrarDevolucion::class)->ejecutar($pedido, TipoDevolucion::Credito, [$pedido->items()->sole()->id => ['danadas' => 3]], $this->admin);
+
+    $this->travelTo(CarbonImmutable::parse('2026-11-14 17:00:00'));
+    app(CerrarPeriodoComision::class)->ejecutar(quincena('2026-11-01'), $this->admin);
+
+    $this->travelTo(CarbonImmutable::parse('2026-11-20 10:00:00'));
+    app(AnularFactura::class)->ejecutar($pedido->factura ?? throw new RuntimeException('Sin factura.'), $this->admin, 'prueba');
+    facturaDeComision($this, $this->ana, [[$this->jabon, 15]]);
+
+    // 1,500 − (1,200 − 300) = 600; el mes: 900 + 600 = 1,500 → 2 % = 30, menos los 9 adelantados.
+    $ana = comisionDe(quincena('2026-11-20'), $this->ana);
+    expect($ana->filas[0]->anulado)->toBe(900.0)
+        ->and($ana->filas[0]->devuelto)->toBe(0.0)
+        ->and($ana->filas[0]->base)->toBe(600.0)
+        ->and($ana->filas[0]->comision)->toBe(21.0);
 });
 
 test('la meta es del mes: la primera quincena se paga como adelanto y a fin de mes se completa con el escalón del mes', function (): void {

@@ -95,13 +95,16 @@
             </div>
         </section>
 
-        @if ($d['rezagadas'] > 0 || $d['anuladas'] > 0)
+        @if ($d['rezagadas'] > 0 || $d['anuladas'] > 0 || $d['devoluciones'] > 0)
             <div class="rp-aviso">
                 @if ($d['rezagadas'] > 0)
                     {{ $d['rezagadas'] === 1 ? 'Entra 1 factura' : 'Entran '.$d['rezagadas'].' facturas' }} con fecha de un periodo ya cerrado (se emitieron después del cierre).
                 @endif
                 @if ($d['anuladas'] > 0)
                     Se {{ $d['anuladas'] === 1 ? 'descuenta 1 factura que ya se había pagado y se anuló' : 'descuentan '.$d['anuladas'].' facturas que ya se habían pagado y se anularon' }} (al corregir el pedido sale otra, que cuenta en su fecha).
+                @endif
+                @if ($d['devoluciones'] > 0)
+                    Se {{ $d['devoluciones'] === 1 ? 'descuenta 1 devolución' : 'descuentan '.$d['devoluciones'].' devoluciones' }} con crédito (se le devolvió el dinero al cliente).
                 @endif
             </div>
         @endif
@@ -111,6 +114,7 @@
                 @php
                     /** @var \App\Domain\Comisiones\ResumenVendedor $v */
                     $conAnulado = collect($v->filas)->contains(fn ($f) => $f->anulado != 0.0);
+                    $conDevuelto = collect($v->filas)->contains(fn ($f) => $f->devuelto != 0.0);
                     $conMes = collect($v->filas)->contains(fn ($f) => $f->sumaElMes());
                 @endphp
                 <section class="cm-vendedor">
@@ -137,6 +141,9 @@
                                         @if ($conAnulado)
                                             <th class="n">Anuladas</th>
                                         @endif
+                                        @if ($conDevuelto)
+                                            <th class="n" title="Devoluciones con crédito">Devoluciones</th>
+                                        @endif
                                         @if ($conMes)
                                             <th class="n">En el mes</th>
                                         @endif
@@ -155,6 +162,9 @@
                                             <td class="n">{{ lempiras($fila->venta) }}</td>
                                             @if ($conAnulado)
                                                 <td @class(['n', 'neg' => $fila->anulado != 0.0])>{{ $fila->anulado != 0.0 ? '− '.lempiras($fila->anulado) : '—' }}</td>
+                                            @endif
+                                            @if ($conDevuelto)
+                                                <td @class(['n', 'neg' => $fila->devuelto != 0.0])>{{ $fila->devuelto != 0.0 ? '− '.lempiras($fila->devuelto) : '—' }}</td>
                                             @endif
                                             @if ($conMes)
                                                 <td class="n">

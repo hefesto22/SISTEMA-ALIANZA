@@ -24,6 +24,8 @@ use Illuminate\Support\Facades\DB;
  *    paga lo del mes menos el adelanto (salvo que la primera sea de antes
  *    del primer cierre: esa no cuenta).
  *  - De uno en uno (dos cierres al mismo tiempo no pagan doble).
+ *  - Las devoluciones con crédito que se descuentan quedan anotadas (tipo
+ *    devolución, en negativo): no se vuelven a descontar.
  */
 final class CerrarPeriodoComision
 {
@@ -73,7 +75,7 @@ final class CerrarPeriodoComision
 
             foreach ($vendedores as $vendedor) {
                 foreach ($vendedor->filas as $fila) {
-                    if ($fila->venta == 0.0 && $fila->anulado == 0.0 && $fila->comision == 0.0) {
+                    if ($fila->venta == 0.0 && $fila->anulado == 0.0 && $fila->devuelto == 0.0 && $fila->comision == 0.0) {
                         continue;
                     }
 
@@ -84,6 +86,7 @@ final class CerrarPeriodoComision
                         'grupo'               => $fila->grupo,
                         'venta'               => $fila->venta,
                         'anulado'             => $fila->anulado,
+                        'devuelto'            => $fila->devuelto,
                         'base'                => $fila->base,
                         'base_antes'          => $fila->baseAntes,
                         'pagado_antes'        => $fila->pagadoAntes,
@@ -102,6 +105,7 @@ final class CerrarPeriodoComision
                 ...array_map(fn (array $f): array => [
                     'comision_periodo_id' => $cierre->id,
                     'factura_id'          => $f['factura_id'],
+                    'devolucion_id'       => null,
                     'vendedor_id'         => $f['vendedor_id'],
                     'comision_grupo_id'   => $f['grupo_id'],
                     'tipo'                => ComisionFactura::VENTA,
@@ -112,6 +116,7 @@ final class CerrarPeriodoComision
                 ...array_map(fn (array $f): array => [
                     'comision_periodo_id' => $cierre->id,
                     'factura_id'          => $f['factura_id'],
+                    'devolucion_id'       => null,
                     'vendedor_id'         => $f['vendedor_id'],
                     'comision_grupo_id'   => $f['grupo_id'],
                     'tipo'                => ComisionFactura::ANULADA,
@@ -119,6 +124,17 @@ final class CerrarPeriodoComision
                     'created_at'          => $ahora,
                     'updated_at'          => $ahora,
                 ], $detalle['anuladas']),
+                ...array_map(fn (array $f): array => [
+                    'comision_periodo_id' => $cierre->id,
+                    'factura_id'          => $f['factura_id'],
+                    'devolucion_id'       => $f['devolucion_id'],
+                    'vendedor_id'         => $f['vendedor_id'],
+                    'comision_grupo_id'   => $f['grupo_id'],
+                    'tipo'                => ComisionFactura::DEVOLUCION,
+                    'neta'                => -$f['neta'],
+                    'created_at'          => $ahora,
+                    'updated_at'          => $ahora,
+                ], $detalle['devoluciones']),
             ];
 
             foreach (array_chunk($filas, 500) as $lote) {

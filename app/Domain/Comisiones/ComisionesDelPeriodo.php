@@ -6,6 +6,7 @@ namespace App\Domain\Comisiones;
 
 use App\Enums\EstadoFactura;
 use App\Enums\Rol;
+use App\Enums\TipoDevolucion;
 use App\Models\ComisionFactura;
 use App\Models\ComisionGrupo;
 use App\Models\ComisionLiquidacion;
@@ -35,6 +36,12 @@ use stdClass;
  *  - descontadas, las facturas que ya se pagaron y después se anularon.
  * Así nada se paga dos veces ni se queda sin pagar.
  *
+ * Las devoluciones con crédito (se le devolvió el dinero al cliente; un
+ * cambio no baja la venta) se descuentan, sin ISV, en el grupo de cada
+ * producto: las de las facturas del periodo, si se registran antes de
+ * cerrarlo (por eso se paga del 1 al 5 del mes siguiente), y las de
+ * facturas ya pagadas, en el siguiente cierre.
+ *
  * La meta y los escalones son del MES. En la segunda quincena se suma lo de
  * la primera (anteriorDelMes): el escalón sale de lo vendido en el mes y se
  * paga lo que gana en el mes menos el adelanto de la primera quincena.
@@ -54,7 +61,7 @@ final class ComisionesDelPeriodo
 
     private ?ComisionPeriodo $cierre = null;
 
-    /** @var array{ventas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, neta: float, rezagada: bool}>, anuladas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, activo: bool, neta: float}>}|null */
+    /** @var array{ventas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, neta: float, rezagada: bool}>, anuladas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, activo: bool, neta: float}>, devoluciones: list<array{devolucion_id: int, factura_id: int, vendedor_id: int, grupo_id: int|null, neta: float}>}|null */
     private ?array $detalle = null;
 
     /** @var list<ResumenVendedor>|null */
@@ -221,10 +228,29 @@ final class ComisionesDelPeriodo
     }
 
     /**
+     * Devoluciones con crédito que se descuentan en este periodo.
+     */
+    public function devoluciones(): int
+    {
+        $cierre = $this->cierre();
+
+        if ($cierre !== null) {
+            return (int) $this->conAlcance(
+                DB::table('comision_facturas as cf')
+                    ->where('cf.comision_periodo_id', $cierre->id)
+                    ->where('cf.tipo', ComisionFactura::DEVOLUCION),
+                'cf.vendedor_id',
+            )->distinct()->count('cf.devolucion_id');
+        }
+
+        return count(array_unique(array_column($this->detalle()['devoluciones'], 'devolucion_id')));
+    }
+
+    /**
      * Lo que entraría al cerrar, factura por factura y por grupo (sin
      * grupo = no paga comisión). Solo para un periodo abierto.
      *
-     * @return array{ventas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, neta: float, rezagada: bool}>, anuladas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, activo: bool, neta: float}>}
+     * @return array{ventas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, neta: float, rezagada: bool}>, anuladas: list<array{factura_id: int, vendedor_id: int, grupo_id: int|null, activo: bool, neta: float}>, devoluciones: list<array{devolucion_id: int, factura_id: int, vendedor_id: int, grupo_id: int|null, neta: float}>}
      */
     public function detalle(): array
     {
@@ -266,6 +292,7 @@ final class ComisionesDelPeriodo
 
         [$alcance, $valores] = $this->alcanceSql('cf.vendedor_id');
 
+        // Con lo que ya se le descontó por devoluciones, para no restarlo dos veces.
         /** @var list<stdClass> $anuladas */
         $anuladas = DB::select(<<<SQL
             SELECT cf.factura_id, cf.vendedor_id, cf.comision_grupo_id AS grupo_id, COALESCE(g.activo, FALSE) AS activo, cf.neta
@@ -273,17 +300,53 @@ final class ComisionesDelPeriodo
             JOIN comision_periodos cp ON cp.id = cf.comision_periodo_id
             JOIN facturas fa ON fa.id = cf.factura_id
             LEFT JOIN comision_grupos g ON g.id = cf.comision_grupo_id
-            WHERE cf.tipo = ? AND fa.estado = ? AND fa.anulada_at < ? AND cp.desde < ?
+            WHERE cf.tipo IN (?, ?) AND fa.estado = ? AND fa.anulada_at < ? AND cp.desde < ?
                 AND NOT EXISTS (SELECT 1 FROM comision_facturas x WHERE x.factura_id = cf.factura_id AND x.tipo = ?){$alcance}
             ORDER BY cf.factura_id, cf.id
             SQL, [
             ComisionFactura::VENTA,
+            ComisionFactura::DEVOLUCION,
             EstadoFactura::Anulada->value,
             $this->periodo->finExclusivo(),
             $this->periodo->desde->toDateString(),
             ComisionFactura::ANULADA,
             ...$valores,
         ]);
+
+        [$alcance, $valores] = $this->alcanceSql('p.vendedor_id');
+
+        // Devoluciones con crédito que no se han descontado: de facturas vigentes que no son de venta en
+        // bodega. Entran las de facturas de este periodo (abajo) y las de facturas pagadas en un cierre
+        // anterior, registradas antes de que termine este.
+        /** @var list<stdClass> $devoluciones */
+        $devoluciones = DB::select(<<<SQL
+            SELECT d.id AS devolucion_id, d.factura_id, p.vendedor_id, CASE WHEN g.activo THEN g.id END AS grupo_id,
+                (d.created_at < ? AND EXISTS (
+                    SELECT 1 FROM comision_facturas v JOIN comision_periodos vp ON vp.id = v.comision_periodo_id
+                    WHERE v.factura_id = d.factura_id AND v.tipo = ? AND vp.desde < ?
+                )) AS pagada,
+                ROUND(SUM(di.subtotal), 2) AS neta
+            FROM devoluciones d
+            JOIN devolucion_items di ON di.devolucion_id = d.id
+            JOIN pedidos p ON p.id = d.pedido_id
+            JOIN facturas fa ON fa.id = d.factura_id
+            JOIN productos pr ON pr.id = di.producto_id
+            LEFT JOIN categorias c ON c.id = pr.categoria_id
+            LEFT JOIN comision_grupos g ON g.id = c.comision_grupo_id
+            WHERE d.tipo = ? AND fa.estado = ? AND NOT p.en_bodega
+                AND NOT EXISTS (SELECT 1 FROM comision_facturas x WHERE x.devolucion_id = d.id){$alcance}
+            GROUP BY 1, 2, 3, 4, 5
+            ORDER BY 1
+            SQL, [
+            $this->periodo->finExclusivo(),
+            ComisionFactura::VENTA,
+            $this->periodo->desde->toDateString(),
+            TipoDevolucion::Credito->value,
+            EstadoFactura::Vigente->value,
+            ...$valores,
+        ]);
+
+        $deEste = array_fill_keys(array_map(fn (stdClass $f): int => self::entero($f->factura_id), $ventas), true);
 
         return $this->detalle = [
             'ventas' => array_map(fn (stdClass $f): array => [
@@ -300,6 +363,13 @@ final class ComisionesDelPeriodo
                 'activo'      => (bool) $f->activo,
                 'neta'        => self::numero($f->neta),
             ], $anuladas),
+            'devoluciones' => array_values(array_map(fn (stdClass $f): array => [
+                'devolucion_id' => self::entero($f->devolucion_id),
+                'factura_id'    => self::entero($f->factura_id),
+                'vendedor_id'   => self::entero($f->vendedor_id),
+                'grupo_id'      => $f->grupo_id === null ? null : self::entero($f->grupo_id),
+                'neta'          => self::numero($f->neta),
+            ], array_filter($devoluciones, fn (stdClass $f): bool => (bool) $f->pagada || isset($deEste[self::entero($f->factura_id)])))),
         ];
     }
 
@@ -312,7 +382,7 @@ final class ComisionesDelPeriodo
     {
         $detalle = $this->detalle();
 
-        /** @var array<int, array<int, array{venta?: float, anulado?: float, facturas?: array<int, true>}>> $porGrupo [vendedor][grupo] */
+        /** @var array<int, array<int, array{venta?: float, anulado?: float, devuelto?: float, facturas?: array<int, true>}>> $porGrupo [vendedor][grupo] */
         $porGrupo = [];
         /** @var array<int, float> $total */
         $total = [];
@@ -334,6 +404,14 @@ final class ComisionesDelPeriodo
 
             if ($f['grupo_id'] !== null && $f['activo']) {
                 $porGrupo[$f['vendedor_id']][$f['grupo_id']]['anulado'] = ($porGrupo[$f['vendedor_id']][$f['grupo_id']]['anulado'] ?? 0.0) + $f['neta'];
+            }
+        }
+
+        foreach ($detalle['devoluciones'] as $f) {
+            $total[$f['vendedor_id']] = ($total[$f['vendedor_id']] ?? 0.0) - $f['neta'];
+
+            if ($f['grupo_id'] !== null) {
+                $porGrupo[$f['vendedor_id']][$f['grupo_id']]['devuelto'] = ($porGrupo[$f['vendedor_id']][$f['grupo_id']]['devuelto'] ?? 0.0) + $f['neta'];
             }
         }
 
@@ -371,6 +449,7 @@ final class ComisionesDelPeriodo
                     baseAntes: $delMes['base'] ?? 0.0,
                     pagadoAntes: $delMes['pagado'] ?? 0.0,
                     deBodega: $deBodega,
+                    devuelto: $datos['devuelto'] ?? 0.0,
                 );
             }
 
@@ -489,6 +568,7 @@ final class ComisionesDelPeriodo
                 baseAntes: $l->base_antes,
                 pagadoAntes: $l->pagado_antes,
                 deBodega: $l->escala_bodega,
+                devuelto: $l->devuelto,
             ))->all());
 
             $resumenes[] = new ResumenVendedor(

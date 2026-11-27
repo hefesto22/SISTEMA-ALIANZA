@@ -259,17 +259,18 @@ class Comisiones extends Page
         $calculo = $this->calculo();
 
         return [
-            'periodo'    => $calculo->periodo,
-            'cierre'     => $calculo->cierre(),
-            'vendedores' => $calculo->vendedores(),
-            'totales'    => $calculo->totales(),
-            'rezagadas'  => $calculo->rezagadas(),
-            'anuladas'   => $calculo->anuladas(),
-            'anterior'   => $calculo->cierre() === null ? $calculo->anteriorDelMes() : null,
-            'adelantos'  => $calculo->adelantos(),
-            'alcance'    => $this->nombreAlcance(),
-            'hayGrupos'  => ComisionGrupo::query()->activos()->exists(),
-            'urlGrupos'  => Acceso::puede('ViewAny:ComisionGrupo') ? ComisionGrupoResource::getUrl() : null,
+            'periodo'      => $calculo->periodo,
+            'cierre'       => $calculo->cierre(),
+            'vendedores'   => $calculo->vendedores(),
+            'totales'      => $calculo->totales(),
+            'rezagadas'    => $calculo->rezagadas(),
+            'anuladas'     => $calculo->anuladas(),
+            'devoluciones' => $calculo->devoluciones(),
+            'anterior'     => $calculo->cierre() === null ? $calculo->anteriorDelMes() : null,
+            'adelantos'    => $calculo->adelantos(),
+            'alcance'      => $this->nombreAlcance(),
+            'hayGrupos'    => ComisionGrupo::query()->activos()->exists(),
+            'urlGrupos'    => Acceso::puede('ViewAny:ComisionGrupo') ? ComisionGrupoResource::getUrl() : null,
         ];
     }
 
@@ -328,7 +329,8 @@ class Comisiones extends Page
             .($anterior !== null && $anterior['estado'] === ComisionesDelPeriodo::ANTERIOR_FUERA
                 ? ' La quincena del '.$anterior['periodo']->texto().' no se cerró: no cuenta para la meta del mes ni se paga.'
                 : '')
-            .' Después ya no cambia: lo que se facture con fecha de este periodo o se anule pasa al siguiente.';
+            .' Ya van descontadas las devoluciones con crédito registradas hasta hoy (por eso se paga del 1 al 5 del mes siguiente).'
+            .' Después ya no cambia: lo que se facture con fecha de este periodo, se anule o se devuelva con crédito pasa al siguiente.';
     }
 
     /**

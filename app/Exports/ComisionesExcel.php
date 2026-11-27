@@ -13,8 +13,9 @@ use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 /**
  * Las comisiones de un periodo en Excel, para pagar: una hoja con lo de
  * cada vendedor (venta y comisión) y otra con el detalle por grupo
- * (venta, anuladas, base, venta del mes, %, comisión del mes, lo ya
- * adelantado, lo que se paga y la meta). La meta es del mes.
+ * (venta, anuladas, devoluciones con crédito, base, venta del mes, %,
+ * comisión del mes, lo ya adelantado, lo que se paga y la meta). La meta
+ * es del mes.
  */
 final class ComisionesExcel implements Export, WithMultipleSheets
 {
@@ -74,6 +75,7 @@ final class ComisionesExcel implements Export, WithMultipleSheets
                     $f->propia ? 'Propia' : ($f->deBodega ? 'De la bodega' : 'Del grupo'),
                     $f->venta,
                     $f->anulado,
+                    $f->devuelto,
                     $f->base,
                     $f->baseMes(),
                     $f->porcentaje / 100,
@@ -98,6 +100,7 @@ final class ComisionesExcel implements Export, WithMultipleSheets
                 'Escala'           => HojaReporte::TEXTO,
                 'Venta'            => HojaReporte::DINERO,
                 'Anuladas'         => HojaReporte::DINERO,
+                'Devoluciones'     => HojaReporte::DINERO,
                 'Base del periodo' => HojaReporte::DINERO,
                 'Venta del mes'    => HojaReporte::DINERO,
                 '%'                => HojaReporte::PORCENTAJE,
@@ -108,7 +111,7 @@ final class ComisionesExcel implements Export, WithMultipleSheets
                 'Avance a la meta' => HojaReporte::PORCENTAJE,
             ],
             $filas,
-            ['', 'Total', '', '', null, null, $t['base'], null, null, null, $this->calculo->adelantos(), $t['comision'], null, null],
+            ['', 'Total', '', '', null, null, null, $t['base'], null, null, null, $this->calculo->adelantos(), $t['comision'], null, null],
         );
     }
 

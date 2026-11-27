@@ -13,7 +13,10 @@ namespace App\Domain\Comisiones;
  *                con descuentos.
  *  anulado     = facturas que ya se le pagaron y después se anularon (al
  *                corregir el pedido): se descuentan aquí.
- *  base        = venta − anulado: lo de este periodo.
+ *  devuelto    = devoluciones con crédito (se le devolvió el dinero) de las
+ *                facturas del periodo, o de facturas ya pagadas que se
+ *                registraron después del cierre: se descuentan aquí, sin ISV.
+ *  base        = venta − anulado − devuelto: lo de este periodo.
  *
  * La meta y los escalones son del MES. Con quincenal, la segunda quincena
  * suma lo de la primera:
@@ -45,6 +48,7 @@ final class FilaComision
         public readonly float $baseAntes = 0.0,
         public readonly float $pagadoAntes = 0.0,
         public readonly bool $deBodega = false,
+        public readonly float $devuelto = 0.0,
     ) {}
 
     public static function calcular(
@@ -58,8 +62,9 @@ final class FilaComision
         float $baseAntes = 0.0,
         float $pagadoAntes = 0.0,
         bool $deBodega = false,
+        float $devuelto = 0.0,
     ): self {
-        $base = round($venta - $anulado, 2);
+        $base = round($venta - $anulado - $devuelto, 2);
         $baseMes = round($base + $baseAntes, 2);
 
         return new self(
@@ -77,6 +82,7 @@ final class FilaComision
             baseAntes: round($baseAntes, 2),
             pagadoAntes: round($pagadoAntes, 2),
             deBodega: $deBodega,
+            devuelto: round($devuelto, 2),
         );
     }
 
