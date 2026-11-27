@@ -65,38 +65,54 @@ class ClienteResource extends Resource
         return $usuario === null ? $query->whereRaw('1 = 0') : $query->visiblePara($usuario);
     }
 
+    /**
+     * En el celular cada cliente es una tarjeta compacta: nombre, dirección,
+     * teléfono (se llama con un toque) y municipio. Código, RTN, bodega y
+     * activo, solo en pantallas grandes. La bodega solo la ve administración.
+     */
     public static function table(Table $table): Table
     {
         return $table
+            ->stackedOnMobile()
+            ->extraAttributes(['class' => 'tabla-celular'])
             ->columns([
-                TextColumn::make('codigo')
-                    ->label('Código')
-                    ->searchable()
-                    ->sortable()
-                    ->placeholder('—'),
                 TextColumn::make('nombre')
                     ->searchable()
                     ->sortable()
                     ->weight('bold')
-                    ->description(fn (Cliente $record): ?string => $record->direccion),
+                    ->description(fn (Cliente $record): ?string => $record->direccion)
+                    ->wrap(),
+                TextColumn::make('telefono')
+                    ->label('Teléfono')
+                    ->icon(Heroicon::OutlinedPhone)
+                    ->url(fn (Cliente $record): ?string => $record->telefono !== null && $record->telefono !== '' ? 'tel:'.preg_replace('/\D+/', '', $record->telefono) : null)
+                    ->color('primary')
+                    ->placeholder('—'),
+                TextColumn::make('municipio.nombre')
+                    ->label('Municipio')
+                    ->formatStateUsing(fn (string $state, Cliente $record): string => $state.', '.$record->municipio?->departamento->nombre)
+                    ->placeholder('Sin zona')
+                    ->searchable(),
+                TextColumn::make('codigo')
+                    ->label('Código')
+                    ->searchable()
+                    ->sortable()
+                    ->placeholder('—')
+                    ->visibleFrom('md'),
                 TextColumn::make('rtn')
                     ->label('RTN')
                     ->searchable()
                     ->placeholder('—')
-                    ->toggleable(),
-                TextColumn::make('telefono')
-                    ->label('Teléfono')
-                    ->placeholder('—'),
-                TextColumn::make('municipio.nombre')
-                    ->label('Municipio')
-                    ->description(fn (Cliente $record): ?string => $record->municipio?->departamento->nombre)
-                    ->placeholder('Sin zona')
-                    ->searchable(),
+                    ->toggleable()
+                    ->visibleFrom('md'),
                 TextColumn::make('bodega.nombre')
                     ->label('Bodega')
-                    ->toggleable(),
+                    ->toggleable()
+                    ->visible(fn (): bool => Acceso::veTodo())
+                    ->visibleFrom('md'),
                 IconColumn::make('activo')
-                    ->boolean(),
+                    ->boolean()
+                    ->visibleFrom('md'),
             ])
             ->defaultSort('nombre')
             ->filters([

@@ -57,13 +57,17 @@ class AdminPanelProvider extends PanelProvider
      *  - no sale la ruta "Pedidos > Listado" arriba del título: no dice nada
      *    que no diga el menú (en Ver, Editar o Crear sí queda, para regresar);
      *  - la columna con clase "celda-recortada" toma el espacio que sobra y su
-     *    texto queda en una línea, cortado con "…" si no cabe.
+     *    texto queda en una línea, cortado con "…" si no cabe;
+     *  - tabla con clase "tabla-celular" (y stackedOnMobile): en el celular
+     *    cada registro sale como tarjeta compacta, sin el nombre de cada
+     *    columna arriba de su valor.
      */
     private const ESTILO_LISTADOS = '<style>'
         .'.fi-resource-list-records-page .fi-breadcrumbs{display:none}'
         .'.fi-ta-cell.celda-recortada{width:100%;max-width:0;min-width:8rem}'
         .'.fi-ta-cell.celda-recortada>.fi-ta-col{min-width:0}'
         .'.fi-ta-cell.celda-recortada .fi-ta-text,.fi-ta-cell.celda-recortada .fi-ta-text>*{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+        .'.tabla-celular .fi-ta-cell-label{display:none}'
         .'</style>';
 
     /**
