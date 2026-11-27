@@ -82,9 +82,9 @@ final class LineasPedido
      * de las cajas que sobran (se pueden abrir).
      *
      * Al corregir, "salio_pres" es lo que este pedido ya sacó de la bodega
-     * en esa presentación (regresa si sale menos). Los validados antes de que
-     * hubiera inventario no sacaron nada y corregirlos no mueve la existencia
-     * ("mueve" = false).
+     * en esa presentación, sin sus regalos (regresa si sale menos). Los
+     * validados antes de que hubiera inventario no sacaron nada y
+     * corregirlos no mueve la existencia ("mueve" = false).
      *
      * Primero van las líneas del pedido (en orden) y después, de cada
      * producto, las presentaciones que se venden y no trae (sin id, "pidió
@@ -229,8 +229,10 @@ final class LineasPedido
     /**
      * Si el pedido mueve la existencia de la bodega y lo que ya sacó de cada
      * presentación. Al validar mueve y no ha sacado nada; al corregir, lo del
-     * kárdex. Los validados antes de que hubiera inventario no sacaron nada
-     * y corregirlos no mueve la existencia.
+     * kárdex sin los regalos de las promociones: esos no van en las filas
+     * (salen solos), así que si de un producto salió 6 + 1 de regalo y se
+     * deja en 6, no "regresa" nada. Los validados antes de que hubiera
+     * inventario no sacaron nada y corregirlos no mueve la existencia.
      *
      * @return array{0: bool, 1: array<int, int>}
      */
@@ -238,7 +240,19 @@ final class LineasPedido
     {
         $mueve = ! $pedido->estaValidado() || SalidaDeBodega::yaSalio($pedido);
 
-        return [$mueve, $pedido->estaValidado() && $mueve ? SalidaDeBodega::yaSalido($pedido) : []];
+        if (! $pedido->estaValidado() || ! $mueve) {
+            return [$mueve, []];
+        }
+
+        $salio = SalidaDeBodega::yaSalido($pedido);
+
+        foreach ($pedido->items()->where('bonificacion', true)->get() as $regalo) {
+            if (isset($salio[$regalo->presentacion_id])) {
+                $salio[$regalo->presentacion_id] = max(0, $salio[$regalo->presentacion_id] - $regalo->cantidadFacturable());
+            }
+        }
+
+        return [$mueve, $salio];
     }
 
     /**

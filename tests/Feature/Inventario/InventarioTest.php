@@ -34,6 +34,7 @@ use App\Models\MovimientoInventario;
 use App\Models\Pedido;
 use App\Models\Presentacion;
 use App\Models\Producto;
+use App\Models\Promocion;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Facades\Filament;
@@ -393,6 +394,21 @@ test('al corregir un pedido despachado regresa a la bodega lo que ya no sale, a 
     expect(Existencia::de($this->bodega->id, $this->caja->id))->toBe(7)
         ->and($regreso->presentacion_id)->toBe($this->caja->id)
         ->and($regreso->cantidad)->toBe(1);
+});
+
+test('al corregir, lo que salió de regalo no cuenta en la fila: si no se cambia nada, no dice que regresa', function (): void {
+    contar($this->bodega, $this->base, 20, $this->admin);
+    // 6 + 1: por cada 6 unidades, 1 más gratis del mismo.
+    Promocion::factory()->para($this->producto, $this->producto)->state(['compra_unidades' => 6])->create();
+
+    $pedido = pedidoDeInventario($this->bodega, $this->vendedor, [[$this->producto, 1, 6]]);
+    $pedido = app(ValidarDespacho::class)->ejecutar($pedido, [], $this->encargado);
+
+    $fila = LineasPedido::datos($pedido)['items'][0];
+
+    // Salieron 7 (6 + 1 de regalo); la fila es de lo que se cobra: sale 6 y ya salieron 6.
+    expect(Existencia::de($this->bodega->id, $this->base->id))->toBe(13)
+        ->and([$fila['sale'], $fila['salio_pres']])->toBe([6, 6]);
 });
 
 test('precio del pedido: se respeta lo que se le dijo al cliente, salvo que quede bajo el costo', function (): void {
