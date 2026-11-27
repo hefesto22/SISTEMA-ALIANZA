@@ -2,8 +2,9 @@
     Pendiente, Por imprimir, Impreso y Cargado de Pedidos (App\Filament\Resources\Pedidos\Pages\ListPedidos):
     arriba el cambio de vista (Por día / Uno por uno); por día, un cuadro por día y
     bodega (App\Domain\Facturacion\DiaDeFacturacion), del más reciente al más viejo.
-      - Pendiente: Ver (las tarjetas de ese día) · Validar los N (todos de un solo,
-        del más viejo al más nuevo; ListPedidos::validarDiaAction).
+      - Pendiente: Ver (las tarjetas de ese día) · Hoja de alisto (lo que se saca
+        de la bodega para apartarlo; ListPedidos::alistoDiaAction) · Validar los N
+        (todos de un solo, del más viejo al más nuevo; ListPedidos::validarDiaAction).
       - Por imprimir: Ver (las tarjetas de ese día) · Imprimir las N (modal con la vista previa).
       - Impreso (los días con facturas por cargar): Ver · Resumen del día (la hoja
         para cuadrar) · Cargar camión (las facturas de ese día que todavía se pueden
@@ -142,7 +143,7 @@
                 {{ match (true) {
                     $cargados => 'Los días que ya tienen facturas en una carga del camión (o ya entregadas), por el día en que se emitieron.',
                     $impresos => 'Los días que tienen facturas por cargar en el camión, por el día en que se emitieron: cuántas, por cuánto y con qué números.'.($cargar ? ' Marque uno o varios días para cargar el camión de un solo.' : ''),
-                    $porValidar => 'Los pedidos por validar, por el día del pedido: valide todos los de un día de un solo. Para revisar o cambiar uno, use Uno por uno.',
+                    $porValidar => 'Los pedidos por validar, por el día del pedido: saque la hoja de alisto para apartar lo de un día y valídelos todos de un solo. Para revisar o cambiar uno, use Uno por uno.',
                     default => 'Los pedidos listos para imprimir, por el día del pedido: imprima todas las de un día de un solo.',
                 } }}
             </p>
@@ -256,6 +257,10 @@
                                     <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-document-text" wire:click="mountAction('resumenDia', {{ $argumentos }})">
                                         Resumen del día
                                     </x-filament::button>
+                                @elseif ($porValidar && $valida)
+                                    <x-filament::button size="sm" color="gray" outlined icon="heroicon-o-clipboard-document-list" wire:click="mountAction('alistoDia', {{ $argumentos }})">
+                                        Hoja de alisto
+                                    </x-filament::button>
                                 @endif
                             </div>
                             @if ($cargar && $pendientes > 0)
@@ -302,7 +307,7 @@
             @endif
         @endif
 
-        {{-- Por día no se dibuja la tabla, que es la que trae los modales de las acciones (Validar, Imprimir, Resumen del día). --}}
+        {{-- Por día no se dibuja la tabla, que es la que trae los modales de las acciones (Hoja de alisto, Validar, Imprimir, Resumen del día). --}}
         <x-filament-actions::modals />
     @endif
 </div>

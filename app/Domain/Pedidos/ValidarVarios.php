@@ -5,17 +5,15 @@ declare(strict_types=1);
 namespace App\Domain\Pedidos;
 
 use App\Domain\Exceptions\ReglaNegocioException;
-use App\Domain\Inventario\Disponible;
 use App\Enums\EstadoPedido;
 use App\Models\Configuracion;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
-use App\Models\Presentacion;
-use App\Models\Producto;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
- * "Validar las N" de Pedidos: valida de un solo muchos pendientes, como si
+ * "Validar los N" de Pedidos: valida de un solo muchos pendientes, como si
  * bodega abriera el Validar de cada uno y le diera Validar sin cambiar nada.
  * Van del más viejo al más nuevo (por fecha y en el orden en que se
  * levantaron): si algo no alcanza para todos, le sale primero al que pidió
@@ -23,14 +21,20 @@ use App\Models\User;
  *
  *  - Sale todo lo pedido (si las sueltas no alcanzan, se abren solas las
  *    cajas que sobran) y queda Por imprimir.
- *  - Con "controlar existencias" y algo que no alcanza: con $conLoQueHay
- *    sale lo que hay (lo mismo que trae de entrada el modal de Validar,
- *    LoQueAlcanza) y va en "incompletos"; sin $conLoQueHay, o si no hay
- *    nada de lo que pidió, queda pendiente para revisarlo uno por uno.
+ *  - Lo que faltó al alistar con la hoja (HojaDeAlisto, $faltaron): de esa
+ *    presentación se reparte lo que sí se encontró (lo que se cobra menos lo
+ *    que faltó), del más viejo al más nuevo; a los últimos les sale menos y
+ *    van en "incompletos". Si a uno no le queda nada, queda pendiente.
+ *  - Con "controlar existencias" y algo que no alcanza en el sistema: con
+ *    $conLoQueHay sale lo que hay (lo mismo que trae de entrada el modal de
+ *    Validar, LoQueAlcanza) y va en "incompletos"; sin $conLoQueHay, o si no
+ *    hay nada de lo que pidió, queda pendiente para revisarlo uno por uno.
  *
  * Antes de validar, queNoAlcanza() dice qué productos no alcanzan para
  * todos con lo que hay en la bodega. Quién puede validar cuáles lo revisa
  * quien lo llama (PedidoPolicy::validar).
+ *
+ * @phpstan-import-type HojaBodega from HojaDeAlisto
  */
 final class ValidarVarios
 {
@@ -40,8 +44,9 @@ final class ValidarVarios
 
     /**
      * @param list<int> $ids los que no estén pendientes se saltan
+     * @param array<int, array<int, int>> $faltaron [bodega_id => [presentacion_id => cuántas no se encontraron]]
      */
-    public function ejecutar(array $ids, User $usuario, bool $conLoQueHay = true): PedidosValidados
+    public function ejecutar(array $ids, User $usuario, bool $conLoQueHay = true, array $faltaron = []): PedidosValidados
     {
         $controla = Configuracion::actual()->controlar_existencias;
         $validados = [];
@@ -55,11 +60,36 @@ final class ValidarVarios
             ->orderBy('id')
             ->get();
 
+        $quedan = self::seEncontro($pedidos, $faltaron);
+
         foreach ($pedidos as $pedido) {
             $numero = $pedido->numero ?? (string) $pedido->id;
+            $bodega = $pedido->bodega_id;
+            $lineas = $pedido->items()->where('bonificacion', false)->orderBy('id')->get();
+            $pidio = [];
+
+            foreach ($lineas as $linea) {
+                $pidio[$linea->id] = $linea->cantidadFacturable();
+            }
+
+            $sale = isset($quedan[$bodega]) ? self::repartir($lineas, $quedan[$bodega]) : $pidio;
+
+            if (array_sum($sale) === 0) {
+                $pendientes[$numero] = 'No se encontró nada de lo que pidió.';
+
+                continue;
+            }
 
             try {
-                $validados[] = $this->validar->ejecutar($pedido, [], $usuario, abrirSolas: true);
+                $validados[] = $this->validar->ejecutar($pedido, $sale === $pidio ? [] : $sale, $usuario, abrirSolas: true);
+
+                if ($sale !== $pidio) {
+                    $incompletos[] = $numero;
+                }
+
+                if (isset($quedan[$bodega])) {
+                    $quedan[$bodega] = self::restar($quedan[$bodega], $lineas, $sale);
+                }
 
                 continue;
             } catch (ReglaNegocioException $e) {
@@ -70,17 +100,21 @@ final class ValidarVarios
                 }
             }
 
-            $sale = LoQueAlcanza::delPedido($pedido);
+            $alcanza = LoQueAlcanza::delPedido($pedido, $sale);
 
-            if (array_sum($sale) === 0) {
+            if (array_sum($alcanza) === 0) {
                 $pendientes[$numero] = 'No hay nada de lo que pidió.';
 
                 continue;
             }
 
             try {
-                $validados[] = $this->validar->ejecutar($pedido, $sale, $usuario, abrirSolas: true);
+                $validados[] = $this->validar->ejecutar($pedido, $alcanza, $usuario, abrirSolas: true);
                 $incompletos[] = $numero;
+
+                if (isset($quedan[$bodega])) {
+                    $quedan[$bodega] = self::restar($quedan[$bodega], $lineas, $alcanza);
+                }
             } catch (ReglaNegocioException $e) {
                 $pendientes[$numero] = $e->getMessage();
             }
@@ -92,9 +126,9 @@ final class ValidarVarios
     /**
      * Para avisar antes de validar: lo que no alcanza para todos esos
      * pendientes con lo que hay hoy en su bodega, "JABON X (faltan 3
-     * unidades)". Cada caja sale de sus cajas y las sueltas, de las sueltas
-     * y de abrir las que sobran (Disponible::faltantes). Los regalos cuentan
-     * lo que dice el pedido (al validar se vuelven a calcular).
+     * unidades)" (HojaDeAlisto: cada caja sale de sus cajas y las sueltas,
+     * de las sueltas y de abrir las que sobran). Los regalos cuentan lo que
+     * dice el pedido (al validar se vuelven a calcular).
      *
      * @param list<int> $ids
      *
@@ -102,59 +136,109 @@ final class ValidarVarios
      */
     public static function queNoAlcanza(array $ids): array
     {
-        if ($ids === []) {
-            return [];
-        }
+        return self::noAlcanzanEn(HojaDeAlisto::datos($ids));
+    }
 
-        $filas = PedidoItem::query()
-            ->join('pedidos', 'pedidos.id', '=', 'pedido_items.pedido_id')
-            ->whereIn('pedidos.id', $ids)
-            ->where('pedidos.estado', EstadoPedido::Pendiente)
-            ->groupBy('pedidos.bodega_id', 'pedido_items.producto_id', 'pedido_items.presentacion_id')
-            ->selectRaw('pedidos.bodega_id, pedido_items.producto_id, pedido_items.presentacion_id, SUM(pedido_items.cantidad) AS cantidad')
-            ->toBase()
-            ->get();
-
-        /** @var array<int, array<int, array<int, int>>> $pide [bodega => [producto => [presentación => cantidad]]] */
-        $pide = [];
-
-        foreach ($filas as $fila) {
-            $pide[(int) $fila->bodega_id][(int) $fila->producto_id][(int) $fila->presentacion_id] = (int) $fila->cantidad;
-        }
-
-        $productos = Producto::query()
-            ->with('presentaciones.unidadMedida')
-            ->whereKey($filas->pluck('producto_id')->unique()->values()->all())
-            ->orderBy('descripcion')
-            ->get();
-
+    /**
+     * Lo mismo, de una hoja ya armada.
+     *
+     * @param list<HojaBodega> $hoja
+     *
+     * @return list<string>
+     */
+    public static function noAlcanzanEn(array $hoja): array
+    {
         $faltan = [];
 
-        foreach ($pide as $bodegaId => $deLaBodega) {
-            $hay = LoQueAlcanza::existencias($bodegaId, array_keys($deLaBodega));
-
-            foreach ($productos as $producto) {
-                if (! isset($deLaBodega[$producto->id])) {
-                    continue;
-                }
-
-                $contenido = $producto->presentaciones->mapWithKeys(fn (Presentacion $presentacion): array => [$presentacion->id => $presentacion->contenido])->all();
-                $partes = [];
-
-                foreach (Disponible::faltantes($deLaBodega[$producto->id], $hay, $contenido, $producto->presentacionBase()->id) as $presentacionId => $falta) {
-                    $presentacion = $producto->presentaciones->firstWhere('id', $presentacionId);
-
-                    if ($presentacion instanceof Presentacion) {
-                        $partes[] = ($falta === 1 ? 'falta ' : 'faltan ').$presentacion->enPalabras($falta);
-                    }
-                }
-
-                if ($partes !== []) {
-                    $faltan[] = $producto->descripcion.' ('.implode(', ', $partes).')';
+        foreach ($hoja as $bodega) {
+            foreach ($bodega['productos'] as $producto) {
+                if ($producto['falta'] !== null) {
+                    $faltan[] = $producto['descripcion'].' ('.$producto['falta'].')';
                 }
             }
         }
 
         return $faltan;
+    }
+
+    /**
+     * Lo que se encontró de cada presentación que faltó, para repartirlo:
+     * [bodega => [presentación => lo que se cobra en esos pedidos − lo que faltó]].
+     *
+     * @param Collection<int, Pedido> $pedidos
+     * @param array<int, array<int, int>> $faltaron
+     *
+     * @return array<int, array<int, int>>
+     */
+    private static function seEncontro(Collection $pedidos, array $faltaron): array
+    {
+        $quedan = [];
+
+        foreach ($faltaron as $bodega => $presentaciones) {
+            $deLaBodega = $pedidos->where('bodega_id', $bodega)->modelKeys();
+
+            foreach ($presentaciones as $presentacion => $falta) {
+                if ($falta <= 0 || $deLaBodega === []) {
+                    continue;
+                }
+
+                $cobra = 0;
+
+                foreach (PedidoItem::query()->whereIn('pedido_id', $deLaBodega)->where('bonificacion', false)->where('presentacion_id', $presentacion)->get() as $item) {
+                    $cobra += $item->cantidadFacturable();
+                }
+
+                $quedan[$bodega][$presentacion] = max(0, $cobra - $falta);
+            }
+        }
+
+        return $quedan;
+    }
+
+    /**
+     * Lo que sale de cada línea con lo que queda: lo pedido, menos en las
+     * presentaciones que se acabaron.
+     *
+     * @param Collection<int, PedidoItem> $lineas
+     * @param array<int, int> $quedan [presentación => lo que queda por repartir]
+     *
+     * @return array<int, int> [línea => sale]
+     */
+    private static function repartir(Collection $lineas, array $quedan): array
+    {
+        $sale = [];
+
+        foreach ($lineas as $linea) {
+            $pide = $linea->cantidadFacturable();
+
+            if (array_key_exists($linea->presentacion_id, $quedan)) {
+                $pide = min($pide, $quedan[$linea->presentacion_id]);
+                $quedan[$linea->presentacion_id] -= $pide;
+            }
+
+            $sale[$linea->id] = $pide;
+        }
+
+        return $sale;
+    }
+
+    /**
+     * Lo que queda después de que un pedido se llevó lo suyo.
+     *
+     * @param array<int, int> $quedan
+     * @param Collection<int, PedidoItem> $lineas
+     * @param array<int, int> $sale [línea => lo que salió]
+     *
+     * @return array<int, int>
+     */
+    private static function restar(array $quedan, Collection $lineas, array $sale): array
+    {
+        foreach ($lineas as $linea) {
+            if (array_key_exists($linea->presentacion_id, $quedan)) {
+                $quedan[$linea->presentacion_id] = max(0, $quedan[$linea->presentacion_id] - ($sale[$linea->id] ?? 0));
+            }
+        }
+
+        return $quedan;
     }
 }

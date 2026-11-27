@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Pedidos\Actions;
 
+use App\Domain\Pedidos\HojaDeAlisto;
 use App\Domain\Pedidos\PedidosValidados;
 use App\Domain\Pedidos\ValidarVarios;
 use App\Enums\EstadoPedido;
@@ -13,10 +14,14 @@ use App\Models\Configuracion;
 use App\Models\Pedido;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
+use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
@@ -34,8 +39,11 @@ use Livewire\Component as Livewire;
  * El modal dice cuántos son y por cuánto, qué no alcanza para todos y, con
  * "controlar existencias", qué hacer con el pedido al que no le alcanza:
  * mandar lo que hay (como trae de entrada el Validar de cada uno) o dejarlo
- * pendiente. El aviso dice cuántos quedaron por imprimir (con el botón
- * Imprimir las N), cuáles no van completos y cuáles siguen pendientes.
+ * pendiente. Si se alistó con la hoja (HojaDeAlistoAction), en "¿Faltó algo
+ * al alistar?" se anota lo que no se encontró de cada producto: a los
+ * últimos pedidos les sale menos. El aviso dice cuántos quedaron por
+ * imprimir (con el botón Imprimir las N), cuáles no van completos y cuáles
+ * siguen pendientes.
  */
 final class ValidarVariosAction
 {
@@ -44,6 +52,9 @@ final class ValidarVariosAction
     public const LO_QUE_HAY = 'lo_que_hay';
 
     public const DEJARLO = 'dejarlo';
+
+    /** Lo que faltó al alistar: [{clave: "bodega:presentación", cantidad}]. */
+    public const FALTARON = 'faltaron';
 
     /** Cuántos números (o productos) se nombran; del resto se dice cuántos más. */
     private const NOMBRADOS = 6;
@@ -59,12 +70,12 @@ final class ValidarVariosAction
             ->modalIconColor('success')
             ->modalWidth(Width::TwoExtraLarge)
             ->modalSubmitActionLabel('Validar')
-            ->fillForm([self::SI_NO_ALCANZA => self::LO_QUE_HAY]);
+            ->fillForm([self::SI_NO_ALCANZA => self::LO_QUE_HAY, self::FALTARON => []]);
     }
 
     /**
-     * Lo que no alcanza para todos (con "controlar existencias") y qué hacer
-     * con el pedido al que no le alcanza.
+     * Lo que no alcanza para todos (con "controlar existencias"), qué hacer
+     * con el pedido al que no le alcanza y lo que faltó al alistar.
      *
      * @param list<int> $ids
      *
@@ -73,7 +84,16 @@ final class ValidarVariosAction
     public static function schema(array $ids): array
     {
         $controla = Configuracion::actual()->controlar_existencias;
-        $faltan = $controla ? ValidarVarios::queNoAlcanza($ids) : [];
+        $hoja = HojaDeAlisto::datos($ids);
+        $faltan = $controla ? ValidarVarios::noAlcanzanEn($hoja) : [];
+        $productos = HojaDeAlisto::paraAnotar($hoja);
+        $topes = [];
+
+        foreach (HojaDeAlisto::cobrado($hoja) as $bodega => $presentaciones) {
+            foreach ($presentaciones as $presentacion => $cobra) {
+                $topes["{$bodega}:{$presentacion}"] = $cobra;
+            }
+        }
 
         return [
             Callout::make('No alcanza para todos')
@@ -95,6 +115,31 @@ final class ValidarVariosAction
                 ->required()
                 ->helperText('Mandar lo que hay: sale lo que alcanza, como trae de entrada el Validar de cada uno, y el aviso dice cuáles no van completos. Dejarlo pendiente: queda para revisarlo uno por uno. Si no hay nada de lo que pidió, queda pendiente.')
                 ->visible($controla),
+            Repeater::make(self::FALTARON)
+                ->label('¿Faltó algo al alistar?')
+                ->helperText('Si alistó con la hoja: lo que anotó en «Faltó». De ese producto, a los primeros pedidos les sale completo y a los últimos menos; lo demás se aparta hoy.')
+                ->schema([
+                    Select::make('clave')
+                        ->label('Producto')
+                        ->options($productos)
+                        ->searchable()
+                        ->required()
+                        ->distinct()
+                        ->live()
+                        ->columnSpan(['default' => 1, 'sm' => 3]),
+                    TextInput::make('cantidad')
+                        ->label('Faltó')
+                        ->numeric()
+                        ->integer()
+                        ->minValue(1)
+                        ->maxValue(fn (Get $get): ?int => $topes[(string) $get('clave')] ?? null)
+                        ->required(),
+                ])
+                ->columns(['default' => 1, 'sm' => 4])
+                ->defaultItems(0)
+                ->addActionLabel('Agregar lo que faltó')
+                ->reorderable(false)
+                ->visible($productos !== []),
         ];
     }
 
@@ -148,6 +193,7 @@ final class ValidarVariosAction
             array_values(array_map(intval(...), $suyos)),
             $usuario,
             conLoQueHay: ($data[self::SI_NO_ALCANZA] ?? self::LO_QUE_HAY) !== self::DEJARLO,
+            faltaron: self::faltaron($data),
         );
 
         self::avisar($resultado);
@@ -232,6 +278,35 @@ final class ValidarVariosAction
         }
 
         $aviso->send();
+    }
+
+    /**
+     * Lo que faltó al alistar, del modal: [bodega => [presentación => cuántas]].
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<int, array<int, int>>
+     */
+    public static function faltaron(array $data): array
+    {
+        $faltaron = [];
+
+        foreach ((array) ($data[self::FALTARON] ?? []) as $fila) {
+            if (! is_array($fila) || ! is_string($fila['clave'] ?? null) || ! is_numeric($fila['cantidad'] ?? null)) {
+                continue;
+            }
+
+            $partes = explode(':', $fila['clave']);
+            $bodega = (int) ($partes[0] ?? 0);
+            $presentacion = (int) ($partes[1] ?? 0);
+            $cantidad = (int) $fila['cantidad'];
+
+            if ($bodega > 0 && $presentacion > 0 && $cantidad > 0) {
+                $faltaron[$bodega][$presentacion] = ($faltaron[$bodega][$presentacion] ?? 0) + $cantidad;
+            }
+        }
+
+        return $faltaron;
     }
 
     /**

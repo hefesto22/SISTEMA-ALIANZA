@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Pedidos\Tables;
 use App\Enums\EstadoPedido;
 use App\Filament\Resources\Pedidos\Actions\AnularPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\CorregirPedidoAction;
+use App\Filament\Resources\Pedidos\Actions\HojaDeAlistoAction;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ValidarDespachoAction;
 use App\Filament\Resources\Pedidos\Actions\ValidarVariosAction;
@@ -45,7 +46,8 @@ use Livewire\Component;
  *
  * Bodega puede marcar varias (ya validadas) e imprimirlas de un solo, por
  * ejemplo para reimprimir las de un cliente o un vendedor con los filtros.
- * En la pestaña Pendiente marca los pendientes y los valida de un solo
+ * En la pestaña Pendiente marca los pendientes, saca su hoja de alisto
+ * (HojaDeAlistoAction::seleccionados) y los valida de un solo
  * (ValidarVariosAction::seleccionados).
  */
 class PedidosTable
@@ -78,6 +80,7 @@ class PedidosTable
             ->checkIfRecordIsSelectableUsing(fn (Pedido $record, Component $livewire): bool => self::seMarca($record, $livewire))
             ->toolbarActions([
                 ImprimirPedidoAction::seleccionados(),
+                HojaDeAlistoAction::seleccionados(),
                 ValidarVariosAction::seleccionados(),
             ])
             ->filters([

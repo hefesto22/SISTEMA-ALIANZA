@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Inventario\RegistrarCompra;
+use App\Domain\Pedidos\HojaDeAlisto;
 use App\Domain\Pedidos\RecalcularPedido;
 use App\Domain\Pedidos\ValidarVarios;
 use App\Enums\EstadoPedido;
@@ -18,13 +19,15 @@ use App\Models\PedidoItem;
 use App\Models\Producto;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
 
 /**
  * Validar de un solo muchos pendientes (ValidarVarios): "Validar los N" de
  * un cuadro del día, "Validar todos" de la pestaña Pendiente y "Validar
  * seleccionados". Es como darle Validar a cada uno sin cambiar nada, del
- * más viejo al más nuevo.
+ * más viejo al más nuevo. Antes se saca la hoja de alisto (HojaDeAlisto)
+ * y lo que faltó al alistar se anota al validar.
  *
  * Hay 12 UN y 3 CJ12 de jabón.
  */
@@ -172,4 +175,85 @@ test('en "Uno por uno" se marcan los pendientes y se validan los seleccionados',
     expect([$uno->fresh()?->estado, $dos->fresh()?->estado, $otro->fresh()?->estado])
         ->toBe([EstadoPedido::PorImprimir, EstadoPedido::PorImprimir, EstadoPedido::Pendiente])
         ->and(Existencia::de($this->bodega->id, $this->un->id))->toBe(9);
+});
+
+test('la hoja de alisto dice lo que se saca de cada producto y a qué pedido va; sale del día y de los marcados', function (): void {
+    $uno = pendienteParaValidar($this, [[$this->cj12->id, 1], [$this->un->id, 3]], today()->toDateString());
+    $dos = pendienteParaValidar($this, [[$this->cj12->id, 2]], today()->toDateString());
+    $ids = [$dos->id, $uno->id];
+
+    $hoja = HojaDeAlisto::datos($ids);
+    $jabon = $hoja[0]['productos'][0];
+
+    expect($hoja)->toHaveCount(1)
+        ->and(array_column($hoja[0]['pedidos'], 'numero'))->toBe([$uno->numero, $dos->numero])
+        ->and(array_map(fn (array $sale): array => [$sale['sigla'], $sale['cantidad']], $jabon['sale']))->toBe([['CJ12', 3], ['UN', 3]])
+        ->and([$jabon['hay'], $jabon['falta']])->toBe(['3 CJ12 · 12 UN', null])
+        ->and($jabon['para'])->toHaveCount(2)
+        ->and($jabon['para'][0])->toStartWith($uno->numero.' ')->toEndWith(': 1 CJ12 + 3 UN')
+        ->and(HojaDeAlisto::paraAnotar($hoja))->toBe([
+            "{$this->bodega->id}:{$this->cj12->id}" => "{$this->jabon->descripcion} · CJ12 (salen 3)",
+            "{$this->bodega->id}:{$this->un->id}"   => "{$this->jabon->descripcion} · UN (salen 3)",
+        ]);
+
+    $this->actingAs($this->encargado);
+
+    $this->get(route('pedidos.alisto', ['ids' => implode(',', $ids)]))
+        ->assertOk()
+        ->assertSee('Hoja de alisto')
+        ->assertSee('2 pedidos del '.today()->format('d/m/Y'))
+        ->assertSee($this->jabon->descripcion)
+        ->assertSee((string) $dos->numero)
+        ->assertSee('Apartado')
+        ->assertSee('Faltó');
+
+    Livewire::test(ListPedidos::class)
+        ->assertSee('Hoja de alisto')
+        ->mountAction('alistoDia', ['dia' => today()->toDateString(), 'bodega' => $this->bodega->id])
+        ->assertMountedActionModalSee('Hoja de alisto de los 2 pedidos');
+
+    Livewire::test(ListPedidos::class)
+        ->set('vista', 'lista')
+        ->assertTableBulkActionVisible('alistoSeleccionados')
+        ->mountTableBulkAction('alistoSeleccionados', [$uno, $dos])
+        ->assertMountedActionModalSee('Hoja de alisto de los 2 pedidos marcados');
+
+    // Nada se movió: la hoja solo muestra.
+    expect([$uno->fresh()?->estado, Existencia::de($this->bodega->id, $this->cj12->id)])->toBe([EstadoPedido::Pendiente, 3]);
+
+    // El vendedor no la saca.
+    $this->actingAs($this->vendedor);
+
+    $this->get(route('pedidos.alisto', ['ids' => implode(',', $ids)]))->assertForbidden();
+});
+
+test('al validar se anota lo que faltó al alistar: a los primeros les sale completo y a los últimos menos', function (): void {
+    // Piden 1 + 2 + 1 = 4 CJ12; al alistar faltaron 2 (se encontraron 2).
+    $primero = pendienteParaValidar($this, [[$this->cj12->id, 1], [$this->un->id, 2]], today()->subDay()->toDateString());
+    $segundo = pendienteParaValidar($this, [[$this->cj12->id, 2]], today()->toDateString());
+    $tercero = pendienteParaValidar($this, [[$this->cj12->id, 1]], today()->toDateString());
+
+    $this->actingAs($this->encargado);
+    $undoRepeaterFake = Repeater::fake();
+
+    Livewire::test(ListPedidos::class)
+        ->mountAction('validarTodos')
+        ->assertMountedActionModalSee(['¿Faltó algo al alistar?', 'Agregar lo que faltó'])
+        ->setActionData([ValidarVariosAction::FALTARON => [['clave' => "{$this->bodega->id}:{$this->cj12->id}", 'cantidad' => 2]]])
+        ->callMountedAction()
+        ->assertHasNoActionErrors()
+        ->assertNotified('2 pedidos validados: quedan por imprimir');
+
+    $undoRepeaterFake();
+
+    expect([$primero->fresh()?->estado, $segundo->fresh()?->estado, $tercero->fresh()?->estado])
+        ->toBe([EstadoPedido::PorImprimir, EstadoPedido::PorImprimir, EstadoPedido::Pendiente])
+        ->and(despachadoDe($primero))->toBe([1, 2])
+        ->and(despachadoDe($segundo))->toBe([1])
+        ->and(despachadoDe($tercero))->toBe([null])
+        ->and(Existencia::de($this->bodega->id, $this->cj12->id))->toBe(1);
+
+    // Lo que llega del modal: lo que no se entiende se salta.
+    expect(ValidarVariosAction::faltaron([ValidarVariosAction::FALTARON => [['clave' => 'x', 'cantidad' => 1], ['clave' => "{$this->bodega->id}:{$this->un->id}", 'cantidad' => '3']]]))
+        ->toBe([$this->bodega->id => [$this->un->id => 3]]);
 });

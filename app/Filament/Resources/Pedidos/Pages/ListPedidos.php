@@ -16,6 +16,7 @@ use App\Enums\FormatoFactura;
 use App\Enums\ModoImpresion;
 use App\Filament\Resources\Cargas\CargaResource;
 use App\Filament\Resources\Cargas\Schemas\CargaForm;
+use App\Filament\Resources\Pedidos\Actions\HojaDeAlistoAction;
 use App\Filament\Resources\Pedidos\Actions\ImprimirPedidoAction;
 use App\Filament\Resources\Pedidos\Actions\ValidarVariosAction;
 use App\Filament\Resources\Pedidos\PedidoResource;
@@ -54,8 +55,9 @@ use Livewire\Attributes\Url;
  * Pedidos en tarjetas, con una pestaña por estado (Impreso, los que faltan
  * de cargar en el camión; Cargado, los que ya van en una carga). Pendiente,
  * Por imprimir, Impreso y Cargado se ven de entrada por día (resources/views/filament/pedidos/por-dia.blade.php):
- * un cuadro por día y bodega (DiasDeFacturacion) para validar de un solo
- * todos los pendientes de un día (validarDia), imprimir de un solo todas
+ * un cuadro por día y bodega (DiasDeFacturacion) para sacar la hoja de
+ * alisto de los pendientes de un día (alistoDia) y validarlos todos de un
+ * solo (validarDia), imprimir de un solo todas
  * las de un día, o ver cuántas facturas salieron, con qué números y por
  * cuánto, y sacar el resumen del día. En Impresos se escogen uno o varios
  * días de una bodega y se carga el camión con ellos de un solo
@@ -234,6 +236,18 @@ class ListPedidos extends ListRecords
             ->action(function (array $data, array $arguments): void {
                 ValidarVariosAction::ejecutar($this->pendientesDelDia($arguments), $data);
             });
+    }
+
+    /**
+     * "Hoja de alisto" de un cuadro de Pendiente: lo que se saca de la bodega
+     * para los pedidos de ese día, para apartarlo antes de validar.
+     */
+    public function alistoDiaAction(): Action
+    {
+        return HojaDeAlistoAction::modal(Action::make('alistoDia'))
+            ->visible(fn (): bool => Acceso::puede('Validar:Pedido'))
+            ->modalHeading(fn (array $arguments): string => (count($this->pendientesDelDia($arguments)) === 1 ? 'Hoja de alisto del pedido' : 'Hoja de alisto de los '.count($this->pendientesDelDia($arguments)).' pedidos').$this->delDia($arguments))
+            ->modalContent(fn (array $arguments): Hoja => HojaDeAlistoAction::vista($this->pendientesDelDia($arguments)));
     }
 
     /**
@@ -719,11 +733,21 @@ class ListPedidos extends ListRecords
     private function tituloDeValidar(array $arguments): string
     {
         $cuantos = count($this->pendientesDelDia($arguments));
+
+        return ($cuantos === 1 ? 'Validar el pedido' : "Validar los {$cuantos} pedidos").$this->delDia($arguments);
+    }
+
+    /**
+     * " del jueves 26 de noviembre de 2026" (y la bodega, para administración).
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function delDia(array $arguments): string
+    {
         $dia = Periodo::dia($arguments['dia'] ?? null);
         $bodega = $arguments['bodega'] ?? null;
 
-        return ($cuantos === 1 ? 'Validar el pedido' : "Validar los {$cuantos} pedidos")
-            .($dia === null ? '' : ' del '.ResumenDelDia::fechaLarga($dia))
+        return ($dia === null ? '' : ' del '.ResumenDelDia::fechaLarga($dia))
             .(Acceso::veTodo() && is_numeric($bodega) ? ' · '.(string) Bodega::query()->whereKey((int) $bodega)->value('nombre') : '');
     }
 }

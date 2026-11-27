@@ -19,6 +19,7 @@ declare(strict_types=1);
 | /horizon, etc.) las gestiona Filament automáticamente.
 */
 
+use App\Http\Controllers\HojaDeAlistoController;
 use App\Http\Controllers\ImprimirCargaController;
 use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirPedidoController;
@@ -45,6 +46,10 @@ Route::middleware(['panel:admin', Authenticate::class, AuthenticateSession::clas
     // Varias de un solo (?ids=1,2,3), con los números seguidos: Imprimir las N de un día.
     Route::get('vista-previa/pedidos', [VistaPreviaFacturaController::class, 'lote'])
         ->name('pedidos.vista-previa-lote');
+
+    // Lo que se saca de la bodega para unos pendientes (?ids=1,2,3), para apartarlo antes de validar.
+    Route::get('alisto/pedidos', HojaDeAlistoController::class)
+        ->name('pedidos.alisto');
 
     // Resumen de las facturas de un día (?dia=2026-11-18&bodega=2), para cuadrar.
     Route::get('facturas/resumen-dia', ResumenDiaController::class)

@@ -23,17 +23,21 @@ use App\Models\Presentacion;
 final class LoQueAlcanza
 {
     /**
-     * [id de línea => lo que alcanza a salir] de las líneas que se cobran.
+     * [id de línea => lo que alcanza a salir] de las líneas que se cobran,
+     * de lo que pidió o de $pide (lo que se quiere sacar de cada línea).
+     *
+     * @param array<int, int>|null $pide [id de línea => cantidad]
      *
      * @return array<int, int>
      */
-    public static function delPedido(Pedido $pedido): array
+    public static function delPedido(Pedido $pedido, ?array $pide = null): array
     {
         $items = $pedido->items()->with(['producto.presentaciones', 'presentacion'])->where('bonificacion', false)->orderBy('id')->get();
+        $pide ??= [];
         $sale = [];
 
         foreach ($items as $item) {
-            $sale[$item->id] = $item->cantidadFacturable();
+            $sale[$item->id] = $pide[$item->id] ?? $item->cantidadFacturable();
         }
 
         return self::deLasLineas(array_values($items->all()), $sale, self::existencias($pedido->bodega_id, $items->pluck('producto_id')->unique()->values()->all()));
